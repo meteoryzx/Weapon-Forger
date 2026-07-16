@@ -1,0 +1,26 @@
+{
+  "_说明": "M9 材料表 —— 你(策划)直接维护，AI 只写读表逻辑。lv=材料等级；base=对6维的基础影响(锻造起点)；desc=选材界面展示的特性文案。以下为S1占位测试数据，正式内容由你填。",
+  "materials": [
+    {
+      "id": "cu_iron",
+      "name": "粗铁",
+      "lv": 1,
+      "base": { "edge": 2, "hard": 3, "tough": 3, "weight": 6, "look": 2, "balance": 3 },
+      "desc": "村口铁匠铺常见的料，杂质多，做把能用的农具刀还行。"
+    },
+    {
+      "id": "fine_steel",
+      "name": "精钢",
+      "lv": 3,
+      "base": { "edge": 4, "hard": 5, "tough": 4, "weight": 5, "look": 4, "balance": 5 },
+      "desc": "反复除杂的好钢，软硬适中，是打造利器的基础。"
+    },
+    {
+      "id": "cold_jade_steel",
+      "name": "寒玉钢",
+      "lv": 5,
+      "base": { "edge": 5, "hard": 6, "tough": 6, "weight": 4, "look": 7, "balance": 6 },
+      "desc": "深山寒铁精炼而成，刃泛青光，传闻能斩妖。稀有难得。"
+    }
+  ]
+}
