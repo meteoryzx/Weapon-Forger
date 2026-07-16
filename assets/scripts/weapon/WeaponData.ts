@@ -19,10 +19,19 @@ export interface WeaponStats {
   balance: number; // 平衡
 }
 
-/** 外形参数（WeaponShape）。锻打留痕存这里，M1 写、M6 读，不进冒险判定。 */
+/**
+ * 外形参数（WeaponShape）。锻打留痕存这里，M1 写、M6 读，不进冒险判定。
+ * 武器外观=玩家锻造产物，非预制部件拼装（见全案 §3.6 物理外观两层模型）。
+ * M6 渲染分两层：① 读 shape 实时生成形状/温度色/光泽；② 读 process+物理量达标叠加分级工艺贴图。
+ */
 export interface WeaponShape {
+  baseForm: string;        // 基础形制ID（刀/剑/匕首/斧…）：玩家起手选，是第二层工艺贴图对齐的骨架锚点
   controlPoints: number[]; // 刀身轮廓控制点（弯/直/长短）
   thickness: number[];     // 各段厚度（敲打留痕，决定重量分布与平衡）
+  surface?: {              // 表面状态（打磨/氧化/温度色等，驱动实时外观第一层，可选）
+    polish?: number;       // 打磨覆盖率 0–1 → 锋利/外观/光泽
+    tempColor?: number;    // 当前温度色（0冷 → 1白热），锻造中实时变化
+  };
 }
 
 /** 一把武器的完整数据。 */
@@ -38,7 +47,7 @@ export interface WeaponData {
 /** 造一把"空白坯料"的默认值，供测试与初始化用。 */
 export function createBlankWeapon(): WeaponData {
   return {
-    shape: { controlPoints: [0, 0, 0, 0, 0], thickness: [1, 1, 1, 1, 1] },
+    shape: { baseForm: "sword", controlPoints: [0, 0, 0, 0, 0], thickness: [1, 1, 1, 1, 1], surface: { polish: 0, tempColor: 0 } },
     material: "",
     process: [],
     stats: { edge: 0, hard: 0, tough: 0, weight: 0, look: 0, balance: 0 },
