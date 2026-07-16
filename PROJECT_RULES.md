@@ -39,14 +39,15 @@
 ## 3. 接口契约（WeaponData，全项目普通话，改它须记 DECISION_LOG 并通知全模块）
 ```ts
 WeaponData = {
-  shape: { controlPoints: number[], thickness: number[] },  // 外形 M1写 M6读
+  shape: { baseForm: string, controlPoints: number[], thickness: number[], surface?: object }, // 外形=锻造实时生成 M1写 M6读；baseForm=刀/剑/斧基础形制(第二层贴图对齐锚点)
   material: string,                                          // 材质ID M1写
-  process: string[],                                         // 工艺标签 M1写
+  process: string[],                                         // 工艺标签(折叠/分层/淬火介质等) M1写；M6第二层据此判定贴图
   stats: { edge, hard, tough, weight, look, balance },       // 6维0-10 M3写 M4/M6读
   overall: number,                                           // 总评分 M3写 M6/M8读
   flaws: string[],                                           // 裂纹等 M1写 M4/M5读
 }
 ```
+> **武器外观=玩家锻造产物，非预制部件拼装**（详见 docs 全案 §3.6 物理外观两层模型）。M6 渲染分两层：① 读 shape/surface 实时生成形状/温度色/光泽；② 读 process+物理量，达标则叠加对应分级工艺贴图(大马士革等)。baseForm 是第二层贴图对齐的骨架。
 
 ## 4. 数值设计要点（Demo 期）
 - 6 维**不是独立能力值**，是三对取舍：硬度↔韧性 / 锋利↔耐用 / 轻↔结实。无全满神刀。
