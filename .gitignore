@@ -1,0 +1,15 @@
+# 依赖与构建产物
+node_modules/
+library/
+temp/
+local/
+build/
+dist/
+.DS_Store
+
+# 编辑器
+.vscode/
+*.log
+
+# Cocos Creator 自动生成（保留 assets/ 与 settings/ 源文件）
+profiles/
