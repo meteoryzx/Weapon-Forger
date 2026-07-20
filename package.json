@@ -14,6 +14,7 @@
     "validate:data": "node scripts/validate-data.mjs",
     "test": "node --test",
     "check": "npm run doctor && npm run typecheck && npm run validate:data && npm test",
+    "sample:forge": "node scripts/forge-samples.mjs",
     "build:web": "node scripts/build-web.mjs"
   },
   "devDependencies": {
