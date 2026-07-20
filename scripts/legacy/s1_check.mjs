@@ -1,15 +1,15 @@
 /**
  * S1 验收测试入口（纯 node 运行，不依赖 Cocos）
  * 用途：证明"数据结构立得住、数据表能读出来"。
- * 运行：node assets/scripts/weapon/s1_check.mjs
- * 这是 M2/M9 的独立测试入口（PROJECT_RULES §6：每模块留可独立点的测试入口）。
+ * 运行：node scripts/legacy/s1_check.mjs
+ * 这是遗留 M2/M9 数据的独立检查，不是现行 S3a 契约测试。
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const dataDir = join(here, "../../data");
+const dataDir = join(here, "../../assets/data");
 const read = (f) => JSON.parse(readFileSync(join(dataDir, f), "utf8"));
 
 const materials = read("materials.json");

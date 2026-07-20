@@ -13,3 +13,7 @@ dist/
 
 # Cocos Creator 自动生成（保留 assets/ 与 settings/ 源文件）
 profiles/
+native/
+
+# 其他编辑器
+.idea/
