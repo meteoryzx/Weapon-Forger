@@ -144,7 +144,7 @@ function hammerSection(
   const plasticStrain = section.plasticStrain + compression * FORGE_RULES.plasticStrainPerCompression;
   const localisation = clamp((plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainRange, 0, 1);
   const thinness = clamp((FORGE_RULES.initialSectionThickness - section.thickness) / FORGE_RULES.initialSectionThickness, 0, 1);
-  // Risk rises sharply after leaving the workable window instead of quietly punishing correct hot forging.
+  // Cold-work damage rises sharply outside the material's workable temperature range.
   const coldness = (1 - section.plasticity) ** 3;
   const damageIncrease = operation.energy * kernel * coldness * (
     FORGE_RULES.coldImpactDamage

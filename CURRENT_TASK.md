@@ -2,12 +2,12 @@
 
 > This is the only live handoff note. Update it before changing device, pausing a slice, or requesting merge.
 
-- **Task**: S3a minimum simulation core
-- **Branch**: `feat/S3-forge`
-- **Issue / PR**: Issue `#3`; Draft PR `#5`
-- **Base**: `39a4122` from merged S0b PR #4
+- **Task**: S3b 2.5D forge design gate
+- **Branch**: `main` after boundary PR #7 merges; no S3b implementation branch yet
+- **Issue / PR**: Open design-gate Issue `#6`; boundary PR `#7`
+- **Base**: `afaa5df` from merged S3a PR #5
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: S3a source-backed physical audit, complete diff review and green CI are finished; PR #5 is ready to squash merge.
+- **State**: S3a's physical core is merged and Issue #3 is closed. PR #7 clarifies the boundary between objective craftsmanship and contextual weapon performance; Issue #6 remains open until the minimum S3b experience decisions are confirmed.
 
 ## Verified Facts
 
@@ -23,11 +23,12 @@
 - A fresh clone at commit `80bbe6c` installed dependencies, passed required doctor/check, rebuilt H5, opened in Creator with zero console errors, and remained Git-clean.
 - Windows portability is designed but not yet proved on the private PC. `COCOS_CREATOR` supports non-default Dashboard install locations; Windows does not take ownership until its rehearsal passes.
 - S3a's pure TypeScript core currently proves deterministic JSON replay, material-specific hot/cold deformation and stress differences, stress recovery without crack healing, thermal damage, orientation response, neighbour influence, volume preservation with draw-out, bending correction, and deterministic cracks caused by local cold-working damage rather than a raw stress threshold.
+- S3a is merged as `afaa5df`; PR #5 had green CI and no blocking review finding. Issue #6 records the required S3b design gate.
 - Legacy S1 data check runs with local Node. It proves only that legacy reference data is readable.
 
 ## Next Actions
 
-1. Squash merge PR #5, close Issue #3, then open the S3b design gate before starting Cocos input or rendering work.
+1. Discuss and record the minimum S3b design-gate decisions in Issue #6; then create the S3b implementation branch and Draft PR.
 2. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
 
 ## Before Leaving This Device
