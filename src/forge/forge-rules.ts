@@ -6,12 +6,14 @@ export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
   id: "simulation-steel",
   hotWorkability: 1,
   coldStressMultiplier: 1,
+  plasticityStartC: 700,
+  plasticityPeakC: 1000,
+  overheatTemperatureC: 1150,
+  stressRecoveryAtPeak: 0.75,
 };
 
 export const FORGE_RULES = {
   ambientTemperatureC: 20,
-  minimumPlasticTemperatureC: 650,
-  maximumPlasticTemperatureC: 1050,
   initialSectionLength: 14,
   initialSectionWidth: 32,
   initialSectionThickness: 8,
@@ -24,5 +26,7 @@ export const FORGE_RULES = {
   integrityLossScale: 0.14,
   crackIntegrityThreshold: 0.3,
   lateralBendAtFullEnergy: 0.8,
+  lengthShareOfSpread: 0.6,
+  overheatDamagePerHeat: 0.22,
   neighbourKernel: [0.25, 1, 0.25] as const,
 } as const;

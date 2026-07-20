@@ -20,6 +20,7 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
   }
 
   const material = options.material ?? DEFAULT_FORGE_MATERIAL;
+  assertMaterial(material);
   const sections = Array.from({ length: sectionCount }, (_, index) => createSection(index));
   return {
     parameterVersion: FORGE_PARAMETER_VERSION,
@@ -44,9 +45,7 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
         workpiece: {
           ...state.workpiece,
           sections: state.workpiece.sections.map((section) => ({
-            ...section,
-            temperatureC: operation.temperatureC,
-            plasticity: calculatePlasticity(operation.temperatureC, state.material),
+            ...applyHeat(section, operation.temperatureC, state.material),
           })),
         },
       }, operation);
@@ -76,6 +75,7 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
     parameterVersion: state.parameterVersion,
     orientationQuarterTurns: state.workpiece.orientationQuarterTurns,
     hasCracks: state.workpiece.sections.some((section) => section.cracked),
+    hasOverheatedSections: state.workpiece.sections.some((section) => section.overheated),
     sections: state.workpiece.sections.map((section) => ({
       position: section.position,
       length: section.length,
@@ -83,8 +83,10 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
       thickness: section.thickness,
       temperatureC: section.temperatureC,
       plasticity: section.plasticity,
+      thermalDamage: section.thermalDamage,
       lateralOffset: section.lateralOffset,
       cracked: section.cracked,
+      overheated: section.overheated,
     })),
   };
 }
@@ -94,8 +96,8 @@ export function totalVolume(state: ForgeState): number {
 }
 
 export function calculatePlasticity(temperatureC: number, material: ForgeMaterial = DEFAULT_FORGE_MATERIAL): number {
-  const range = FORGE_RULES.maximumPlasticTemperatureC - FORGE_RULES.minimumPlasticTemperatureC;
-  return clamp((temperatureC - FORGE_RULES.minimumPlasticTemperatureC) / range, 0, 1) * material.hotWorkability;
+  const range = material.plasticityPeakC - material.plasticityStartC;
+  return clamp((temperatureC - material.plasticityStartC) / range, 0, 1) * material.hotWorkability;
 }
 
 function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState {
@@ -112,7 +114,7 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
 
   return {
     ...state,
-    workpiece: { ...state.workpiece, sections },
+    workpiece: { ...state.workpiece, sections: repositionSections(sections) },
   };
 }
 
@@ -123,14 +125,15 @@ function hammerSection(
   hitsThickness: boolean,
   material: ForgeMaterial,
 ): BladeSection {
-  const deformation = operation.energy * kernel * material.hotWorkability * (
+  const deformation = operation.energy * kernel * (
     FORGE_RULES.deformationAtZeroPlasticity
     + (FORGE_RULES.deformationAtFullPlasticity - FORGE_RULES.deformationAtZeroPlasticity) * section.plasticity
   );
   const compression = Math.min(FORGE_RULES.maxCompressionPerHit, deformation);
-  const area = section.width * section.thickness;
   const compressedDimension = hitsThickness ? section.thickness * (1 - compression) : section.width * (1 - compression);
-  const spreadDimension = area / compressedDimension;
+  const length = section.length * (1 + compression * FORGE_RULES.lengthShareOfSpread);
+  const volume = section.length * section.width * section.thickness;
+  const spreadDimension = volume / (compressedDimension * length);
   const stressIncrease = operation.energy * kernel * material.coldStressMultiplier * (
     FORGE_RULES.hotStressAtFullEnergy
     + (FORGE_RULES.coldStressAtFullEnergy - FORGE_RULES.hotStressAtFullEnergy) * (1 - section.plasticity)
@@ -142,11 +145,27 @@ function hammerSection(
     ...section,
     width: hitsThickness ? spreadDimension : compressedDimension,
     thickness: hitsThickness ? compressedDimension : spreadDimension,
+    length,
     stress,
     integrity,
     lateralOffset: section.lateralOffset
       + operation.lateralBias * operation.energy * kernel * section.plasticity * FORGE_RULES.lateralBendAtFullEnergy,
     cracked: section.cracked || integrity <= FORGE_RULES.crackIntegrityThreshold,
+  };
+}
+
+function applyHeat(section: BladeSection, temperatureC: number, material: ForgeMaterial): BladeSection {
+  const plasticity = calculatePlasticity(temperatureC, material);
+  const overheatRatio = clamp((temperatureC - material.overheatTemperatureC) / (1300 - material.overheatTemperatureC), 0, 1);
+  const thermalDamage = clamp(section.thermalDamage + overheatRatio * FORGE_RULES.overheatDamagePerHeat, 0, 1);
+  return {
+    ...section,
+    temperatureC,
+    plasticity,
+    // Reheating allows recovery/recrystallisation; it cannot restore lost integrity or close a crack.
+    stress: section.stress * (1 - plasticity * material.stressRecoveryAtPeak),
+    thermalDamage,
+    overheated: section.overheated || thermalDamage > 0,
   };
 }
 
@@ -177,8 +196,10 @@ function createSection(index: number): BladeSection {
     plasticity: 0,
     stress: 0,
     integrity: 1,
+    thermalDamage: 0,
     lateralOffset: 0,
     cracked: false,
+    overheated: false,
   };
 }
 
@@ -193,6 +214,19 @@ function rotate(current: 0 | 1 | 2 | 3, quarterTurns: 1 | -1): 0 | 1 | 2 | 3 {
 function assertTemperature(temperatureC: number): void {
   if (!Number.isFinite(temperatureC) || temperatureC < FORGE_RULES.ambientTemperatureC || temperatureC > 1300) {
     throw new Error("Heat temperature must be between ambient temperature and 1300C.");
+  }
+}
+
+function assertMaterial(material: ForgeMaterial): void {
+  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.coldStressMultiplier <= 0) {
+    throw new Error("Material workability values must be positive and hot workability at most one.");
+  }
+  if (material.plasticityStartC < FORGE_RULES.ambientTemperatureC || material.plasticityPeakC <= material.plasticityStartC
+    || material.overheatTemperatureC <= material.plasticityPeakC || material.overheatTemperatureC >= 1300) {
+    throw new Error("Material temperature windows must be ordered inside the simulation range.");
+  }
+  if (material.stressRecoveryAtPeak < 0 || material.stressRecoveryAtPeak > 1) {
+    throw new Error("Material peak stress recovery must be between zero and one.");
   }
 }
 
@@ -216,4 +250,13 @@ function assertQuarterTurns(quarterTurns: number): void {
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function repositionSections(sections: readonly BladeSection[]): readonly BladeSection[] {
+  let position = 0;
+  return sections.map((section) => {
+    const next = { ...section, position };
+    position += section.length;
+    return next;
+  });
 }

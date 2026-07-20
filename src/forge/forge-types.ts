@@ -4,6 +4,10 @@ export interface ForgeMaterial {
   readonly id: string;
   readonly hotWorkability: number;
   readonly coldStressMultiplier: number;
+  readonly plasticityStartC: number;
+  readonly plasticityPeakC: number;
+  readonly overheatTemperatureC: number;
+  readonly stressRecoveryAtPeak: number;
 }
 
 export interface BladeSection {
@@ -15,8 +19,10 @@ export interface BladeSection {
   readonly plasticity: number;
   readonly stress: number;
   readonly integrity: number;
+  readonly thermalDamage: number;
   readonly lateralOffset: number;
   readonly cracked: boolean;
+  readonly overheated: boolean;
 }
 
 export interface JointState {
@@ -80,8 +86,10 @@ export interface ForgeSnapshotSection {
   readonly thickness: number;
   readonly temperatureC: number;
   readonly plasticity: number;
+  readonly thermalDamage: number;
   readonly lateralOffset: number;
   readonly cracked: boolean;
+  readonly overheated: boolean;
 }
 
 export interface ForgeSnapshot {
@@ -89,4 +97,5 @@ export interface ForgeSnapshot {
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
+  readonly hasOverheatedSections: boolean;
 }

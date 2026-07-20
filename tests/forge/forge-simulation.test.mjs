@@ -70,7 +70,30 @@ test("hammering is smooth across neighbouring sections and preserves approximate
 
   assert.ok(Math.abs(neighbourChange) > 0, "neighbours receive a smaller, continuous influence");
   assert.ok(Math.abs(neighbourChange) < Math.abs(centerChange));
+  assert.ok(center(result).length > center(initial).length, "free material draws out along the billet as well as spreading sideways");
   assert.ok(Math.abs(totalVolume(result) - totalVolume(initial)) < 0.000001);
+});
+
+test("reheating relieves residual stress without repairing existing damage", () => {
+  const hammer = { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 };
+  const coldWorked = forgeAt(450, [hammer, hammer]);
+  const reheated = applyForgeOperation(coldWorked, { kind: "heat", temperatureC: 950 });
+
+  assert.ok(center(reheated).stress < center(coldWorked).stress);
+  assert.equal(center(reheated).integrity, center(coldWorked).integrity);
+  assert.equal(center(reheated).cracked, center(coldWorked).cracked);
+});
+
+test("repeated overheating creates deterministic thermal damage without pretending a crack is healed", () => {
+  let state = createForgeState({ sectionCount: 9 });
+  state = applyForgeOperation(state, { kind: "heat", temperatureC: 1200 });
+  const once = state;
+  state = applyForgeOperation(state, { kind: "heat", temperatureC: 1200 });
+  const snapshot = createForgeSnapshot(state);
+
+  assert.ok(center(state).thermalDamage > center(once).thermalDamage);
+  assert.equal(center(state).overheated, true);
+  assert.equal(snapshot.hasOverheatedSections, true);
 });
 
 test("one-sided hits bend the billet and opposite hits can correct it", () => {
