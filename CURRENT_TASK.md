@@ -2,13 +2,13 @@
 
 > This is the only live handoff note. Update it before changing device, pausing a slice, or requesting merge.
 
-- **Task**: S0 portable project foundation and plan consolidation
-- **Branch**: `chore/S0-portable-workflow`
-- **Issue / Draft PR**: `#1` / `#2`
+- **Task**: S0b portable Cocos engineering foundation
+- **Branch**: `main` after PR #2 merges; next create `chore/S0-cocos-foundation`
+- **Issue / PR**: Issue `#1` remains open; the S0b Draft PR does not exist yet
 - **Prepared next Issue**: `#3` S3a minimal simulation core
-- **Base**: `36bbe2f`
+- **Base**: the squash commit produced by merging PR #2
 - **Device owner**: current macOS device; Windows takes over only after the clean-clone rehearsal
-- **State**: plan audit in progress; Cocos integration intentionally paused until the audit is accepted
+- **State**: S0a plan/workflow baseline accepted and reviewed; merge PR #2, then start S0b
 
 ## Verified Facts
 
@@ -21,10 +21,10 @@
 
 ## Next Actions
 
-1. Finish the plan audit and obtain author acceptance of `PROJECT_PLAN.md`.
-2. Ask the author to close Creator, then import only the generated project skeleton from `/Users/yzx/NewProject`.
-3. Add lockfile, `doctor`, typecheck, tests, data validation, CI, and Web Desktop build wrapper; export and play the first H5.
-4. Install/configure Git LFS, rehearse a clean clone, then merge S0.
+1. Merge the accepted S0a PR #2 without closing Issue #1.
+2. Create `chore/S0-cocos-foundation` from the updated `main` and open its Draft PR.
+3. Ask the author to close Creator, then import only the generated project skeleton from `/Users/yzx/NewProject`.
+4. Add lockfile, `doctor`, typecheck, tests, data validation, CI, Web Desktop build wrapper, LFS, and the clean-clone rehearsal.
 
 ## Before Leaving This Device
 
