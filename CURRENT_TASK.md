@@ -8,7 +8,7 @@
 - **Prepared next Issue**: `#3` S3a minimal simulation core
 - **Base**: `d6ce8b6` from merged PR #2
 - **Device owner**: current macOS device; Windows takes over only after the clean-clone rehearsal
-- **State**: Creator 3.8.8 opens the repository; pure checks pass; the first Web Desktop H5 builds successfully
+- **State**: Creator and pure checks pass; the first Web Desktop H5 builds and was visually accepted; clean-clone rehearsal is next
 
 ## Verified Facts
 
@@ -17,16 +17,17 @@
 - The 3D project skeleton from `/Users/yzx/NewProject` is integrated into this branch. Cocos generated eight required legacy asset `.meta` files; generated caches remain ignored.
 - `assets/Bootstrap.scene` contains the initial camera/light scene and has a committed `.meta` identity.
 - `npm run check` passes locally. The official Creator command-line build succeeds with exit code `36` and produces the ignored `build/web-desktop` directory.
+- The author opened `http://127.0.0.1:4174` and confirmed the empty graybox H5 renders.
 - GitHub Issue #1 and Issue #3 remain open; PR #2 is merged. `main` requires a PR, linear history, squash-only merge, and blocks deletion/force pushes.
 - The current HTTPS credential cannot upload `.github/workflows/*` because it lacks workflow scope. Add CI after GitHub authorization is refreshed; local `npm run check` is the current gate.
-- LFS tracking rules exist, but the Git LFS executable is not installed yet.
+- Git LFS `3.7.1` is installed in `~/.local/bin`, initialized, and recognizes the tracked `*.psd`, `*.wav`, and `*.blend` patterns.
 - Legacy S1 data check runs with local Node. It proves only that legacy reference data is readable.
 
 ## Next Actions
 
-1. Serve and visually inspect the first H5, then verify a clean Creator restart.
-2. Refresh GitHub workflow authorization and add pure-logic CI.
-3. Install LFS and perform the clean-clone rehearsal.
+1. Perform the clean-clone install, doctor, test, and Web Desktop build rehearsal.
+2. Verify a clean Creator restart from the rehearsal clone.
+3. Refresh GitHub workflow authorization and add pure-logic CI.
 
 ## Before Leaving This Device
 

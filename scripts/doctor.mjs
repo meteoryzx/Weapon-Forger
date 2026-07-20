@@ -7,6 +7,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const failures = [];
 const notes = [];
 const requireCocos = process.argv.includes("--require-cocos");
+const requireLfs = process.argv.includes("--require-lfs");
 
 function check(condition, message) {
   if (condition) notes.push(`OK  ${message}`);
@@ -56,6 +57,13 @@ const cocosCandidates = [
 const cocos = cocosCandidates.find((path) => existsSync(path));
 if (requireCocos) check(Boolean(cocos), "找到 Cocos Creator 3.8.8 命令行程序");
 else notes.push(cocos ? `OK  找到 Cocos Creator：${cocos}` : "INFO 未找到 Cocos；CI 允许，本地构建前需安装或设置 COCOS_CREATOR");
+
+let lfsVersion = "";
+try {
+  lfsVersion = execFileSync("git", ["lfs", "version"], { cwd: root, encoding: "utf8" }).trim();
+} catch {}
+if (requireLfs) check(Boolean(lfsVersion), "找到 Git LFS");
+else notes.push(lfsVersion ? `OK  ${lfsVersion}` : "INFO 未找到 Git LFS；CI 允许，设备交接前必须安装");
 
 console.log(notes.join("\n"));
 if (failures.length) {

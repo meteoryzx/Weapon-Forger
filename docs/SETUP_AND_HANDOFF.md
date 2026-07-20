@@ -18,6 +18,8 @@ npm run build:web
 
 `npm run check` 会依次执行环境检查、类型检查、数据校验和单元测试。`npm run build:web` 调用本机 Creator 3.8.8；官方以退出码 `36` 表示构建成功。CI 不安装或启动 Cocos，只验证纯逻辑和数据。
 
+本机 Git LFS 安装在 `~/.local/bin`，`~/.zprofile` 已加入该目录。换机验收使用 `npm run doctor -- --require-cocos --require-lfs`，同时要求 Creator 3.8.8 与 Git LFS 存在。
+
 Creator 的账号登录、macOS/Windows 系统授权与真人试玩必须由作者完成。日常场景内容优先由代码和项目内扩展生成，不把第三方 MCP 当作换机必需条件。
 
 ## Windows 接手
