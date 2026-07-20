@@ -18,6 +18,8 @@
 - Product, architecture, progress, and decision documents aligned to the 2026-07-20 six-week plan.
 - GitHub Issue #1 and Draft PR #2 created from the first pushed checkpoint.
 - Active `Protect main` ruleset requires PRs, linear history, squash-only merging, and blocks deletion/force pushes.
+- Git LFS tracking rules added for PSD, WAV, and BLEND source assets; local LFS installation remains pending.
+- Exact Node/Cocos installation and temporary-project acceptance steps documented for macOS and Windows.
 
 ## Current Work
 
