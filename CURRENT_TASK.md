@@ -4,7 +4,7 @@
 
 - **Task**: S0b portable Cocos engineering foundation
 - **Branch**: `chore/S0-cocos-foundation`
-- **Issue / PR**: Issue `#1` remains open; create the S0b Draft PR after the first pushed checkpoint
+- **Issue / PR**: Issue `#1`; Draft PR `#4`
 - **Prepared next Issue**: `#3` S3a minimal simulation core
 - **Base**: `d6ce8b6` from merged PR #2
 - **Device owner**: current macOS device; Windows takes over only after the clean-clone rehearsal
@@ -24,8 +24,8 @@
 
 ## Next Actions
 
-1. Commit and push the integrated project, lockfile, checks, CI, Bootstrap scene, and Web Desktop build wrapper; then open the S0b Draft PR.
-2. Serve and visually inspect the first H5, then verify a clean Creator restart.
+1. Serve and visually inspect the first H5, then verify a clean Creator restart.
+2. Refresh GitHub workflow authorization and add pure-logic CI.
 3. Install LFS and perform the clean-clone rehearsal.
 
 ## Before Leaving This Device
