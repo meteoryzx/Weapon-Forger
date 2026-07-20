@@ -117,6 +117,22 @@ test("cold repeated heavy hits create deterministic cracks and expose them throu
   assert.ok(snapshot.sections.some((section) => section.cracked));
 });
 
+test("crack risk is local cold-working damage, not a raw stress threshold", () => {
+  const hammer = { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 };
+  const hot = forgeAt(950, [hammer, hammer, hammer, hammer, hammer]);
+  const spreadOut = forgeAt(450, [
+    { kind: "hammer", sectionIndex: CENTER - 2, energy: 1, lateralBias: 0 },
+    { kind: "hammer", sectionIndex: CENTER - 1, energy: 1, lateralBias: 0 },
+    { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 },
+    { kind: "hammer", sectionIndex: CENTER + 1, energy: 1, lateralBias: 0 },
+    { kind: "hammer", sectionIndex: CENTER + 2, energy: 1, lateralBias: 0 },
+  ]);
+
+  assert.equal(center(hot).cracked, false, "a hot, ductile workpiece tolerates repeated shaping");
+  assert.ok(center(hot).integrity > 0.98, "correct hot forging should not quietly consume meaningful integrity");
+  assert.equal(spreadOut.workpiece.sections.some((section) => section.cracked), false, "moving low-temperature hits avoids a single damage concentration");
+});
+
 test("invalid external operations are rejected before they can change a state", () => {
   const initial = createForgeState({ sectionCount: 9 });
 

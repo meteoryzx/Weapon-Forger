@@ -7,7 +7,7 @@
 - **Issue / PR**: Issue `#3`; Draft PR `#5`
 - **Base**: `39a4122` from merged S0b PR #4
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: the first deterministic core is green; a source-backed correction adds material-specific temperature windows, stress recovery, thermal damage and draw-out before final review.
+- **State**: source-backed physical audit is implemented locally: material windows, draw-out, stress recovery, thermal damage, and deterministic local damage are covered; next is full diff review and CI.
 
 ## Verified Facts
 
@@ -22,12 +22,12 @@
 - Git LFS `3.7.1` is installed in `~/.local/bin`, initialized, and recognizes the tracked `*.psd`, `*.wav`, and `*.blend` patterns.
 - A fresh clone at commit `80bbe6c` installed dependencies, passed required doctor/check, rebuilt H5, opened in Creator with zero console errors, and remained Git-clean.
 - Windows portability is designed but not yet proved on the private PC. `COCOS_CREATOR` supports non-default Dashboard install locations; Windows does not take ownership until its rehearsal passes.
-- S3a's pure TypeScript core currently proves deterministic JSON replay, material-specific hot/cold deformation and stress differences, stress recovery without crack healing, thermal damage, orientation response, neighbour influence, volume preservation with draw-out, bending correction and deterministic cracks.
+- S3a's pure TypeScript core currently proves deterministic JSON replay, material-specific hot/cold deformation and stress differences, stress recovery without crack healing, thermal damage, orientation response, neighbour influence, volume preservation with draw-out, bending correction, and deterministic cracks caused by local cold-working damage rather than a raw stress threshold.
 - Legacy S1 data check runs with local Node. It proves only that legacy reference data is readable.
 
 ## Next Actions
 
-1. Push the source-backed S3a correction, complete its CI and independent review, then mark PR #5 ready for review.
+1. Commit/push the physical-audit correction, complete CI and independent review, then mark PR #5 ready for review.
 2. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
 
 ## Before Leaving This Device

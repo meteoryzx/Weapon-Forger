@@ -84,6 +84,7 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
       temperatureC: section.temperatureC,
       plasticity: section.plasticity,
       thermalDamage: section.thermalDamage,
+      damage: section.damage,
       lateralOffset: section.lateralOffset,
       cracked: section.cracked,
       overheated: section.overheated,
@@ -109,7 +110,7 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
     if (kernel === 0) {
       return section;
     }
-    return hammerSection(section, operation, kernel, hitsThickness, state.material);
+    return hammerSection(section, operation, kernel, hitsThickness, state.material, neighbourPlasticStrain(state, index));
   });
 
   return {
@@ -124,6 +125,7 @@ function hammerSection(
   kernel: number,
   hitsThickness: boolean,
   material: ForgeMaterial,
+  neighbourStrain: number,
 ): BladeSection {
   const deformation = operation.energy * kernel * (
     FORGE_RULES.deformationAtZeroPlasticity
@@ -139,7 +141,18 @@ function hammerSection(
     + (FORGE_RULES.coldStressAtFullEnergy - FORGE_RULES.hotStressAtFullEnergy) * (1 - section.plasticity)
   );
   const stress = section.stress + stressIncrease;
-  const integrity = Math.max(0, section.integrity - Math.max(0, stress - FORGE_RULES.stressDamageThreshold) * FORGE_RULES.integrityLossScale);
+  const plasticStrain = section.plasticStrain + compression * FORGE_RULES.plasticStrainPerCompression;
+  const localisation = clamp((plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainRange, 0, 1);
+  const thinness = clamp((FORGE_RULES.initialSectionThickness - section.thickness) / FORGE_RULES.initialSectionThickness, 0, 1);
+  // Risk rises sharply after leaving the workable window instead of quietly punishing correct hot forging.
+  const coldness = (1 - section.plasticity) ** 3;
+  const damageIncrease = operation.energy * kernel * coldness * (
+    FORGE_RULES.coldImpactDamage
+    + localisation * FORGE_RULES.localisationDamage
+    + thinness * FORGE_RULES.thinSectionDamage
+  ) * (1 + section.thermalDamage) / material.damageResistance;
+  const damage = clamp(section.damage + damageIncrease, 0, 1);
+  const integrity = Math.max(0, 1 - damage);
 
   return {
     ...section,
@@ -147,6 +160,8 @@ function hammerSection(
     thickness: hitsThickness ? compressedDimension : spreadDimension,
     length,
     stress,
+    plasticStrain,
+    damage,
     integrity,
     lateralOffset: section.lateralOffset
       + operation.lateralBias * operation.energy * kernel * section.plasticity * FORGE_RULES.lateralBendAtFullEnergy,
@@ -195,6 +210,8 @@ function createSection(index: number): BladeSection {
     temperatureC: FORGE_RULES.ambientTemperatureC,
     plasticity: 0,
     stress: 0,
+    plasticStrain: 0,
+    damage: 0,
     integrity: 1,
     thermalDamage: 0,
     lateralOffset: 0,
@@ -218,7 +235,7 @@ function assertTemperature(temperatureC: number): void {
 }
 
 function assertMaterial(material: ForgeMaterial): void {
-  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.coldStressMultiplier <= 0) {
+  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.coldStressMultiplier <= 0 || material.damageResistance <= 0) {
     throw new Error("Material workability values must be positive and hot workability at most one.");
   }
   if (material.plasticityStartC < FORGE_RULES.ambientTemperatureC || material.plasticityPeakC <= material.plasticityStartC
@@ -228,6 +245,11 @@ function assertMaterial(material: ForgeMaterial): void {
   if (material.stressRecoveryAtPeak < 0 || material.stressRecoveryAtPeak > 1) {
     throw new Error("Material peak stress recovery must be between zero and one.");
   }
+}
+
+function neighbourPlasticStrain(state: ForgeState, index: number): number {
+  const neighbours = [state.workpiece.sections[index - 1], state.workpiece.sections[index + 1]].filter(Boolean);
+  return neighbours.reduce((sum, section) => sum + section.plasticStrain, 0) / neighbours.length;
 }
 
 function assertHammerOperation(state: ForgeState, operation: HammerOperation): void {

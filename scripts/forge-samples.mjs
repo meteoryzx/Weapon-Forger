@@ -16,6 +16,10 @@ const samples = {
     { kind: "heat", temperatureC: 950 },
     { kind: "hammer", sectionIndex: center, energy: 0.9, lateralBias: 1 },
   ],
+  repeatedOverheating: [
+    { kind: "heat", temperatureC: 1200 },
+    { kind: "heat", temperatureC: 1200 },
+  ],
 };
 
 const report = Object.entries(samples).map(([name, operations]) => {
@@ -31,6 +35,7 @@ const report = Object.entries(samples).map(([name, operations]) => {
       plasticity: round(middle.plasticity),
       stress: round(middle.stress),
       integrity: round(middle.integrity),
+      damage: round(middle.damage),
       thermalDamage: round(middle.thermalDamage),
       lateralOffset: round(middle.lateralOffset),
       cracked: middle.cracked,

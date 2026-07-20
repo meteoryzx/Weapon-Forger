@@ -4,6 +4,7 @@ export interface ForgeMaterial {
   readonly id: string;
   readonly hotWorkability: number;
   readonly coldStressMultiplier: number;
+  readonly damageResistance: number;
   readonly plasticityStartC: number;
   readonly plasticityPeakC: number;
   readonly overheatTemperatureC: number;
@@ -17,7 +18,11 @@ export interface BladeSection {
   readonly thickness: number;
   readonly temperatureC: number;
   readonly plasticity: number;
+  // A normalized residual-stress index, not a real-world MPa measurement.
   readonly stress: number;
+  // A normalized record of repeated local shaping for deterministic damage checks.
+  readonly plasticStrain: number;
+  readonly damage: number;
   readonly integrity: number;
   readonly thermalDamage: number;
   readonly lateralOffset: number;
@@ -87,6 +92,7 @@ export interface ForgeSnapshotSection {
   readonly temperatureC: number;
   readonly plasticity: number;
   readonly thermalDamage: number;
+  readonly damage: number;
   readonly lateralOffset: number;
   readonly cracked: boolean;
   readonly overheated: boolean;
