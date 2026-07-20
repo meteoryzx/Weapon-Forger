@@ -20,6 +20,7 @@
 - Active `Protect main` ruleset requires PRs, linear history, squash-only merging, and blocks deletion/force pushes.
 - Git LFS tracking rules added for PSD, WAV, and BLEND source assets; local LFS installation remains pending.
 - Exact Node/Cocos installation and temporary-project acceptance steps documented for macOS and Windows.
+- S3a minimal-physics interface draft prepared; implementation remains blocked behind S0 Cocos/Node validation.
 
 ## Current Work
 
