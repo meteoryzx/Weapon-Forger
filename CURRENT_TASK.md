@@ -2,12 +2,12 @@
 
 > This is the only live handoff note. Update it before changing device, pausing a slice, or requesting merge.
 
-- **Task**: S3b 2.5D forge design gate
-- **Branch**: `main` after boundary PR #7 merges; no S3b implementation branch yet
-- **Issue / PR**: Open design-gate Issue `#6`; boundary PR `#7`
+- **Task**: S3b 2.5D workshop navigation and forge interaction
+- **Branch**: create `feat/S3b-workshop-graybox` from current `main`
+- **Issue / PR**: Open design-gate Issue `#6`; create one Draft PR for the first playable S3b slice
 - **Base**: `afaa5df` from merged S3a PR #5
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: S3a's physical core is merged and Issue #3 is closed. PR #7 clarifies the boundary between objective craftsmanship and contextual weapon performance; Issue #6 remains open until the minimum S3b experience decisions are confirmed.
+- **State**: S3a's physical core is merged and Issue #3 is closed. The S3b graybox experience is confirmed: fixed top-down/oblique workshop overview, click a station to enter its close operation view, no visible player character, tongs and hammer represent the player at the anvil. The minimum stations are rack, furnace, anvil, quench tank, and grinder. Hand hammer comes first; power hammer is a later tool using the same M1 operation interface.
 
 ## Verified Facts
 
@@ -28,8 +28,9 @@
 
 ## Next Actions
 
-1. Discuss and record the minimum S3b design-gate decisions in Issue #6; then create the S3b implementation branch and Draft PR.
-2. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
+1. Record the confirmed design gate in Issue #6, create the S3b branch/Draft PR, then implement the workshop overview and rack -> furnace -> anvil navigation chain.
+2. Add deterministic M1 time advance/passive cooling before anvil input, then implement the hand-hammer close view and continuous workpiece feedback.
+3. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
 
 ## Before Leaving This Device
 
