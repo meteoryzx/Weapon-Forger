@@ -129,7 +129,7 @@ test("crack risk is local cold-working damage, not a raw stress threshold", () =
   ]);
 
   assert.equal(center(hot).cracked, false, "a hot, ductile workpiece tolerates repeated shaping");
-  assert.ok(center(hot).integrity > 0.98, "correct hot forging should not quietly consume meaningful integrity");
+  assert.ok(center(hot).integrity > 0.98, "high-plasticity shaping should not accumulate meaningful cold-work damage");
   assert.equal(spreadOut.workpiece.sections.some((section) => section.cracked), false, "moving low-temperature hits avoids a single damage concentration");
 });
 

@@ -3,7 +3,7 @@ import { applyForgeOperation, createForgeSnapshot, createForgeState, totalVolume
 const center = 4;
 
 const samples = {
-  carefulHotForging: [
+  workableRangeShaping: [
     { kind: "heat", temperatureC: 950 },
     { kind: "hammer", sectionIndex: center, energy: 0.65, lateralBias: -1 },
     { kind: "hammer", sectionIndex: center, energy: 0.65, lateralBias: 1 },

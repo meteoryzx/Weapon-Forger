@@ -7,7 +7,7 @@
 - **Issue / PR**: Issue `#6`; PR not yet created
 - **Base**: `afaa5df` from merged S3a PR #5
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: S3a's physical core is merged and Issue #3 is closed. S3b code must not start until the minimum workbench/camera/player-presence/onboarding/sound decisions are confirmed.
+- **State**: S3a's physical core is merged and Issue #3 is closed. The S3b gate now also locks neutral simulation language: M1 describes conditions and consequences without judging player behaviour or imposing an ideal shape.
 
 ## Verified Facts
 

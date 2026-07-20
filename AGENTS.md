@@ -16,6 +16,7 @@
 - The player may freely forge a continuous billet. Do not require a weapon category or replace forging with prebuilt blade parts.
 - Use deterministic rules for forging defects and explicitly seeded randomness for the agent world.
 - Player-facing forging UI hides six stats and overall quality. Use visible material feedback; NPC adventure is the explicit performance feedback.
+- M1 and its tests describe physical conditions and consequences, never player behaviour as careful/sloppy, correct/wrong, or successful/failed. There is no universally correct forging route or mandatory ideal shape.
 - Do not add soft-body physics, arbitrary welding, full weapon taxonomy, runtime LLMs, multiple worlds, economy, formal WeChat release, or large final-art production to this six-week demo.
 - Treat the existing `assets/scripts/weapon` and `assets/data` files as legacy S1 references until the S3a migration plan replaces their contracts. Do not build new features on `baseForm`, `overall`, direct material stat bonuses, or fixed story branches.
 
