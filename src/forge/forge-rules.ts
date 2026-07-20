@@ -15,6 +15,7 @@ export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
 
 export const FORGE_RULES = {
   ambientTemperatureC: 20,
+  coolingRatePerSecond: 0.004,
   initialSectionLength: 14,
   initialSectionWidth: 32,
   initialSectionThickness: 8,
