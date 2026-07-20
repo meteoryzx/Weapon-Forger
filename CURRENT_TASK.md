@@ -19,7 +19,7 @@
 - `npm run check` passes locally. The official Creator command-line build succeeds with exit code `36` and produces the ignored `build/web-desktop` directory.
 - The author opened `http://127.0.0.1:4174` and confirmed the empty graybox H5 renders.
 - GitHub Issue #1 and Issue #3 remain open; PR #2 is merged. `main` requires a PR, linear history, squash-only merge, and blocks deletion/force pushes.
-- The current HTTPS credential cannot upload `.github/workflows/*` because it lacks workflow scope. Add CI after GitHub authorization is refreshed; local `npm run check` is the current gate.
+- GitHub CLI `2.96.0` is authenticated with `repo` and `workflow` scopes. Pure-logic CI is added; its first PR run must pass before review.
 - Git LFS `3.7.1` is installed in `~/.local/bin`, initialized, and recognizes the tracked `*.psd`, `*.wav`, and `*.blend` patterns.
 - A fresh clone at commit `80bbe6c` installed dependencies, passed required doctor/check, rebuilt H5, opened in Creator with zero console errors, and remained Git-clean.
 - Windows portability is designed but not yet proved on the private PC. `COCOS_CREATOR` supports non-default Dashboard install locations; Windows does not take ownership until its rehearsal passes.
@@ -27,7 +27,7 @@
 
 ## Next Actions
 
-1. Refresh GitHub workflow authorization and add pure-logic CI.
+1. Confirm the first pure-logic CI run passes on Draft PR #4.
 2. Review the complete S0b diff and prepare author acceptance; keep Issue #1 open until Windows rehearsal if needed.
 3. On the private Windows PC, run the documented rehearsal before any feature work.
 
