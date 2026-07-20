@@ -21,10 +21,11 @@
 - Git LFS tracking rules added for PSD, WAV, and BLEND source assets; local LFS installation remains pending.
 - Exact Node/Cocos installation and temporary-project acceptance steps documented for macOS and Windows.
 - S3a minimal-physics interface draft prepared; implementation remains blocked behind S0 Cocos/Node validation.
+- GitHub Issue #3 now records the S3a player outcome, scope, exclusions, and acceptance criteria; it is prepared but not yet active.
 
 ## Current Work
 
-- Verify and upload the first repository-only S0 checkpoint.
+- Wait for the author to complete the local Node/Cocos prerequisite, then validate the temporary Cocos project before importing its generated project structure.
 
 ## Next Actions
 
@@ -45,4 +46,4 @@
 - `git diff --check`: passed.
 - Legacy `s1_check.mjs`: passed with bundled Node; confirms old data remains readable, not that the new simulation contract exists.
 - Cocos/H5 checks: unavailable until the author installs Cocos Creator 3.8.8 and initializes the temporary 2D project.
-- GitHub: Issue #1 open; Draft PR #2 open; `Protect main` ruleset active. Required status checks remain intentionally unset until CI exists.
+- GitHub: Issue #1 and Issue #3 open; Draft PR #2 open; `Protect main` ruleset active. Required status checks remain intentionally unset until CI exists.
