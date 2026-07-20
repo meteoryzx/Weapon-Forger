@@ -50,6 +50,20 @@ test("hot material deforms more while cold heavy hammering accumulates more stre
   assert.ok(center(cold).stress > center(hot).stress);
 });
 
+test("deterministic time advance cools a workpiece and reduces plasticity without healing damage", () => {
+  const hammer = { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 };
+  const hotWorked = forgeAt(950, [hammer]);
+  const cooled = applyForgeOperation(hotWorked, { kind: "advanceTime", durationSeconds: 120 });
+  const replayed = applyForgeOperation(JSON.parse(JSON.stringify(hotWorked)), { kind: "advanceTime", durationSeconds: 120 });
+
+  assert.ok(center(cooled).temperatureC < center(hotWorked).temperatureC);
+  assert.ok(center(cooled).temperatureC > 20);
+  assert.ok(center(cooled).plasticity < center(hotWorked).plasticity);
+  assert.equal(center(cooled).damage, center(hotWorked).damage);
+  assert.equal(center(cooled).integrity, center(hotWorked).integrity);
+  assert.deepEqual(replayed, cooled);
+});
+
 test("a quarter-turn swaps the width and thickness response", () => {
   const hammer = { kind: "hammer", sectionIndex: CENTER, energy: 0.8, lateralBias: 0 };
   const original = center(createForgeState({ sectionCount: 9 }));
@@ -137,6 +151,7 @@ test("invalid external operations are rejected before they can change a state", 
   const initial = createForgeState({ sectionCount: 9 });
 
   assert.throws(() => applyForgeOperation(initial, { kind: "heat", temperatureC: 1401 }));
+  assert.throws(() => applyForgeOperation(initial, { kind: "advanceTime", durationSeconds: 0 }));
   assert.throws(() => applyForgeOperation(initial, { kind: "rotate", quarterTurns: 2 }));
   assert.throws(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 3 }));
   assert.equal(initial.operations.length, 0);

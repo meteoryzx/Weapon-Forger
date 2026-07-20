@@ -49,6 +49,12 @@ export interface HeatOperation {
   readonly temperatureC: number;
 }
 
+export interface AdvanceTimeOperation {
+  readonly kind: "advanceTime";
+  // Seconds of deterministic game time, recorded so a session can replay exactly.
+  readonly durationSeconds: number;
+}
+
 export interface RotateOperation {
   readonly kind: "rotate";
   readonly quarterTurns: 1 | -1;
@@ -73,7 +79,7 @@ export interface GrindOperation {
   readonly amount: number;
 }
 
-export type ForgeOperation = HeatOperation | RotateOperation | HammerOperation | QuenchOperation | GrindOperation;
+export type ForgeOperation = AdvanceTimeOperation | HeatOperation | RotateOperation | HammerOperation | QuenchOperation | GrindOperation;
 export type S3aForgeOperation = HeatOperation | RotateOperation | HammerOperation;
 
 export interface ForgeState {

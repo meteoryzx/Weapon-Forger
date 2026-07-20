@@ -38,6 +38,17 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
 
 export function applyForgeOperation(state: ForgeState, operation: ForgeOperation): ForgeState {
   switch (operation.kind) {
+    case "advanceTime":
+      assertDuration(operation.durationSeconds);
+      return appendOperation({
+        ...state,
+        workpiece: {
+          ...state.workpiece,
+          sections: state.workpiece.sections.map((section) => ({
+            ...applyCooling(section, operation.durationSeconds, state.material),
+          })),
+        },
+      }, operation);
     case "heat":
       assertTemperature(operation.temperatureC);
       return appendOperation({
@@ -184,6 +195,16 @@ function applyHeat(section: BladeSection, temperatureC: number, material: ForgeM
   };
 }
 
+function applyCooling(section: BladeSection, durationSeconds: number, material: ForgeMaterial): BladeSection {
+  const temperatureC = FORGE_RULES.ambientTemperatureC
+    + (section.temperatureC - FORGE_RULES.ambientTemperatureC) * Math.exp(-FORGE_RULES.coolingRatePerSecond * durationSeconds);
+  return {
+    ...section,
+    temperatureC,
+    plasticity: calculatePlasticity(temperatureC, material),
+  };
+}
+
 function appendOperation(state: ForgeState, operation: ForgeOperation): ForgeState {
   return { ...state, operations: [...state.operations, { ...operation }] };
 }
@@ -231,6 +252,12 @@ function rotate(current: 0 | 1 | 2 | 3, quarterTurns: 1 | -1): 0 | 1 | 2 | 3 {
 function assertTemperature(temperatureC: number): void {
   if (!Number.isFinite(temperatureC) || temperatureC < FORGE_RULES.ambientTemperatureC || temperatureC > 1300) {
     throw new Error("Heat temperature must be between ambient temperature and 1300C.");
+  }
+}
+
+function assertDuration(durationSeconds: number): void {
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > 300) {
+    throw new Error("Advance time duration must be greater than zero and at most 300 seconds.");
   }
 }
 
