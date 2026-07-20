@@ -7,7 +7,7 @@
 - **Issue / PR**: Issue `#3`; Draft PR `#5`
 - **Base**: `39a4122` from merged S0b PR #4
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: source-backed physical audit is implemented locally: material windows, draw-out, stress recovery, thermal damage, and deterministic local damage are covered; next is full diff review and CI.
+- **State**: S3a source-backed physical audit, complete diff review and green CI are finished; PR #5 is ready to squash merge.
 
 ## Verified Facts
 
@@ -27,7 +27,7 @@
 
 ## Next Actions
 
-1. Commit/push the physical-audit correction, complete CI and independent review, then mark PR #5 ready for review.
+1. Squash merge PR #5, close Issue #3, then open the S3b design gate before starting Cocos input or rendering work.
 2. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
 
 ## Before Leaving This Device
