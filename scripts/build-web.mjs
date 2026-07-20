@@ -1,13 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const candidates = [
   process.env.COCOS_CREATOR,
   "/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator",
-  "C:\\Program Files\\Cocos\\Creator\\3.8.8\\CocosCreator.exe",
+  process.env.PROGRAMDATA && join(process.env.PROGRAMDATA, "cocos/editors/Creator/3.8.8/CocosCreator.exe"),
+  process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs/CocosCreator/Creator/3.8.8/CocosCreator.exe"),
+  process.env.ProgramFiles && join(process.env.ProgramFiles, "Cocos/Creator/3.8.8/CocosCreator.exe"),
 ].filter(Boolean);
 const executable = candidates.find((path) => existsSync(path));
 

@@ -8,7 +8,7 @@
 - **Prepared next Issue**: `#3` S3a minimal simulation core
 - **Base**: `d6ce8b6` from merged PR #2
 - **Device owner**: current macOS device; Windows takes over only after the clean-clone rehearsal
-- **State**: Creator and pure checks pass; the first Web Desktop H5 builds and was visually accepted; clean-clone rehearsal is next
+- **State**: macOS clean-clone, Creator GUI, pure checks, Web build, and H5 visual acceptance pass; Windows rehearsal remains pending
 
 ## Verified Facts
 
@@ -21,13 +21,15 @@
 - GitHub Issue #1 and Issue #3 remain open; PR #2 is merged. `main` requires a PR, linear history, squash-only merge, and blocks deletion/force pushes.
 - The current HTTPS credential cannot upload `.github/workflows/*` because it lacks workflow scope. Add CI after GitHub authorization is refreshed; local `npm run check` is the current gate.
 - Git LFS `3.7.1` is installed in `~/.local/bin`, initialized, and recognizes the tracked `*.psd`, `*.wav`, and `*.blend` patterns.
+- A fresh clone at commit `80bbe6c` installed dependencies, passed required doctor/check, rebuilt H5, opened in Creator with zero console errors, and remained Git-clean.
+- Windows portability is designed but not yet proved on the private PC. `COCOS_CREATOR` supports non-default Dashboard install locations; Windows does not take ownership until its rehearsal passes.
 - Legacy S1 data check runs with local Node. It proves only that legacy reference data is readable.
 
 ## Next Actions
 
-1. Perform the clean-clone install, doctor, test, and Web Desktop build rehearsal.
-2. Verify a clean Creator restart from the rehearsal clone.
-3. Refresh GitHub workflow authorization and add pure-logic CI.
+1. Refresh GitHub workflow authorization and add pure-logic CI.
+2. Review the complete S0b diff and prepare author acceptance; keep Issue #1 open until Windows rehearsal if needed.
+3. On the private Windows PC, run the documented rehearsal before any feature work.
 
 ## Before Leaving This Device
 

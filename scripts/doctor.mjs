@@ -52,7 +52,9 @@ check(nodeImports.length === 0, nodeImports.length ? `游戏资源引用 Node �
 const cocosCandidates = [
   process.env.COCOS_CREATOR,
   "/Applications/Cocos/Creator/3.8.8/CocosCreator.app/Contents/MacOS/CocosCreator",
-  "C:\\Program Files\\Cocos\\Creator\\3.8.8\\CocosCreator.exe",
+  process.env.PROGRAMDATA && join(process.env.PROGRAMDATA, "cocos/editors/Creator/3.8.8/CocosCreator.exe"),
+  process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, "Programs/CocosCreator/Creator/3.8.8/CocosCreator.exe"),
+  process.env.ProgramFiles && join(process.env.ProgramFiles, "Cocos/Creator/3.8.8/CocosCreator.exe"),
 ].filter(Boolean);
 const cocos = cocosCandidates.find((path) => existsSync(path));
 if (requireCocos) check(Boolean(cocos), "找到 Cocos Creator 3.8.8 命令行程序");
