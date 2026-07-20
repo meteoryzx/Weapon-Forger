@@ -8,7 +8,7 @@
 - **Prepared next Issue**: `#3` S3a minimal simulation core
 - **Base**: `d6ce8b6` from merged PR #2
 - **Device owner**: current macOS device; Windows takes over only after the clean-clone rehearsal
-- **State**: macOS clean-clone, Creator GUI, local/CI checks, Web build, and H5 visual acceptance pass; Windows rehearsal remains pending
+- **State**: S0b macOS acceptance and full diff review pass with no blockers; PR #4 is ready for review, Windows rehearsal remains pending
 
 ## Verified Facts
 
@@ -23,12 +23,13 @@
 - Git LFS `3.7.1` is installed in `~/.local/bin`, initialized, and recognizes the tracked `*.psd`, `*.wav`, and `*.blend` patterns.
 - A fresh clone at commit `80bbe6c` installed dependencies, passed required doctor/check, rebuilt H5, opened in Creator with zero console errors, and remained Git-clean.
 - Windows portability is designed but not yet proved on the private PC. `COCOS_CREATOR` supports non-default Dashboard install locations; Windows does not take ownership until its rehearsal passes.
+- Full `main...PR #4` review found no blocking issue: no forbidden tracked paths or tracked files over 5 MiB, strict data/settings JSON parses, npm audit reports zero vulnerabilities, and the latest Web build succeeds.
 - Legacy S1 data check runs with local Node. It proves only that legacy reference data is readable.
 
 ## Next Actions
 
-1. Review the complete S0b diff and prepare author acceptance; keep Issue #1 open until Windows rehearsal if needed.
-2. On the private Windows PC, run the documented rehearsal before any feature work.
+1. Mark PR #4 ready for review but leave it unmerged so Windows results can be recorded on the same branch and PR.
+2. On the private Windows PC, run the documented rehearsal before any feature work; after acceptance, squash merge PR #4 and close Issue #1.
 
 ## Before Leaving This Device
 
