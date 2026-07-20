@@ -50,4 +50,4 @@ console.log(`  材质=${testWeapon.material}  工艺=[${testWeapon.process}]`);
 console.log(`  6维: ` + Object.keys(LABEL).map((k) => `${LABEL[k]}${testWeapon.stats[k]}`).join(" "));
 
 console.log("\n✅ S1 通过：数据结构与数据表均可正常读取、承载。");
-console.log("   下一步 S2：写 M4 冒险判定 + M5 故事呈现，把这把武器的 6 维喂进节点表跑出故事。");
+console.log("   这是旧 S1 数据骨架验收，不代表新模拟接口完成。当前先完成 S0 可迁移工程，再进入 S3a 最小物理内核。");
