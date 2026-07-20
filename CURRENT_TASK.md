@@ -4,8 +4,8 @@
 
 - **Task**: S0 portable collaboration and engineering foundation
 - **Branch**: `chore/S0-portable-workflow`
-- **Issue**: pending GitHub authentication/tooling
-- **Draft PR**: pending first pushed checkpoint
+- **Issue**: `#1` - S0 portable engineering foundation
+- **Draft PR**: `#2` - `[S0] 建立可迁移协作与 Cocos 工程地基`
 - **Base commit**: `36bbe2f`
 - **Device owner**: current macOS device
 - **State**: in progress
@@ -16,6 +16,8 @@
 - Work branch created from clean, synchronized `main`.
 - Durable Codex guidance, plain-language workflow, GitHub templates, review checklist, and `$device-handoff` added.
 - Product, architecture, progress, and decision documents aligned to the 2026-07-20 six-week plan.
+- GitHub Issue #1 and Draft PR #2 created from the first pushed checkpoint.
+- Active `Protect main` ruleset requires PRs, linear history, squash-only merging, and blocks deletion/force pushes.
 
 ## Current Work
 
@@ -23,9 +25,10 @@
 
 ## Next Actions
 
-1. Push the first checkpoint and create the GitHub Issue/Draft PR when authentication tooling is available.
-2. Author installs Cocos Dashboard, Cocos Creator 3.8.8, and Node.js 24 LTS.
-3. Initialize and verify the portable Cocos/H5 project.
+1. Author installs Cocos Dashboard, Cocos Creator 3.8.8, and Node.js 24 LTS.
+2. Author creates and opens a temporary blank 2D Cocos project with Creator 3.8.8.
+3. Integrate the generated project files, initialize locked dependencies, and add doctor/tests/CI/H5 build wrappers.
+4. After the first successful CI run, require that status check in the `Protect main` ruleset.
 
 ## Known Blockers
 
@@ -39,3 +42,4 @@
 - `git diff --check`: passed.
 - Legacy `s1_check.mjs`: passed with bundled Node; confirms old data remains readable, not that the new simulation contract exists.
 - Cocos/H5 checks: unavailable until the author installs Cocos Creator 3.8.8 and initializes the temporary 2D project.
+- GitHub: Issue #1 open; Draft PR #2 open; `Protect main` ruleset active. Required status checks remain intentionally unset until CI exists.

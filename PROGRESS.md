@@ -16,7 +16,9 @@
 - [x] 从干净 `main` 建立短期工作分支。
 - [x] 新增 `AGENTS.md`、`CURRENT_TASK.md`、通俗协作指南、模板和 `$device-handoff`。
 - [x] 完成规范迁移并通过文档自检。
-- [ ] 在 GitHub 建 Issue 和 Draft PR。
+- [x] 在 GitHub 建 Issue #1 和 Draft PR #2。
+- [x] 启用 `main` 保护：必须 PR、线性历史、仅 squash、禁止删除和 force push。
+- [ ] CI 首次成功后，将其设为 `main` 必需状态检查。
 - [ ] 作者安装 Node.js 24 LTS、Cocos Dashboard 和 Creator 3.8.8。
 - [ ] 整合正式 Cocos 2D 项目，锁定依赖并保留全部 `.meta`/设置。
 - [ ] 建立 `doctor`、类型检查、单元测试、数据校验和纯逻辑 CI。
