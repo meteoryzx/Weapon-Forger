@@ -4,10 +4,10 @@
 
 - **Task**: S3a minimum simulation core
 - **Branch**: `feat/S3-forge`
-- **Issue / PR**: Issue `#3`; Draft PR not yet created
+- **Issue / PR**: Issue `#3`; Draft PR `#5`
 - **Base**: `39a4122` from merged S0b PR #4
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: contract and deterministic simulation are implemented locally; next checkpoint is a draft PR, full check and review.
+- **State**: contract and deterministic simulation are committed, pushed and protected by green CI; independent review and author data-trend acceptance remain.
 
 ## Verified Facts
 
@@ -27,7 +27,7 @@
 
 ## Next Actions
 
-1. Commit and push the S3a contract checkpoint, create its Draft PR, then complete sample output and full-diff review.
+1. Complete S3a's independent review and author data-trend acceptance; then mark PR #5 ready for review.
 2. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
 
 ## Before Leaving This Device

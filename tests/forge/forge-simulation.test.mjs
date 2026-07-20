@@ -93,3 +93,13 @@ test("cold repeated heavy hits create deterministic cracks and expose them throu
   assert.equal(snapshot.hasCracks, true);
   assert.ok(snapshot.sections.some((section) => section.cracked));
 });
+
+test("invalid external operations are rejected before they can change a state", () => {
+  const initial = createForgeState({ sectionCount: 9 });
+
+  assert.throws(() => applyForgeOperation(initial, { kind: "heat", temperatureC: 1401 }));
+  assert.throws(() => applyForgeOperation(initial, { kind: "rotate", quarterTurns: 2 }));
+  assert.throws(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 3 }));
+  assert.equal(initial.operations.length, 0);
+  assert.equal(center(initial).integrity, 1);
+});

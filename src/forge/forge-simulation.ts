@@ -6,7 +6,6 @@ import type {
   ForgeSnapshot,
   ForgeState,
   HammerOperation,
-  S3aForgeOperation,
 } from "./forge-types.ts";
 
 export interface CreateForgeStateOptions {
@@ -52,6 +51,7 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
         },
       }, operation);
     case "rotate":
+      assertQuarterTurns(operation.quarterTurns);
       return appendOperation({
         ...state,
         workpiece: {
@@ -202,6 +202,15 @@ function assertHammerOperation(state: ForgeState, operation: HammerOperation): v
   }
   if (!Number.isFinite(operation.energy) || operation.energy <= 0 || operation.energy > 1) {
     throw new Error("Hammer energy must be greater than zero and at most one.");
+  }
+  if (operation.lateralBias !== -1 && operation.lateralBias !== 0 && operation.lateralBias !== 1) {
+    throw new Error("Hammer lateral bias must be -1, 0, or 1.");
+  }
+}
+
+function assertQuarterTurns(quarterTurns: number): void {
+  if (quarterTurns !== -1 && quarterTurns !== 1) {
+    throw new Error("Rotation must be exactly one quarter turn in either direction.");
   }
 }
 
