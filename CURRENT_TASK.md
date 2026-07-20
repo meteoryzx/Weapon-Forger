@@ -4,10 +4,10 @@
 
 - **Task**: S0b portable Cocos engineering foundation
 - **Branch**: `chore/S0-cocos-foundation`
-- **Issue / PR**: Issue `#1`; Draft PR `#4`
+- **Issue / PR**: Issue `#1`; Ready-for-review PR `#4`
 - **Prepared next Issue**: `#3` S3a minimal simulation core
 - **Base**: `d6ce8b6` from merged PR #2
-- **Device owner**: current macOS device; Windows takes over only after the clean-clone rehearsal
+- **Device owner**: current macOS device; Windows takes over only after its own clean-clone rehearsal
 - **State**: S0b macOS acceptance and full diff review pass with no blockers; PR #4 is ready for review, Windows rehearsal remains pending
 
 ## Verified Facts
