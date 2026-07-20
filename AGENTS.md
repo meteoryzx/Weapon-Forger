@@ -1,42 +1,99 @@
-# Weapon Forger Agent Guide
+# 《打了个铁》AI 工作规范
 
-## Read Order
+本文件给编码 AI 阅读。作者不需要写代码，作者的职责是：说明目标、确认边界、亲手验收玩家行为。AI 的职责是：在边界内施工、提供可验证证据、如实报告限制。
 
-1. Read `CURRENT_TASK.md` for branch, owner, progress, and next action.
-2. Read `PROJECT_PLAN.md` before changing code, data, scenes, or design.
-3. Read `docs/锻造工艺研究报告.md` for simulation rules and `docs/SETUP_AND_HANDOFF.md` for environment or device work when relevant.
+每次开始任何工作前，AI 必须完整阅读本文件和 `PROJECT_PLAN.md`，再检查 Git 工作区状态。这两份文件加 Git 历史，是跨电脑、跨 AI 的唯一项目事实；聊天记录和 AI 的短期记忆不能作为交接依据。
 
-## Non-Negotiable Rules
+## 1. 开发范式：小步、可验、可回退
 
-- Never develop on `main`, force-push, or use `git reset --hard` for routine recovery.
-- One short branch and one Draft PR deliver one player-verifiable vertical behavior. Keep `main` runnable.
-- The pure simulation, evaluation, and agent world must not import Cocos.
-- Input creates immutable `ForgeOperation` records. Operations change `ForgeState`; M3 derives `WeaponData`; no operation may directly add a stat.
-- Rendering only reads `ForgeSnapshot`/`WeaponData`; stories only read finalized `WeaponData` and proved rule events. Neither may change simulation state.
-- The player may freely forge a continuous billet. Do not require a weapon category or replace forging with prebuilt blade parts.
-- Use deterministic rules for forging defects and explicitly seeded randomness for the agent world.
-- Player-facing forging UI hides six stats and overall quality. Use visible material feedback; NPC adventure is the explicit performance feedback.
-- M1 records physical conditions and consequences; tests name those conditions precisely. M3 may derive physically grounded process quality/craftsmanship from damage, control, heat treatment and completion, but must not turn craftsmanship into universal combat power or impose one ideal shape, weight, or use.
-- Do not add soft-body physics, arbitrary welding, full weapon taxonomy, runtime LLMs, multiple worlds, economy, formal WeChat release, or large final-art production to this six-week demo.
-- Treat the existing `assets/scripts/weapon` and `assets/data` files as legacy S1 references until the S3a migration plan replaces their contracts. Do not build new features on `baseForm`, `overall`, direct material stat bonuses, or fixed story branches.
+本项目采用 Prompt 工程协作：不是要求作者读代码，而是用明确的模块边界、测试入口和 Git 存档，使每次问题都限制在一小块内。
 
-## Workflow And Evidence
+必须遵守：
 
-1. State branch, worktree state, intended player behavior, scope, and acceptance evidence before editing.
-2. Create or link an Issue, set the Goal, and work in a short branch with a Draft PR.
-3. Write/adjust contract tests before public interfaces, then pure logic, then Cocos adapters.
-4. Commit and push every describable checkpoint. Use `[WIP]` only for an unfinished checkpoint.
-5. Run the checks declared by the active slice. CI only proves pure TypeScript/data; local Cocos/H5 evidence proves engine behavior.
-6. Give the author a plain Chinese test path. Review the complete diff before asking for acceptance.
-7. After acceptance, squash merge the PR, tag major milestones, and update `CURRENT_TASK.md`.
+- **一切可验证**：每次交付必须给作者可操作的证据，例如可点击入口、固定操作步骤、截图、录屏或可读状态输出；不能只说“写完了”。
+- **接口先行**：跨模块数据如何传递，先写进 `PROJECT_PLAN.md`；模块内部可以迭代，但不得偷偷改变对外契约。
+- **配置与逻辑分离**：材料、工具、规则阈值、故事节点和文案属于数据；计算和读取数据的程序属于逻辑。不得把策划数值散写在代码中。
+- **一次一个可玩切片**：不并行铺开多个长期分支；一个分支只完成一条玩家可验证的行为。
+- **先验证核心，再填内容**：先跑通锻造、评估、故事因果；美术库、内容量和分享功能后置。
 
-## Project Files
+## 2. 强制检查点闸门
 
-- Commit Cocos source, `assets/`, `.meta`, `settings/`, `package.json`, lockfiles, source, data, and tests.
-- Never commit `library/`, `temp/`, `local/`, `profiles/`, `build/`, dependency folders, or local caches.
-- PSD, WAV, and BLEND source assets use Git LFS after it is installed. H5 archives and videos use GitHub Releases.
-- Tunable values and player-facing copy belong in versioned data files, not scattered code.
+总计划获准，**不等于** AI 获准自动执行后续步骤。
 
-## Done Means
+每一次会改变项目状态的操作之前，包括编辑文件、安装依赖、删除文件、切换分支、提交、推送、创建或关闭 PR（合并请求），AI 必须先用中文发出“检查点说明”，其中写清：
 
-A slice is complete only when its automated checks pass, its relevant Cocos/H5 behavior is demonstrated, the author has played and accepted it, Codex has reviewed the full diff, and its PR is ready to squash merge.
+1. 当前检查点编号，以及它在 `PROJECT_PLAN.md` 中的准确目标。
+2. 会修改的确切文件与会接触的外部系统。
+3. 明确不会做什么。
+4. 作者如何验收，以及完成后 AI 会停在哪里。
+
+AI 必须等待作者明确回复开始该检查点。诸如“执行计划”这样的宽泛指令，只允许启动 AI 提出的**第一个**检查点，绝不能自动连续执行。
+
+实现结束后，AI 必须停下，展示验收证据，等待作者明确回复“验收通过”或同等清晰认可。在此之前，AI 不得开始下一步、创建正式提交、推送、创建 PR、把状态标为已通过或合并。
+
+唯一例外是作者明确要求换电脑时的 `[WIP]`（进行中）提交与推送。它只保存未完成工作，绝不能合并进 `main`；`PROJECT_PLAN.md` 必须写明它未验收的分支、提交和文件范围。
+
+## 3. 模块职责与数据流铁律
+
+当前只保留实际闭环必需的六个代码边界：
+
+| 边界 | 负责什么 | 明确不做什么 |
+| --- | --- | --- |
+| `platform` | 画布、时间、输入、存储、音频、分享等平台差异 | 不直接改锻造状态 |
+| `app` | 组装依赖、控制游戏流程 | 不存物理规则或渲染细节 |
+| `forge` | 锻造意图、合法操作、确定性状态、回放 | 不算六维、不讲故事、不依赖 Three.js |
+| `evaluate` | 最终状态到隐藏六维、特性、缺陷 | 不改外形、不决定画面 |
+| `story` | `WeaponData` 和种子到确定性事件 | 不读取点击过程、不编造武器事实 |
+| `render` | Three.js 程序化场景与状态可视化 | 不反向写任何游戏状态 |
+
+唯一允许的数据方向：
+
+```text
+平台输入 -> ForgeIntent -> ForgeOperation -> ForgeState
+                                           |-> ForgeSnapshot -> render
+                                           `-> evaluate -> WeaponData -> story
+```
+
+铁律：
+
+- `forge`、`evaluate`、`story` 必须是可重复计算的纯 TypeScript，不得导入 Three.js、浏览器 DOM 或微信 API。
+- 平台层只把鼠标、键盘、触摸转换成 `ForgeIntent`（锻造意图），绝不直接改状态。
+- `render` 只读取 `ForgeSnapshot`，不得写入模拟、六维或缺陷。
+- 故事只读取最终 `WeaponData` 和种子，不能根据“玩家乱点了几次”编造后果。
+- 所有公共状态必须可序列化、带规则版本；同一操作回放在浏览器与微信端必须得到相同 JSON。
+- 不新增 Manager、Service Locator、Factory、事件总线、编辑器或公共框架层，除非出现第二个真实需求并获作者同意。
+
+## 4. 已锁定技术与内容边界
+
+- 正式目标是**微信小游戏**；浏览器 H5 只是同源代码的调试、自动验收和作品集入口，不是以后再迁移的临时原型。
+- 技术栈是 TypeScript、Three.js、Vite、Vitest、Playwright。首轮场景、钢坯、器具、特效和生产 UI 均由代码和参数生成。
+- 不使用 Cocos、Unity、外部场景编辑器、GLB 模型、贴图资产或生产环境依赖的 DOM 界面。
+- 微信适配只实现本项目需要的画布、WebGL 上下文、尺寸、帧循环、触摸、离屏画布、本地存储，以及音频/分享接口预留；不模拟完整 DOM、不改 Three.js 源码、不用依赖 DOM 的 Loader 或控件。
+- 不做有限元、软体物理、真实化学、任意拓扑、开孔、分叉、折叠焊接、运行时 LLM、经济成长、支付、广告、服务端或大量正式美术。
+- 动力锤、自由焊接和受控装配是后续设计项，不得抢在最小锻造链之前实现。
+
+## 5. 工程质量、验证与止损
+
+- 每个切片都要有纯逻辑自动测试、浏览器验收，以及作者能按中文步骤完成的试玩验收。
+- 每个模块要有独立测试入口；不能要求作者先跑完整游戏才能验证一个小功能。
+- 微信端是否可用，只能由作者在微信开发者工具和真机预览确认。AI 不得声称完成了自己无法进行的 GUI 或真机验证。
+- 同一路径出现两次无法解释的失败，必须停止试错，先用通俗中文报告：哪里失败、已知证据、可能原因、备选方案和需要作者决定什么。
+- 删除文件、关闭 PR、删除远端分支、修改公共接口前，必须列出精确目标并获得作者同意。
+- 不得 force push，不得改写 `main` 历史，不得把 `git reset --hard` 当日常修复手段；优先用新分支、`git revert` 或保留现场的 `[WIP]` 提交。
+- 依赖和版本必须锁定；生成目录不得进入 Git；源文件、配置和必要元数据必须进入 Git。
+
+## 6. Git 与跨设备交付
+
+- 一个短期分支和一个 PR，只交付一条作者能验证的玩家行为。
+- 本地检查通过后先由作者试玩；作者验收通过，才创建正式提交并推送。
+- 提交信息使用 `[阶段/模块] 可读动作`，例如 `[R1/forge] 最小锤击可玩链，验收通过`。
+- 自动检查、作者验收和完整差异检查都通过后，PR 才可 squash merge（把过程提交整理为一个正式提交）到 `main`。
+- `main` 必须始终保持可运行；Git 历史就是档案，不创建额外的流程文档堆积。
+- 换电脑前必须关闭编辑器、运行已知检查、更新 `PROJECT_PLAN.md`、推送已验收提交或一个明确的 `[WIP]`，并核对本地与远端提交一致。
+
+## 7. 沟通、模型与能力边界
+
+- 所有说明、错误和取舍都用通俗中文；术语第一次出现时说明其用途。
+- AI 必须如实说明能力边界。账号登录、微信开发者工具导入、真机扫码、真机试玩由作者操作；AI 只能提供步骤与检查点，不能虚构 GUI 控制能力。
+- 架构、物理规则和复杂故障分析适合高推理模型；进入重复编码、常规测试、格式整理时，AI 应提醒作者切换低消耗模型。
+- 作者提出的新想法先记录为“待讨论”，不得在当前切片中顺手加入；先完成当前最小闭环再扩展。
