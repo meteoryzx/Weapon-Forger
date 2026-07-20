@@ -3,11 +3,11 @@
 > This is the only live handoff note. Update it before changing device, pausing a slice, or requesting merge.
 
 - **Task**: S3b 2.5D forge design gate
-- **Branch**: `chore/S3b-design-gate`
-- **Issue / PR**: Issue `#6`; PR not yet created
+- **Branch**: `main` after boundary PR #7 merges; no S3b implementation branch yet
+- **Issue / PR**: Open design-gate Issue `#6`; boundary PR `#7`
 - **Base**: `afaa5df` from merged S3a PR #5
 - **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
-- **State**: S3a's physical core is merged and Issue #3 is closed. The S3b gate now also locks neutral simulation language: M1 describes conditions and consequences without judging player behaviour or imposing an ideal shape.
+- **State**: S3a's physical core is merged and Issue #3 is closed. PR #7 clarifies the boundary between objective craftsmanship and contextual weapon performance; Issue #6 remains open until the minimum S3b experience decisions are confirmed.
 
 ## Verified Facts
 
