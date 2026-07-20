@@ -28,8 +28,8 @@
 
 ## Next Actions
 
-1. Mark PR #4 ready for review but leave it unmerged so Windows results can be recorded on the same branch and PR.
-2. On the private Windows PC, run the documented rehearsal before any feature work; after acceptance, squash merge PR #4 and close Issue #1.
+1. On the private Windows PC, switch to `chore/S0-cocos-foundation` and run the documented rehearsal before any feature work.
+2. Record the Windows result on the same branch and PR; after acceptance, squash merge PR #4 and close Issue #1.
 
 ## Before Leaving This Device
 
