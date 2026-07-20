@@ -4,9 +4,9 @@
 
 - Node `v24.18.0`、npm `11.16.0` 已验证。
 - Cocos Dashboard 与 Creator `3.8.8` 已安装。
-- 临时 Creator 3D 工程：`/Users/yzx/NewProject`。关闭 Creator 后，Codex 只迁移其项目骨架；绝不迁移 `.git`、`library/`、`temp/`、`profiles/` 或构建物。
+- Creator 3D 工程骨架已经并入正式仓库，项目版本锁定为 `3.8.8`。`/Users/yzx/NewProject` 只保留为临时来源，不再参与开发。
 
-## S0 完成后可用命令
+## 当前可用命令
 
 ```bash
 npm ci
@@ -16,7 +16,9 @@ npm run typecheck
 npm run build:web
 ```
 
-`doctor`、测试和构建脚本尚未建立；它们必须在 S0 中实际运行后才能算可用。
+`npm run check` 会依次执行环境检查、类型检查、数据校验和单元测试。`npm run build:web` 调用本机 Creator 3.8.8；官方以退出码 `36` 表示构建成功。CI 不安装或启动 Cocos，只验证纯逻辑和数据。
+
+Creator 的账号登录、macOS/Windows 系统授权与真人试玩必须由作者完成。日常场景内容优先由代码和项目内扩展生成，不把第三方 MCP 当作换机必需条件。
 
 ## Windows 接手
 

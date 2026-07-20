@@ -1,0 +1,22 @@
+{
+  "name": "weapon-forger",
+  "uuid": "7032bb41-caf9-4af8-ab17-fc88f7674f9f",
+  "creator": {
+    "version": "3.8.8"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "doctor": "node scripts/doctor.mjs",
+    "typecheck": "tsc -p tsconfig.logic.json",
+    "validate:data": "node scripts/validate-data.mjs",
+    "test": "node --test",
+    "check": "npm run doctor && npm run typecheck && npm run validate:data && npm test",
+    "build:web": "node scripts/build-web.mjs"
+  },
+  "devDependencies": {
+    "typescript": "5.8.2"
+  }
+}
