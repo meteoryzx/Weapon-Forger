@@ -2,13 +2,13 @@
 
 > This is the only live handoff note. Update it before changing device, pausing a slice, or requesting merge.
 
-- **Task**: S0b portable Cocos engineering foundation
+- **Task**: S0b portable Cocos engineering foundation, ready to merge
 - **Branch**: `chore/S0-cocos-foundation`
 - **Issue / PR**: Issue `#1`; Ready-for-review PR `#4`
 - **Prepared next Issue**: `#3` S3a minimal simulation core
 - **Base**: `d6ce8b6` from merged PR #2
-- **Device owner**: current macOS device; Windows takes over only after its own clean-clone rehearsal
-- **State**: S0b macOS acceptance and full diff review pass with no blockers; PR #4 is ready for review, Windows rehearsal remains pending
+- **Device owner**: current macOS device; Windows performs its clean-clone rehearsal from merged `main` before taking over
+- **State**: S0b macOS acceptance and full diff review pass with no blockers; PR #4 is ready to squash merge. Windows portability remains a post-merge handoff check, not a gate for S3a work on this device.
 
 ## Verified Facts
 
@@ -28,8 +28,8 @@
 
 ## Next Actions
 
-1. On the private Windows PC, switch to `chore/S0-cocos-foundation` and run the documented rehearsal before any feature work.
-2. Record the Windows result on the same branch and PR; after acceptance, squash merge PR #4 and close Issue #1.
+1. Squash merge PR #4, close Issue #1, and create `feat/S3-forge` for S3a's minimum simulation core.
+2. On the private Windows PC, clone merged `main` and run the documented rehearsal before Windows starts feature work; record the result in its active S3 PR.
 
 ## Before Leaving This Device
 
