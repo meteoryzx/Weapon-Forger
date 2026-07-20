@@ -14,7 +14,7 @@ node --version
 npm --version
 ```
 
-验收：Node 输出 `v24.16.0`；npm 能正常输出版本。Windows 后续使用同版本 x64 `.msi`。
+验收：Node 输出 `v24.x`；npm 能正常输出版本。当前 macOS 已验证 `node v24.18.0`、`npm 11.16.0`。Windows 后续使用同一 Node 24 LTS 系列的 x64 `.msi`。
 
 ## 2. 安装 Cocos Dashboard 与 Creator
 
