@@ -13,5 +13,5 @@
     "noEmit": true,
     "types": ["vitest/globals"]
   },
-  "include": ["src", "tests", "vite.web.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src", "tests", "vite.web.config.ts", "vite.wechat.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

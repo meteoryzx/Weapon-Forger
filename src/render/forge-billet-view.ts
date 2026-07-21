@@ -11,7 +11,6 @@ import {
   Raycaster,
   Scene,
   Vector2,
-  Vector3,
   WebGLRenderer,
   BoxGeometry,
   DoubleSide,
@@ -28,6 +27,18 @@ const BILLET_MATERIAL = new MeshStandardMaterial({
   side: DoubleSide,
 });
 
+export interface RenderCanvas {
+  readonly width: number;
+  readonly height: number;
+  getContext(kind: "webgl2"): WebGL2RenderingContext | null;
+}
+
+export interface RenderViewport {
+  readonly width: number;
+  readonly height: number;
+  readonly pixelRatio: number;
+}
+
 export class ForgeBilletView {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -36,9 +47,19 @@ export class ForgeBilletView {
   private readonly pointer = new Vector2();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
   private snapshot: ForgeSnapshot | null = null;
+  private viewport: RenderViewport;
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
-    this.renderer = new WebGLRenderer({ antialias: true, canvas });
+  constructor(private readonly canvas: RenderCanvas, viewport: RenderViewport) {
+    const context = canvas.getContext("webgl2");
+    if (!context) {
+      throw new Error("The current runtime does not provide a WebGL2 context.");
+    }
+    this.viewport = viewport;
+    this.renderer = new WebGLRenderer({
+      antialias: true,
+      canvas: canvas as unknown as HTMLCanvasElement,
+      context,
+    });
     this.scene.background = new Color("#171817");
     this.scene.add(new AmbientLight("#ffbc86", 0.8));
 
@@ -50,7 +71,7 @@ export class ForgeBilletView {
     this.scene.add(this.billet);
     this.camera.position.set(258, 174, 265);
     this.camera.lookAt(165, 0, 0);
-    this.resize();
+    this.resize(viewport);
   }
 
   update(snapshot: ForgeSnapshot, impactSectionIndex: number | null = null): void {
@@ -61,10 +82,11 @@ export class ForgeBilletView {
     this.render();
   }
 
-  resize(): void {
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
-    this.camera.aspect = window.innerWidth / window.innerHeight;
+  resize(viewport: RenderViewport): void {
+    this.viewport = viewport;
+    this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
+    this.renderer.setSize(viewport.width, viewport.height, false);
+    this.camera.aspect = viewport.width / viewport.height;
     this.camera.updateProjectionMatrix();
     this.render();
   }
@@ -73,10 +95,9 @@ export class ForgeBilletView {
     if (!this.snapshot) {
       return null;
     }
-    const bounds = this.canvas.getBoundingClientRect();
     this.pointer.set(
-      ((viewportX - bounds.left) / bounds.width) * 2 - 1,
-      -((viewportY - bounds.top) / bounds.height) * 2 + 1,
+      (viewportX / this.viewport.width) * 2 - 1,
+      -(viewportY / this.viewport.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const hit = this.raycaster.intersectObject(this.billet, false)[0];

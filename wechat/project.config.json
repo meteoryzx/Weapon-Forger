@@ -1,0 +1,9 @@
+{
+  "appid": "touristappid",
+  "compileType": "game",
+  "projectname": "weapon-forger-r0",
+  "setting": {
+    "es6": true,
+    "minified": true
+  }
+}

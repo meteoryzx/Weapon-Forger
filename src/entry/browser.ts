@@ -7,15 +7,24 @@ if (!canvas) {
 }
 
 const application = new GameApplication();
-const view = new ForgeBilletView(canvas);
+const view = new ForgeBilletView(canvas, browserViewport());
 
 view.update(application.getSnapshot());
 canvas.addEventListener("pointerdown", (event) => {
-  const sectionIndex = view.pickSection(event.clientX, event.clientY);
+  const bounds = canvas.getBoundingClientRect();
+  const sectionIndex = view.pickSection(event.clientX - bounds.left, event.clientY - bounds.top);
   if (sectionIndex === null) {
     return;
   }
   view.update(application.applyIntent({ kind: "hammer", sectionIndex, energy: 0.85, lateralBias: 0 }), sectionIndex);
 });
-window.addEventListener("resize", () => view.resize());
+window.addEventListener("resize", () => view.resize(browserViewport()));
 window.addEventListener("beforeunload", () => view.dispose());
+
+function browserViewport() {
+  return {
+    width: window.innerWidth,
+    height: window.innerHeight,
+    pixelRatio: window.devicePixelRatio,
+  };
+}
