@@ -7,22 +7,30 @@ import {
   Group,
   Mesh,
   MeshStandardMaterial,
-  PerspectiveCamera,
+  OrthographicCamera,
   Raycaster,
   Scene,
   Vector2,
   WebGLRenderer,
   BoxGeometry,
+  ConeGeometry,
+  CylinderGeometry,
   DoubleSide,
+  ExtrudeGeometry,
+  Shape,
+  Vector3,
 } from "three";
 
 import type { ForgeSnapshot, ForgeSnapshotSection } from "../forge/index.ts";
 
 const RING_VERTEX_COUNT = 4;
 const VISUAL_THICKNESS_SCALE = 2.4;
+const DESIGN_HALF_HEIGHT = 117;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
+  emissive: "#351008",
+  emissiveIntensity: 0.55,
   vertexColors: true,
   side: DoubleSide,
 });
@@ -42,7 +50,7 @@ export interface RenderViewport {
 export class ForgeBilletView {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
-  private readonly camera = new PerspectiveCamera(38, 1, 0.1, 1000);
+  private readonly camera = new OrthographicCamera(-320, 320, 180, -180, 0.1, 2000);
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
@@ -60,17 +68,23 @@ export class ForgeBilletView {
       canvas: canvas as unknown as HTMLCanvasElement,
       context,
     });
-    this.scene.background = new Color("#171817");
-    this.scene.add(new AmbientLight("#ffbc86", 0.8));
+    this.scene.background = new Color("#1b1d20");
+    this.scene.add(new AmbientLight("#d8dbe0", 1.15));
 
-    const keyLight = new DirectionalLight("#ffd2a8", 3.2);
-    keyLight.position.set(120, 170, 120);
+    const keyLight = new DirectionalLight("#ffd8b2", 3.2);
+    keyLight.position.set(-220, 320, -260);
     this.scene.add(keyLight);
+    const rimLight = new DirectionalLight("#9fb9d0", 1.7);
+    rimLight.position.set(280, 180, 220);
+    this.scene.add(rimLight);
 
-    this.scene.add(this.createAnvil());
+    this.scene.add(this.createAnvilModel());
+    this.scene.add(this.createTongsModel());
+    this.scene.add(this.createHammerModel());
+    this.billet.scale.x = 0.58;
+    this.billet.position.set(-118, 13, 0);
+    this.billet.rotation.y = 0.3;
     this.scene.add(this.billet);
-    this.camera.position.set(258, 174, 265);
-    this.camera.lookAt(165, 0, 0);
     this.resize(viewport);
   }
 
@@ -86,7 +100,15 @@ export class ForgeBilletView {
     this.viewport = viewport;
     this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
     this.renderer.setSize(viewport.width, viewport.height, false);
-    this.camera.aspect = viewport.width / viewport.height;
+    const aspect = viewport.width / viewport.height;
+    const halfHeight = DESIGN_HALF_HEIGHT * Math.max(1, (16 / 9) / aspect);
+    const halfWidth = halfHeight * aspect;
+    this.camera.left = -halfWidth;
+    this.camera.right = halfWidth;
+    this.camera.top = halfHeight;
+    this.camera.bottom = -halfHeight;
+    this.camera.position.set(-260, 300, 600);
+    this.camera.lookAt(0, -28, 0);
     this.camera.updateProjectionMatrix();
     this.render();
   }
@@ -119,18 +141,102 @@ export class ForgeBilletView {
     this.renderer.render(this.scene, this.camera);
   }
 
-  private createAnvil(): Group {
+  private createAnvilModel(): Group {
     const anvil = new Group();
-    const material = new MeshStandardMaterial({ color: "#303536", metalness: 0.8, roughness: 0.52 });
-
-    const face = new Mesh(new BoxGeometry(240, 9, 82), material);
-    face.position.set(165, -24, 0);
-    const waist = new Mesh(new BoxGeometry(94, 52, 54), material);
-    waist.position.set(165, -53, 0);
-    const foot = new Mesh(new BoxGeometry(160, 12, 92), material);
-    foot.position.set(165, -84, 0);
-    anvil.add(face, waist, foot);
+    const steel = new MeshStandardMaterial({ color: "#414852", metalness: 0.52, roughness: 0.4, side: DoubleSide });
+    const edge = new MeshStandardMaterial({ color: "#697482", metalness: 0.48, roughness: 0.3 });
+    const face = new Mesh(new BoxGeometry(320, 16, 150), edge);
+    face.position.set(0, -8, 0);
+    const body = this.createProfile(
+      [[-112, -16], [112, -16], [82, -38], [58, -88], [88, -112], [80, -152], [-80, -152], [-88, -112], [-58, -88], [-82, -38]],
+      94,
+      steel,
+    );
+    const foot = new Mesh(new BoxGeometry(210, 20, 126), edge);
+    foot.position.set(0, -151, 0);
+    const horn = new Mesh(new ConeGeometry(55, 132, 4), steel);
+    horn.position.set(226, -8, 0);
+    horn.rotation.z = -Math.PI / 2;
+    anvil.add(face, body, foot, horn);
     return anvil;
+  }
+
+  private createTongsModel(): Group {
+    const tongs = new Group();
+    const steel = new MeshStandardMaterial({ color: "#59636f", metalness: 0.5, roughness: 0.34 });
+    const pivotPosition = new Vector3(-164, 20, -54);
+    const nearHandleEnd = new Vector3(-330, -92, 120);
+    const farHandleEnd = new Vector3(-312, -72, 76);
+    const nearJawStart = new Vector3(-146, 19, -29);
+    const nearJawEnd = new Vector3(-103, 19, -20);
+    const farJawStart = new Vector3(-146, 19, 23);
+    const farJawEnd = new Vector3(-103, 19, 18);
+    const nearHandle = this.createToolBar(nearHandleEnd, pivotPosition, 11, steel);
+    const farHandle = this.createToolBar(farHandleEnd, pivotPosition, 11, steel);
+    const nearArm = this.createToolBar(pivotPosition, nearJawStart, 11, steel);
+    const farArm = this.createToolBar(pivotPosition, farJawStart, 11, steel);
+    const nearJaw = this.createToolBar(nearJawStart, nearJawEnd, 15, steel);
+    const farJaw = this.createToolBar(farJawStart, farJawEnd, 15, steel);
+    const pivot = new Mesh(new CylinderGeometry(15, 15, 13, 16), steel);
+    pivot.position.copy(pivotPosition);
+
+    tongs.add(nearHandle, farHandle, nearArm, farArm, nearJaw, farJaw, pivot);
+    return tongs;
+  }
+
+  private createHammerModel(): Group {
+    const hammer = new Group();
+    const steel = new MeshStandardMaterial({ color: "#4d5662", metalness: 0.54, roughness: 0.3 });
+    const wood = new MeshStandardMaterial({ color: "#844a29", metalness: 0.06, roughness: 0.48 });
+    const headPosition = new Vector3(105, 112, 34);
+    const head = new Mesh(new BoxGeometry(58, 82, 58), steel);
+    head.position.copy(headPosition);
+    head.rotation.z = -0.16;
+    const handle = this.createRoundToolBar(
+      headPosition.clone().add(new Vector3(18, -30, -8)),
+      new Vector3(330, -12, 180),
+      18,
+      wood,
+    );
+
+    hammer.add(head, handle);
+    return hammer;
+  }
+
+  private createToolBar(start: Vector3, end: Vector3, width: number, material: MeshStandardMaterial): Mesh {
+    const direction = end.clone().sub(start);
+    const bar = new Mesh(new BoxGeometry(direction.length(), width, width), material);
+    bar.position.copy(start).add(end).multiplyScalar(0.5);
+    bar.quaternion.setFromUnitVectors(new Vector3(1, 0, 0), direction.normalize());
+    return bar;
+  }
+
+  private createRoundToolBar(start: Vector3, end: Vector3, diameter: number, material: MeshStandardMaterial): Mesh {
+    const direction = end.clone().sub(start);
+    const bar = new Mesh(new CylinderGeometry(diameter / 2, diameter / 2, direction.length(), 12), material);
+    bar.position.copy(start).add(end).multiplyScalar(0.5);
+    bar.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), direction.normalize());
+    return bar;
+  }
+
+  private createProfile(points: readonly [number, number][], depth: number, material: MeshStandardMaterial): Mesh {
+    const shape = new Shape();
+    const [first, ...rest] = points;
+    if (!first) {
+      throw new Error("A profile needs at least one point.");
+    }
+    shape.moveTo(...first);
+    rest.forEach((point) => shape.lineTo(...point));
+    shape.closePath();
+    const geometry = new ExtrudeGeometry(shape, {
+      depth,
+      bevelEnabled: true,
+      bevelSegments: 1,
+      bevelSize: 2,
+      bevelThickness: 2,
+    });
+    geometry.translate(0, 0, -depth / 2);
+    return new Mesh(geometry, material);
   }
 }
 

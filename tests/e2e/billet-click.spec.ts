@@ -6,8 +6,21 @@ test("clicking the billet changes the rendered canvas", async ({ page }) => {
   await expect(canvas).toBeVisible();
 
   const before = await canvas.screenshot();
-  await canvas.click({ position: { x: 640, y: 360 } });
-  const after = await canvas.screenshot();
+  let changed = false;
 
-  expect(after.equals(before)).toBe(false);
+  for (const y of [220, 260, 300, 340]) {
+    for (const x of [360, 440, 520, 600, 680, 760]) {
+      await canvas.click({ position: { x, y } });
+      const after = await canvas.screenshot();
+      if (!after.equals(before)) {
+        changed = true;
+        break;
+      }
+    }
+    if (changed) {
+      break;
+    }
+  }
+
+  expect(changed).toBe(true);
 });
