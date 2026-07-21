@@ -76,6 +76,15 @@ export interface GrindOperation {
 export type ForgeOperation = HeatOperation | RotateOperation | HammerOperation | QuenchOperation | GrindOperation;
 export type S3aForgeOperation = HeatOperation | RotateOperation | HammerOperation;
 
+export interface HammerIntent {
+  readonly kind: "hammer";
+  readonly sectionIndex: number;
+  readonly energy: number;
+  readonly lateralBias: -1 | 0 | 1;
+}
+
+export type ForgeIntent = HammerIntent;
+
 export interface ForgeState {
   readonly parameterVersion: string;
   readonly phase: ForgePhase;

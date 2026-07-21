@@ -2,6 +2,7 @@ import { DEFAULT_FORGE_MATERIAL, FORGE_PARAMETER_VERSION, FORGE_RULES } from "./
 import type {
   BladeSection,
   ForgeMaterial,
+  ForgeIntent,
   ForgeOperation,
   ForgeSnapshot,
   ForgeState,
@@ -63,6 +64,13 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
     case "quench":
     case "grind":
       throw new Error(`${operation.kind} is reserved for S3c and cannot run in S3a.`);
+  }
+}
+
+export function applyForgeIntent(state: ForgeState, intent: ForgeIntent): ForgeState {
+  switch (intent.kind) {
+    case "hammer":
+      return applyForgeOperation(state, { ...intent });
   }
 }
 

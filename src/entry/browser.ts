@@ -1,20 +1,21 @@
-import { Color, PerspectiveCamera, Scene, WebGLRenderer } from "three";
+import { GameApplication } from "../app/game-application.ts";
+import { ForgeBilletView } from "../render/forge-billet-view.ts";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
 if (!canvas) {
   throw new Error("Missing #game canvas.");
 }
 
-const renderer = new WebGLRenderer({ antialias: true, canvas });
-const scene = new Scene();
-const camera = new PerspectiveCamera();
-scene.background = new Color("#151817");
+const application = new GameApplication();
+const view = new ForgeBilletView(canvas);
 
-function render(): void {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
-  renderer.render(scene, camera);
-}
-
-window.addEventListener("resize", render);
-render();
+view.update(application.getSnapshot());
+canvas.addEventListener("pointerdown", (event) => {
+  const sectionIndex = view.pickSection(event.clientX, event.clientY);
+  if (sectionIndex === null) {
+    return;
+  }
+  view.update(application.applyIntent({ kind: "hammer", sectionIndex, energy: 0.85, lateralBias: 0 }), sectionIndex);
+});
+window.addEventListener("resize", () => view.resize());
+window.addEventListener("beforeunload", () => view.dispose());
