@@ -50,12 +50,22 @@ window.addEventListener("keydown", (event) => {
   if (event.repeat) {
     return;
   }
-  const quarterTurns = event.key.toLowerCase() === "a" ? -1 : event.key.toLowerCase() === "d" ? 1 : null;
-  if (quarterTurns === null) {
+  const key = event.key.toLowerCase();
+  const quarterTurns = key === "a" ? -1 : key === "d" ? 1 : null;
+  if (quarterTurns !== null) {
+    event.preventDefault();
+    view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
     return;
   }
+
+  const step = key === "w" ? -1 : key === "s" ? 1 : null;
+  if (step === null) {
+    return;
+  }
+
   event.preventDefault();
-  view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
+  activePress = null;
+  view.update(application.applyIntent({ kind: "feed", step }));
 });
 window.addEventListener("resize", () => view.resize(browserViewport()));
 window.addEventListener("beforeunload", () => view.dispose());

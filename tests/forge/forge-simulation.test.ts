@@ -39,10 +39,28 @@ describe("forge simulation", () => {
     expect(turned.operations).toEqual([{ kind: "rotate", quarterTurns: 1 }]);
   });
 
+  it("feeds the whole billet along its long axis with clamped ends", () => {
+    let state = createForgeState({ sectionCount: 9 });
+
+    expect(state.workpiece.feedOffset).toBe(0);
+    state = applyForgeIntent(state, { kind: "feed", step: -1 });
+    expect(state.workpiece.feedOffset).toBeLessThan(0);
+    state = applyForgeIntent(state, { kind: "feed", step: 1 });
+    expect(state.workpiece.feedOffset).toBe(0);
+
+    for (let index = 0; index < 12; index += 1) {
+      state = applyForgeIntent(state, { kind: "feed", step: -1 });
+    }
+
+    expect(state.workpiece.feedOffset).toBe(-63);
+    expect(state.operations.at(-1)).toEqual({ kind: "feed", step: -1 });
+  });
+
   it("replays the same serializable start and operation history", () => {
     const initial = createForgeState({ sectionCount: 9 });
     const operations: ForgeOperation[] = [
       { kind: "heat", temperatureC: 950 },
+      { kind: "feed", step: -1 },
       { kind: "hammer", sectionIndex: CENTER, energy: 0.7, lateralBias: -1 },
       { kind: "rotate", quarterTurns: 1 },
       { kind: "hammer", sectionIndex: CENTER, energy: 0.45, lateralBias: 0 },
@@ -164,6 +182,7 @@ describe("forge simulation", () => {
 
     expect(() => applyForgeOperation(initial, { kind: "heat", temperatureC: 1401 })).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "rotate", quarterTurns: 2 } as unknown as ForgeOperation)).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "feed", step: 0 } as unknown as ForgeOperation)).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 3 } as unknown as ForgeOperation)).toThrow();
     expect(initial.operations).toHaveLength(0);
     expect(center(initial).integrity).toBe(1);

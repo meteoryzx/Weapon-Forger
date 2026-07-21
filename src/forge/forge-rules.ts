@@ -31,6 +31,7 @@ export const FORGE_RULES = {
   thinSectionDamage: 0.12,
   lateralBendAtFullEnergy: 0.8,
   lengthShareOfSpread: 0.6,
+  feedStepLength: 14,
   overheatDamagePerHeat: 0.22,
   neighbourKernel: [0.25, 1, 0.25] as const,
 } as const;

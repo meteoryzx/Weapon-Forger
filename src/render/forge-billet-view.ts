@@ -102,6 +102,7 @@ export class ForgeBilletView {
   update(snapshot: ForgeSnapshot, impactSectionIndex: number | null = null): void {
     this.snapshot = snapshot;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
+    this.billet.position.x = snapshot.feedOffset;
     const nextGeometry = createBilletGeometry(snapshot.sections, impactSectionIndex);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
@@ -268,7 +269,8 @@ function createBilletGeometry(
 
   for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
     const profile = profileAtRing(ringIndex, sections);
-    const color = temperatureColor(profile.temperatureC, impactSectionIndex !== null && (ringIndex === impactSectionIndex || ringIndex === impactSectionIndex + 1));
+    const isImpacted = impactSectionIndex !== null && (ringIndex === impactSectionIndex || ringIndex === impactSectionIndex + 1);
+    const color = temperatureColor(profile.temperatureC, isImpacted);
     writeRing(positions, colors, ringIndex, profile, color);
   }
 
@@ -335,9 +337,20 @@ function writeRing(
   vertices.forEach((vertex, index) => {
     const offset = start + index * 3;
     positions.set(vertex, offset);
-    colors.set([color.r, color.g, color.b], offset);
+    const faceTint = FACE_TINTS[index];
+    if (!faceTint) {
+      throw new Error("Missing face tint.");
+    }
+    colors.set([color.r * faceTint[0], color.g * faceTint[1], color.b * faceTint[2]], offset);
   });
 }
+
+const FACE_TINTS: readonly [number, number, number][] = [
+  [0.72, 0.82, 1.05],
+  [0.92, 0.76, 0.58],
+  [1.18, 1.06, 0.78],
+  [0.58, 0.68, 0.88],
+];
 
 function temperatureColor(temperatureC: number, isImpacted: boolean): Color {
   const heat = Math.min(1, Math.max(0, (temperatureC - 450) / 550));

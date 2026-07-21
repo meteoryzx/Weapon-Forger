@@ -30,6 +30,7 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
     workpiece: {
       id: "workpiece-0",
       orientationQuarterTurns: 0,
+      feedOffset: 0,
       sections,
       joints: [],
     },
@@ -59,6 +60,18 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
           orientationQuarterTurns: rotate(state.workpiece.orientationQuarterTurns, operation.quarterTurns),
         },
       }, operation);
+    case "feed":
+      assertFeedStep(operation.step);
+      return appendOperation({
+        ...state,
+        workpiece: {
+          ...state.workpiece,
+          feedOffset: clampFeedOffset(
+            state.workpiece.feedOffset + operation.step * FORGE_RULES.feedStepLength,
+            state.workpiece.sections,
+          ),
+        },
+      }, operation);
     case "hammer":
       return appendOperation(applyHammer(state, operation), operation);
     case "quench":
@@ -73,6 +86,8 @@ export function applyForgeIntent(state: ForgeState, intent: ForgeIntent): ForgeS
       return applyForgeOperation(state, { ...intent });
     case "rotate":
       return applyForgeOperation(state, { ...intent });
+    case "feed":
+      return applyForgeOperation(state, { ...intent });
   }
 }
 
@@ -84,6 +99,7 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
   return {
     parameterVersion: state.parameterVersion,
     orientationQuarterTurns: state.workpiece.orientationQuarterTurns,
+    feedOffset: state.workpiece.feedOffset,
     hasCracks: state.workpiece.sections.some((section) => section.cracked),
     hasOverheatedSections: state.workpiece.sections.some((section) => section.overheated),
     sections: state.workpiece.sections.map((section) => ({
@@ -279,6 +295,22 @@ function assertQuarterTurns(quarterTurns: number): void {
   if (quarterTurns !== -1 && quarterTurns !== 1) {
     throw new Error("Rotation must be exactly one quarter turn in either direction.");
   }
+}
+
+function assertFeedStep(step: number): void {
+  if (step !== -1 && step !== 1) {
+    throw new Error("Feed must move exactly one step in either direction.");
+  }
+}
+
+function clampFeedOffset(feedOffset: number, sections: readonly BladeSection[]): number {
+  const first = sections[0];
+  const last = sections.at(-1);
+  if (!first || !last) {
+    return 0;
+  }
+  const halfLength = (last.position + last.length / 2 - (first.position - first.length / 2)) / 2;
+  return clamp(feedOffset, -halfLength, halfLength);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

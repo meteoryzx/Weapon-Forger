@@ -40,6 +40,7 @@ export interface JointState {
 export interface WorkpieceState {
   readonly id: string;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
+  readonly feedOffset: number;
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
 }
@@ -52,6 +53,11 @@ export interface HeatOperation {
 export interface RotateOperation {
   readonly kind: "rotate";
   readonly quarterTurns: 1 | -1;
+}
+
+export interface FeedOperation {
+  readonly kind: "feed";
+  readonly step: 1 | -1;
 }
 
 export interface HammerOperation {
@@ -73,8 +79,8 @@ export interface GrindOperation {
   readonly amount: number;
 }
 
-export type ForgeOperation = HeatOperation | RotateOperation | HammerOperation | QuenchOperation | GrindOperation;
-export type S3aForgeOperation = HeatOperation | RotateOperation | HammerOperation;
+export type ForgeOperation = HeatOperation | RotateOperation | FeedOperation | HammerOperation | QuenchOperation | GrindOperation;
+export type S3aForgeOperation = HeatOperation | RotateOperation | FeedOperation | HammerOperation;
 
 export interface HammerIntent {
   readonly kind: "hammer";
@@ -88,7 +94,12 @@ export interface RotateIntent {
   readonly quarterTurns: 1 | -1;
 }
 
-export type ForgeIntent = HammerIntent | RotateIntent;
+export interface FeedIntent {
+  readonly kind: "feed";
+  readonly step: 1 | -1;
+}
+
+export type ForgeIntent = HammerIntent | RotateIntent | FeedIntent;
 
 export interface ForgeState {
   readonly parameterVersion: string;
@@ -115,6 +126,7 @@ export interface ForgeSnapshotSection {
 export interface ForgeSnapshot {
   readonly parameterVersion: string;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
+  readonly feedOffset: number;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;

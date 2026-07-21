@@ -41,3 +41,18 @@ test("turning the billet four times returns to its initial face", async ({ page 
   expect(turned.equals(initial)).toBe(false);
   expect(restored.equals(initial)).toBe(true);
 });
+
+test("feeding moves the whole billet on the anvil", async ({ page }) => {
+  await page.goto("/");
+  const canvas = page.locator("#game");
+  await expect(canvas).toBeVisible();
+
+  const initial = await canvas.screenshot();
+  await page.keyboard.press("w");
+  const fed = await canvas.screenshot();
+  await page.keyboard.press("s");
+  const restored = await canvas.screenshot();
+
+  expect(fed.equals(initial)).toBe(false);
+  expect(restored.equals(initial)).toBe(true);
+});
