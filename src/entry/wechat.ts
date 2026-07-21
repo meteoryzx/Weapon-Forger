@@ -12,13 +12,14 @@ const systemInfo = wxApi.getSystemInfoSync();
 const canvas = wxApi.createCanvas();
 canvas.width = systemInfo.windowWidth * systemInfo.pixelRatio;
 canvas.height = systemInfo.windowHeight * systemInfo.pixelRatio;
-
-const application = new GameApplication();
-const view = new ForgeBilletView(canvas, {
+const viewport = {
   width: systemInfo.windowWidth,
   height: systemInfo.windowHeight,
   pixelRatio: systemInfo.pixelRatio,
-});
+};
+
+const application = new GameApplication();
+const view = new ForgeBilletView(canvas, viewport);
 
 view.update(application.getSnapshot());
 let activePress: { readonly sectionIndex: number; readonly startedAtMs: number } | null = null;
@@ -28,6 +29,13 @@ wxApi.onTouchStart((event) => {
   if (!touch) {
     return;
   }
+  const quarterTurns = view.pickRotateControl(touch.clientX, touch.clientY);
+  if (quarterTurns !== null) {
+    activePress = null;
+    view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
+    return;
+  }
+
   const sectionIndex = view.pickSection(touch.clientX, touch.clientY);
   if (sectionIndex === null) {
     return;

@@ -15,7 +15,16 @@ let activePress: { readonly sectionIndex: number; readonly startedAtMs: number }
 
 canvas.addEventListener("pointerdown", (event) => {
   const bounds = canvas.getBoundingClientRect();
-  const sectionIndex = view.pickSection(event.clientX - bounds.left, event.clientY - bounds.top);
+  const viewportX = event.clientX - bounds.left;
+  const viewportY = event.clientY - bounds.top;
+  const quarterTurns = view.pickRotateControl(viewportX, viewportY);
+  if (quarterTurns !== null) {
+    activePress = null;
+    view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
+    return;
+  }
+
+  const sectionIndex = view.pickSection(viewportX, viewportY);
   if (sectionIndex === null) {
     return;
   }

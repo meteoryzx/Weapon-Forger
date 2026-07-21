@@ -6,10 +6,13 @@ import {
   DirectionalLight,
   Group,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   OrthographicCamera,
   Raycaster,
   Scene,
+  ShapeGeometry,
   Vector2,
   WebGLRenderer,
   BoxGeometry,
@@ -26,6 +29,7 @@ import type { ForgeSnapshot, ForgeSnapshotSection } from "../forge/index.ts";
 const RING_VERTEX_COUNT = 4;
 const VISUAL_THICKNESS_SCALE = 2.4;
 const DESIGN_HALF_HEIGHT = 117;
+const ROTATE_CONTROL_SIZE = 72;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
@@ -56,6 +60,7 @@ export class ForgeBilletView {
   // The rig establishes the fixed presentation angle; the billet spins inside it on its own long axis.
   private readonly billetRig = new Group();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
+  private readonly rotateControls: { readonly direction: -1 | 1; readonly group: Group }[] = [];
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -82,6 +87,10 @@ export class ForgeBilletView {
 
     this.scene.add(this.createAnvilModel());
     this.scene.add(this.createHammerModel());
+    const rotateLeftControl = { direction: -1 as const, group: this.createRotateControl(-1) };
+    const rotateRightControl = { direction: 1 as const, group: this.createRotateControl(1) };
+    this.rotateControls.push(rotateLeftControl, rotateRightControl);
+    this.scene.add(rotateLeftControl.group, rotateRightControl.group);
     this.billet.scale.x = 0.58;
     this.billetRig.position.set(-118, 13, 0);
     this.billetRig.rotation.y = 0.3;
@@ -120,18 +129,31 @@ export class ForgeBilletView {
     if (!this.snapshot) {
       return null;
     }
-    this.pointer.set(
-      (viewportX / this.viewport.width) * 2 - 1,
-      -(viewportY / this.viewport.height) * 2 + 1,
-    );
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hit = this.raycaster.intersectObject(this.billet, false)[0];
+    const hit = this.pickObject(viewportX, viewportY, [this.billet], false);
     if (!hit) {
       return null;
     }
 
     const localPoint = this.billet.worldToLocal(hit.point.clone());
     return sectionIndexAt(localPoint.x, this.snapshot.sections);
+  }
+
+  pickRotateControl(viewportX: number, viewportY: number): -1 | 1 | null {
+    for (const control of this.rotateControls) {
+      if (this.pickObject(viewportX, viewportY, [control.group], true)) {
+        return control.direction;
+      }
+    }
+    return null;
+  }
+
+  private pickObject(viewportX: number, viewportY: number, objects: Object3D[], recursive: boolean) {
+    this.pointer.set(
+      (viewportX / this.viewport.width) * 2 - 1,
+      -(viewportY / this.viewport.height) * 2 + 1,
+    );
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    return this.raycaster.intersectObjects(objects, recursive)[0] ?? null;
   }
 
   dispose(): void {
@@ -142,6 +164,21 @@ export class ForgeBilletView {
 
   private render(): void {
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private createRotateControl(direction: -1 | 1): Group {
+    const group = new Group();
+    const panel = new Mesh(
+      new BoxGeometry(ROTATE_CONTROL_SIZE, ROTATE_CONTROL_SIZE, 1),
+      new MeshBasicMaterial({ color: "#29323a" }),
+    );
+    const arrow = new Mesh(createArrowGeometry(direction), new MeshBasicMaterial({ color: "#f3c36d" }));
+    panel.position.z = -72;
+    arrow.position.z = -71;
+    group.position.set(direction < 0 ? -142 : 142, -76, 122);
+    group.rotation.x = -Math.PI / 2;
+    group.add(panel, arrow);
+    return group;
   }
 
   private createAnvilModel(): Group {
@@ -306,6 +343,21 @@ function temperatureColor(temperatureC: number, isImpacted: boolean): Color {
   const heat = Math.min(1, Math.max(0, (temperatureC - 450) / 550));
   const color = new Color("#5a2419").lerp(new Color("#ffad45"), heat);
   return isImpacted ? color.lerp(new Color("#fff2ae"), 0.75) : color;
+}
+
+function createArrowGeometry(direction: -1 | 1): ShapeGeometry {
+  const shape = new Shape();
+  const points: [number, number][] = direction < 0
+    ? [[-28, 0], [-1, -22], [-1, -8], [12, -8], [12, 8], [-1, 8], [-1, 22]]
+    : [[28, 0], [1, -22], [1, -8], [-12, -8], [-12, 8], [1, 8], [1, 22]];
+  const [first, ...rest] = points;
+  if (!first) {
+    throw new Error("A rotate arrow needs at least one point.");
+  }
+  shape.moveTo(first[0], first[1]);
+  rest.forEach((point) => shape.lineTo(point[0], point[1]));
+  shape.closePath();
+  return new ShapeGeometry(shape);
 }
 
 function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSection[]): number | null {
