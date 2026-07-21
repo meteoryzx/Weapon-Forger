@@ -23,4 +23,6 @@ export interface WechatApi {
   createCanvas(): WechatCanvas;
   getSystemInfoSync(): WechatSystemInfo;
   onTouchStart(handler: (event: WechatTouchEvent) => void): void;
+  onTouchEnd(handler: (event: WechatTouchEvent) => void): void;
+  onTouchCancel(handler: (event: WechatTouchEvent) => void): void;
 }

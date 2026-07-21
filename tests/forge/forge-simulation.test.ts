@@ -56,6 +56,12 @@ describe("forge simulation", () => {
     expect(center(cold).stress).toBeGreaterThan(center(hot).stress);
   });
 
+  it("gives a full-force hot hammer blow a clearly visible local compression", () => {
+    const hot = forgeAt(950, [{ kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 }]);
+
+    expect(center(hot).thickness).toBeLessThan(7.2);
+  });
+
   it("changes the affected axis after a quarter-turn", () => {
     const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 0.8, lateralBias: 0 };
     const original = center(createForgeState({ sectionCount: 9 }));

@@ -1,4 +1,5 @@
 import { GameApplication } from "../app/game-application.ts";
+import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
 import type { WechatApi } from "../platform/wechat-types.ts";
 import { ForgeBilletView } from "../render/forge-billet-view.ts";
 
@@ -20,6 +21,8 @@ const view = new ForgeBilletView(canvas, {
 });
 
 view.update(application.getSnapshot());
+let activePress: { readonly sectionIndex: number; readonly startedAtMs: number } | null = null;
+
 wxApi.onTouchStart((event) => {
   const touch = event.touches[0];
   if (!touch) {
@@ -29,5 +32,17 @@ wxApi.onTouchStart((event) => {
   if (sectionIndex === null) {
     return;
   }
-  view.update(application.applyIntent({ kind: "hammer", sectionIndex, energy: 0.85, lateralBias: 0 }), sectionIndex);
+  activePress = { sectionIndex, startedAtMs: Date.now() };
+});
+wxApi.onTouchEnd(() => {
+  if (!activePress) {
+    return;
+  }
+  const { sectionIndex, startedAtMs } = activePress;
+  activePress = null;
+  const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
+  view.update(application.applyIntent({ kind: "hammer", sectionIndex, energy, lateralBias: 0 }), sectionIndex);
+});
+wxApi.onTouchCancel(() => {
+  activePress = null;
 });

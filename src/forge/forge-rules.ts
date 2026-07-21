@@ -1,6 +1,6 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
-export const FORGE_PARAMETER_VERSION = "s3a-1";
+export const FORGE_PARAMETER_VERSION = "r1a-1";
 
 export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
   id: "simulation-steel",
@@ -19,7 +19,7 @@ export const FORGE_RULES = {
   initialSectionWidth: 32,
   initialSectionThickness: 8,
   maxCompressionPerHit: 0.22,
-  deformationAtFullPlasticity: 0.055,
+  deformationAtFullPlasticity: 0.132,
   deformationAtZeroPlasticity: 0.003,
   coldStressAtFullEnergy: 0.98,
   hotStressAtFullEnergy: 0.08,
