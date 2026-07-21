@@ -83,7 +83,12 @@ export interface HammerIntent {
   readonly lateralBias: -1 | 0 | 1;
 }
 
-export type ForgeIntent = HammerIntent;
+export interface RotateIntent {
+  readonly kind: "rotate";
+  readonly quarterTurns: 1 | -1;
+}
+
+export type ForgeIntent = HammerIntent | RotateIntent;
 
 export interface ForgeState {
   readonly parameterVersion: string;

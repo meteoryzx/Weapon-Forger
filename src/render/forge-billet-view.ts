@@ -53,6 +53,8 @@ export class ForgeBilletView {
   private readonly camera = new OrthographicCamera(-320, 320, 180, -180, 0.1, 2000);
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
+  // The rig establishes the fixed presentation angle; the billet spins inside it on its own long axis.
+  private readonly billetRig = new Group();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
@@ -79,17 +81,18 @@ export class ForgeBilletView {
     this.scene.add(rimLight);
 
     this.scene.add(this.createAnvilModel());
-    this.scene.add(this.createTongsModel());
     this.scene.add(this.createHammerModel());
     this.billet.scale.x = 0.58;
-    this.billet.position.set(-118, 13, 0);
-    this.billet.rotation.y = 0.3;
-    this.scene.add(this.billet);
+    this.billetRig.position.set(-118, 13, 0);
+    this.billetRig.rotation.y = 0.3;
+    this.billetRig.add(this.billet);
+    this.scene.add(this.billetRig);
     this.resize(viewport);
   }
 
   update(snapshot: ForgeSnapshot, impactSectionIndex: number | null = null): void {
     this.snapshot = snapshot;
+    this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     const nextGeometry = createBilletGeometry(snapshot.sections, impactSectionIndex);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
@@ -159,29 +162,6 @@ export class ForgeBilletView {
     horn.rotation.z = -Math.PI / 2;
     anvil.add(face, body, foot, horn);
     return anvil;
-  }
-
-  private createTongsModel(): Group {
-    const tongs = new Group();
-    const steel = new MeshStandardMaterial({ color: "#59636f", metalness: 0.5, roughness: 0.34 });
-    const pivotPosition = new Vector3(-164, 20, -54);
-    const nearHandleEnd = new Vector3(-330, -92, 120);
-    const farHandleEnd = new Vector3(-312, -72, 76);
-    const nearJawStart = new Vector3(-146, 19, -29);
-    const nearJawEnd = new Vector3(-103, 19, -20);
-    const farJawStart = new Vector3(-146, 19, 23);
-    const farJawEnd = new Vector3(-103, 19, 18);
-    const nearHandle = this.createToolBar(nearHandleEnd, pivotPosition, 11, steel);
-    const farHandle = this.createToolBar(farHandleEnd, pivotPosition, 11, steel);
-    const nearArm = this.createToolBar(pivotPosition, nearJawStart, 11, steel);
-    const farArm = this.createToolBar(pivotPosition, farJawStart, 11, steel);
-    const nearJaw = this.createToolBar(nearJawStart, nearJawEnd, 15, steel);
-    const farJaw = this.createToolBar(farJawStart, farJawEnd, 15, steel);
-    const pivot = new Mesh(new CylinderGeometry(15, 15, 13, 16), steel);
-    pivot.position.copy(pivotPosition);
-
-    tongs.add(nearHandle, farHandle, nearArm, farArm, nearJaw, farJaw, pivot);
-    return tongs;
   }
 
   private createHammerModel(): Group {

@@ -71,6 +71,8 @@ export function applyForgeIntent(state: ForgeState, intent: ForgeIntent): ForgeS
   switch (intent.kind) {
     case "hammer":
       return applyForgeOperation(state, { ...intent });
+    case "rotate":
+      return applyForgeOperation(state, { ...intent });
   }
 }
 

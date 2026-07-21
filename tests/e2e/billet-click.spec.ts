@@ -24,3 +24,20 @@ test("clicking the billet changes the rendered canvas", async ({ page }) => {
 
   expect(changed).toBe(true);
 });
+
+test("turning the billet four times returns to its initial face", async ({ page }) => {
+  await page.goto("/");
+  const canvas = page.locator("#game");
+  await expect(canvas).toBeVisible();
+
+  const initial = await canvas.screenshot();
+  await page.keyboard.press("d");
+  const turned = await canvas.screenshot();
+  await page.keyboard.press("d");
+  await page.keyboard.press("d");
+  await page.keyboard.press("d");
+  const restored = await canvas.screenshot();
+
+  expect(turned.equals(initial)).toBe(false);
+  expect(restored.equals(initial)).toBe(true);
+});

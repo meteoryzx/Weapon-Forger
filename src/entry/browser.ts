@@ -37,6 +37,17 @@ canvas.addEventListener("pointerup", (event) => {
 canvas.addEventListener("pointercancel", () => {
   activePress = null;
 });
+window.addEventListener("keydown", (event) => {
+  if (event.repeat) {
+    return;
+  }
+  const quarterTurns = event.key.toLowerCase() === "a" ? -1 : event.key.toLowerCase() === "d" ? 1 : null;
+  if (quarterTurns === null) {
+    return;
+  }
+  event.preventDefault();
+  view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
+});
 window.addEventListener("resize", () => view.resize(browserViewport()));
 window.addEventListener("beforeunload", () => view.dispose());
 

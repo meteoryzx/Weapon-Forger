@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyForgeOperation,
+  applyForgeIntent,
   createForgeSnapshot,
   createForgeState,
   replayForgeState,
@@ -30,6 +31,14 @@ function center(state: ForgeState) {
 }
 
 describe("forge simulation", () => {
+  it("turns a workpiece through a replayable rotate intent", () => {
+    const initial = createForgeState({ sectionCount: 9 });
+    const turned = applyForgeIntent(initial, { kind: "rotate", quarterTurns: 1 });
+
+    expect(turned.workpiece.orientationQuarterTurns).toBe(1);
+    expect(turned.operations).toEqual([{ kind: "rotate", quarterTurns: 1 }]);
+  });
+
   it("replays the same serializable start and operation history", () => {
     const initial = createForgeState({ sectionCount: 9 });
     const operations: ForgeOperation[] = [
