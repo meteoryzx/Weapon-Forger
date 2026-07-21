@@ -12,7 +12,7 @@ export class GameApplication {
   private state: ForgeState;
 
   constructor() {
-    const initial = createForgeState({ sectionCount: 24 });
+    const initial = createForgeState();
     // R0 keeps the billet in a visible forging state so click-to-deform can be verified.
     this.state = applyForgeOperation(initial, { kind: "heat", temperatureC: 950 });
   }

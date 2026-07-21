@@ -22,7 +22,7 @@ const application = new GameApplication();
 const view = new ForgeBilletView(canvas, viewport);
 
 view.update(application.getSnapshot());
-let activePress: { readonly sectionIndex: number; readonly startedAtMs: number } | null = null;
+let activePress: { readonly sectionIndex: number; readonly faceBias: number; readonly startedAtMs: number } | null = null;
 
 wxApi.onTouchStart((event) => {
   const touch = event.touches[0];
@@ -36,20 +36,20 @@ wxApi.onTouchStart((event) => {
     return;
   }
 
-  const sectionIndex = view.pickSection(touch.clientX, touch.clientY);
-  if (sectionIndex === null) {
+  const target = view.pickHammerTarget(touch.clientX, touch.clientY);
+  if (!target) {
     return;
   }
-  activePress = { sectionIndex, startedAtMs: Date.now() };
+  activePress = { ...target, startedAtMs: Date.now() };
 });
 wxApi.onTouchEnd(() => {
   if (!activePress) {
     return;
   }
-  const { sectionIndex, startedAtMs } = activePress;
+  const { sectionIndex, faceBias, startedAtMs } = activePress;
   activePress = null;
   const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  view.update(application.applyIntent({ kind: "hammer", sectionIndex, energy, lateralBias: 0 }), sectionIndex);
+  view.update(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }), sectionIndex);
 });
 wxApi.onTouchCancel(() => {
   activePress = null;

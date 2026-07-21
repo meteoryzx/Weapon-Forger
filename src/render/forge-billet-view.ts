@@ -24,9 +24,9 @@ import {
   Vector3,
 } from "three";
 
-import type { ForgeSnapshot, ForgeSnapshotSection } from "../forge/index.ts";
+import type { ForgeSnapshot, ForgeSnapshotSection, WorkpieceGrid } from "../forge/index.ts";
 
-const RING_VERTEX_COUNT = 4;
+const VISUAL_SUBDIVISIONS_PER_SECTION = 4;
 const VISUAL_THICKNESS_SCALE = 2.4;
 const DESIGN_HALF_HEIGHT = 117;
 const ROTATE_CONTROL_SIZE = 72;
@@ -49,6 +49,11 @@ export interface RenderViewport {
   readonly width: number;
   readonly height: number;
   readonly pixelRatio: number;
+}
+
+export interface HammerPickTarget {
+  readonly sectionIndex: number;
+  readonly faceBias: number;
 }
 
 export class ForgeBilletView {
@@ -108,7 +113,7 @@ export class ForgeBilletView {
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset;
     this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
-    const nextGeometry = createBilletGeometry(snapshot.sections, impactSectionIndex);
+    const nextGeometry = createBilletGeometry(snapshot, impactSectionIndex);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
     this.render();
@@ -133,6 +138,10 @@ export class ForgeBilletView {
   }
 
   pickSection(viewportX: number, viewportY: number): number | null {
+    return this.pickHammerTarget(viewportX, viewportY)?.sectionIndex ?? null;
+  }
+
+  pickHammerTarget(viewportX: number, viewportY: number): HammerPickTarget | null {
     if (!this.snapshot) {
       return null;
     }
@@ -142,7 +151,27 @@ export class ForgeBilletView {
     }
 
     const localPoint = this.billet.worldToLocal(hit.point.clone());
-    return sectionIndexAt(localPoint.x, this.snapshot.sections);
+    const sectionIndex = sectionIndexAt(localPoint.x, this.snapshot.sections);
+    if (sectionIndex === null) {
+      return null;
+    }
+    const section = this.snapshot.sections[sectionIndex];
+    if (!section) {
+      return null;
+    }
+    const turns = this.snapshot.orientationQuarterTurns;
+    const faceBias = turns % 2 === 0
+      ? inverseLerp(
+        section.lateralOffset - section.width / 2,
+        section.lateralOffset + section.width / 2,
+        localPoint.z,
+      )
+      : inverseLerp(
+        (section.verticalOffset - section.thickness / 2) * VISUAL_THICKNESS_SCALE,
+        (section.verticalOffset + section.thickness / 2) * VISUAL_THICKNESS_SCALE,
+        localPoint.y,
+      );
+    return { sectionIndex, faceBias: clamp(faceBias, 0, 1) };
   }
 
   pickRotateControl(viewportX: number, viewportY: number): -1 | 1 | null {
@@ -276,103 +305,289 @@ export class ForgeBilletView {
 }
 
 function createBilletGeometry(
-  sections: readonly ForgeSnapshotSection[],
+  snapshot: ForgeSnapshot,
   impactSectionIndex: number | null,
 ): BufferGeometry {
-  const ringCount = sections.length + 1;
-  const positions = new Float32Array(ringCount * RING_VERTEX_COUNT * 3);
-  const colors = new Float32Array(ringCount * RING_VERTEX_COUNT * 3);
+  const sections = snapshot.sections;
+  const sectionProfiles = sections.map((section) => sectionPerimeter(section, snapshot.grid));
+  const perimeterVertexCount = (snapshot.grid.widthBlocks + snapshot.grid.heightBlocks) * 2;
+  const ringCount = sections.length * VISUAL_SUBDIVISIONS_PER_SECTION + 1;
+  const positions: number[] = [];
+  const colors: number[] = [];
   const indices: number[] = [];
 
   for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
-    const profile = profileAtRing(ringIndex, sections);
-    const isImpacted = impactSectionIndex !== null && (ringIndex === impactSectionIndex || ringIndex === impactSectionIndex + 1);
-    const color = temperatureColor(profile.temperatureC, isImpacted);
-    writeRing(positions, colors, ringIndex, profile, color);
+    const profile = profileAtRing(ringIndex, sections, sectionProfiles);
+    const impact = impactIntensityAtRing(ringIndex, impactSectionIndex);
+    const color = temperatureColor(profile.temperatureC, impact);
+    profile.points.forEach((point, pointIndex) => {
+      positions.push(profile.position, point.y * VISUAL_THICKNESS_SCALE, point.z);
+      const tint = perimeterTint(pointIndex, snapshot.grid);
+      colors.push(color.r * tint, color.g * tint, color.b * tint);
+    });
   }
 
-  for (let sectionIndex = 0; sectionIndex < sections.length; sectionIndex += 1) {
-    const start = sectionIndex * RING_VERTEX_COUNT;
-    const end = (sectionIndex + 1) * RING_VERTEX_COUNT;
-    for (let side = 0; side < RING_VERTEX_COUNT; side += 1) {
-      const nextSide = (side + 1) % RING_VERTEX_COUNT;
-      indices.push(start + side, end + side, end + nextSide, start + side, end + nextSide, start + nextSide);
+  for (let ringIndex = 0; ringIndex < ringCount - 1; ringIndex += 1) {
+    const start = ringIndex * perimeterVertexCount;
+    const end = (ringIndex + 1) * perimeterVertexCount;
+    for (let pointIndex = 0; pointIndex < perimeterVertexCount; pointIndex += 1) {
+      const nextPoint = (pointIndex + 1) % perimeterVertexCount;
+      indices.push(start + pointIndex, end + pointIndex, end + nextPoint);
+      indices.push(start + pointIndex, end + nextPoint, start + nextPoint);
     }
   }
 
+  appendEndCap(positions, colors, indices, 0, perimeterVertexCount, false);
+  appendEndCap(positions, colors, indices, (ringCount - 1) * perimeterVertexCount, perimeterVertexCount, true);
+
   const geometry = new BufferGeometry();
-  geometry.setAttribute("position", new BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new BufferAttribute(colors, 3));
+  geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
+  geometry.setAttribute("color", new BufferAttribute(new Float32Array(colors), 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
 }
 
-function profileAtRing(index: number, sections: readonly ForgeSnapshotSection[]): ForgeSnapshotSection {
-  const first = sections[0];
-  const last = sections.at(-1);
-  if (!first || !last) {
+interface PerimeterPoint {
+  readonly y: number;
+  readonly z: number;
+}
+
+interface PerimeterProfile {
+  readonly position: number;
+  readonly temperatureC: number;
+  readonly points: readonly PerimeterPoint[];
+}
+
+function sectionPerimeter(section: ForgeSnapshotSection, grid: WorkpieceGrid): PerimeterProfile {
+  const points: PerimeterPoint[] = [];
+  const topHeight = grid.heightBlocks - 1;
+  const rightWidth = grid.widthBlocks - 1;
+
+  for (let boundary = 0; boundary < grid.widthBlocks; boundary += 1) {
+    points.push({
+      y: horizontalSurface(section, topHeight, boundary, "top"),
+      z: horizontalBoundary(section, topHeight, boundary),
+    });
+  }
+  for (let boundary = grid.heightBlocks; boundary > 0; boundary -= 1) {
+    points.push({
+      y: verticalBoundary(section, rightWidth, boundary),
+      z: verticalSurface(section, rightWidth, boundary, "right"),
+    });
+  }
+  for (let boundary = grid.widthBlocks; boundary > 0; boundary -= 1) {
+    points.push({
+      y: horizontalSurface(section, 0, boundary, "bottom"),
+      z: horizontalBoundary(section, 0, boundary),
+    });
+  }
+  for (let boundary = 0; boundary < grid.heightBlocks; boundary += 1) {
+    points.push({
+      y: verticalBoundary(section, 0, boundary),
+      z: verticalSurface(section, 0, boundary, "left"),
+    });
+  }
+
+  return { position: section.position, temperatureC: section.temperatureC, points };
+}
+
+function profileAtRing(
+  ringIndex: number,
+  sections: readonly ForgeSnapshotSection[],
+  profiles: readonly PerimeterProfile[],
+): PerimeterProfile {
+  const firstSection = sections[0];
+  const lastSection = sections.at(-1);
+  const firstProfile = profiles[0];
+  const lastProfile = profiles.at(-1);
+  if (!firstSection || !lastSection || !firstProfile || !lastProfile) {
     throw new Error("A billet needs at least one section to render.");
   }
-  if (index === 0) {
-    return { ...first, position: first.position - first.length / 2 };
+  if (ringIndex === 0) {
+    return { ...firstProfile, position: firstSection.position - firstSection.length / 2 };
   }
-  if (index === sections.length) {
-    return { ...last, position: last.position + last.length / 2 };
+  const finalRingIndex = sections.length * VISUAL_SUBDIVISIONS_PER_SECTION;
+  if (ringIndex === finalRingIndex) {
+    return { ...lastProfile, position: lastSection.position + lastSection.length / 2 };
   }
-  const previous = sections[index - 1];
-  const next = sections[index];
-  if (!previous || !next) {
-    throw new Error("Missing a billet section at a shared ring.");
-  }
+
+  const sample = ringIndex / VISUAL_SUBDIVISIONS_PER_SECTION - 0.5;
+  const leftIndex = Math.floor(sample);
+  const t = smoothStep(sample - leftIndex);
+  const start = profileAtClamped(profiles, leftIndex);
+  const points = start.points.map((_, pointIndex) => ({
+    y: smoothProfileCoordinate(profiles, leftIndex, pointIndex, "y", t),
+    z: smoothProfileCoordinate(profiles, leftIndex, pointIndex, "z", t),
+  }));
   return {
-    ...previous,
-    position: previous.position + previous.length / 2,
-    width: (previous.width + next.width) / 2,
-    thickness: (previous.thickness + next.thickness) / 2,
-    temperatureC: (previous.temperatureC + next.temperatureC) / 2,
-    lateralOffset: (previous.lateralOffset + next.lateralOffset) / 2,
+    position: lerp(ringPositionAt(sections, leftIndex + 1), ringPositionAt(sections, leftIndex + 2), t),
+    temperatureC: smoothScalar(profiles, leftIndex, "temperatureC", t),
+    points,
   };
 }
 
-function writeRing(
-  positions: Float32Array,
-  colors: Float32Array,
-  ringIndex: number,
-  section: ForgeSnapshotSection,
-  color: Color,
-): void {
-  const halfWidth = section.width / 2;
-  const halfThickness = (section.thickness * VISUAL_THICKNESS_SCALE) / 2;
-  const vertices = [
-    [section.position, -halfThickness, section.lateralOffset - halfWidth],
-    [section.position, -halfThickness, section.lateralOffset + halfWidth],
-    [section.position, halfThickness, section.lateralOffset + halfWidth],
-    [section.position, halfThickness, section.lateralOffset - halfWidth],
-  ];
-  const start = ringIndex * RING_VERTEX_COUNT * 3;
-  vertices.forEach((vertex, index) => {
-    const offset = start + index * 3;
-    positions.set(vertex, offset);
-    const faceTint = FACE_TINTS[index];
-    if (!faceTint) {
-      throw new Error("Missing face tint.");
-    }
-    colors.set([color.r * faceTint[0], color.g * faceTint[1], color.b * faceTint[2]], offset);
-  });
+function horizontalBoundary(section: ForgeSnapshotSection, heightIndex: number, boundary: number): number {
+  const touching = section.blocks.filter(
+    (block) => block.heightIndex === heightIndex
+      && (block.widthIndex === boundary - 1 || block.widthIndex === boundary),
+  );
+  return average(touching.map((block) => block.lateralOffset + (block.widthIndex < boundary ? block.width / 2 : -block.width / 2)));
 }
 
-const FACE_TINTS: readonly [number, number, number][] = [
-  [0.72, 0.82, 1.05],
-  [0.92, 0.76, 0.58],
-  [1.18, 1.06, 0.78],
-  [0.58, 0.68, 0.88],
-];
+function horizontalSurface(
+  section: ForgeSnapshotSection,
+  heightIndex: number,
+  boundary: number,
+  face: "top" | "bottom",
+): number {
+  const touching = section.blocks.filter(
+    (block) => block.heightIndex === heightIndex
+      && (block.widthIndex === boundary - 1 || block.widthIndex === boundary),
+  );
+  return average(touching.map((block) => block.verticalOffset + (face === "top" ? block.thickness / 2 : -block.thickness / 2)));
+}
 
-function temperatureColor(temperatureC: number, isImpacted: boolean): Color {
+function verticalBoundary(section: ForgeSnapshotSection, widthIndex: number, boundary: number): number {
+  const touching = section.blocks.filter(
+    (block) => block.widthIndex === widthIndex
+      && (block.heightIndex === boundary - 1 || block.heightIndex === boundary),
+  );
+  return average(touching.map((block) => block.verticalOffset + (block.heightIndex < boundary ? block.thickness / 2 : -block.thickness / 2)));
+}
+
+function verticalSurface(
+  section: ForgeSnapshotSection,
+  widthIndex: number,
+  boundary: number,
+  face: "left" | "right",
+): number {
+  const touching = section.blocks.filter(
+    (block) => block.widthIndex === widthIndex
+      && (block.heightIndex === boundary - 1 || block.heightIndex === boundary),
+  );
+  return average(touching.map((block) => block.lateralOffset + (face === "right" ? block.width / 2 : -block.width / 2)));
+}
+
+function smoothProfileCoordinate(
+  profiles: readonly PerimeterProfile[],
+  leftIndex: number,
+  pointIndex: number,
+  coordinate: keyof PerimeterPoint,
+  t: number,
+): number {
+  const valueAt = (index: number) => profileAtClamped(profiles, index).points[pointIndex]?.[coordinate] ?? 0;
+  return catmullRom(valueAt(leftIndex - 1), valueAt(leftIndex), valueAt(leftIndex + 1), valueAt(leftIndex + 2), t);
+}
+
+function smoothScalar(
+  profiles: readonly PerimeterProfile[],
+  leftIndex: number,
+  key: "temperatureC",
+  t: number,
+): number {
+  return catmullRom(
+    profileAtClamped(profiles, leftIndex - 1)[key],
+    profileAtClamped(profiles, leftIndex)[key],
+    profileAtClamped(profiles, leftIndex + 1)[key],
+    profileAtClamped(profiles, leftIndex + 2)[key],
+    t,
+  );
+}
+
+function profileAtClamped(profiles: readonly PerimeterProfile[], index: number): PerimeterProfile {
+  const profile = profiles[clamp(index, 0, profiles.length - 1)];
+  if (!profile) {
+    throw new Error("Missing billet profile.");
+  }
+  return profile;
+}
+
+function ringPositionAt(sections: readonly ForgeSnapshotSection[], ringIndex: number): number {
+  if (ringIndex <= 0) {
+    const first = sections[0];
+    return first ? first.position - first.length / 2 : 0;
+  }
+  if (ringIndex >= sections.length) {
+    const last = sections.at(-1);
+    return last ? last.position + last.length / 2 : 0;
+  }
+  const previous = sections[ringIndex - 1];
+  return previous ? previous.position + previous.length / 2 : 0;
+}
+
+function appendEndCap(
+  positions: number[],
+  colors: number[],
+  indices: number[],
+  ringStart: number,
+  perimeterVertexCount: number,
+  reverse: boolean,
+): void {
+  let y = 0;
+  let z = 0;
+  for (let index = 0; index < perimeterVertexCount; index += 1) {
+    const offset = (ringStart + index) * 3;
+    y += positions[offset + 1] ?? 0;
+    z += positions[offset + 2] ?? 0;
+  }
+  const centerIndex = positions.length / 3;
+  const x = positions[ringStart * 3] ?? 0;
+  positions.push(x, y / perimeterVertexCount, z / perimeterVertexCount);
+  colors.push(0.72, 0.42, 0.22);
+  for (let index = 0; index < perimeterVertexCount; index += 1) {
+    const next = (index + 1) % perimeterVertexCount;
+    if (reverse) {
+      indices.push(centerIndex, ringStart + index, ringStart + next);
+    } else {
+      indices.push(centerIndex, ringStart + next, ringStart + index);
+    }
+  }
+}
+
+function perimeterTint(pointIndex: number, grid: WorkpieceGrid): number {
+  if (pointIndex < grid.widthBlocks) return 1.08;
+  if (pointIndex < grid.widthBlocks + grid.heightBlocks) return 0.86;
+  if (pointIndex < grid.widthBlocks * 2 + grid.heightBlocks) return 0.62;
+  return 0.74;
+}
+
+function impactIntensityAtRing(ringIndex: number, impactSectionIndex: number | null): number {
+  if (impactSectionIndex === null) return 0;
+  const sample = ringIndex / VISUAL_SUBDIVISIONS_PER_SECTION - 0.5;
+  return Math.max(0, 1 - Math.abs(sample - impactSectionIndex) / 1.5);
+}
+
+function catmullRom(previous: number, start: number, end: number, next: number, t: number): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * (
+    2 * start
+    + (-previous + end) * t
+    + (2 * previous - 5 * start + 4 * end - next) * t2
+    + (-previous + 3 * start - 3 * end + next) * t3
+  );
+}
+
+function smoothStep(value: number): number {
+  return value * value * (3 - 2 * value);
+}
+
+function lerp(start: number, end: number, t: number): number {
+  return start + (end - start) * t;
+}
+
+function average(values: readonly number[]): number {
+  if (values.length === 0) {
+    throw new Error("A billet surface boundary needs at least one block.");
+  }
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function temperatureColor(temperatureC: number, impact: number): Color {
   const heat = Math.min(1, Math.max(0, (temperatureC - 450) / 550));
   const color = new Color("#5a2419").lerp(new Color("#ffad45"), heat);
-  return isImpacted ? color.lerp(new Color("#fff2ae"), 0.75) : color;
+  return color.lerp(new Color("#fff2ae"), impact * 0.75);
 }
 
 function createArrowGeometry(direction: -1 | 1): ShapeGeometry {
@@ -395,4 +610,12 @@ function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSectio
     (section) => position >= section.position - section.length / 2 && position <= section.position + section.length / 2,
   );
   return index >= 0 ? index : null;
+}
+
+function inverseLerp(start: number, end: number, value: number): number {
+  return end === start ? 0.5 : (value - start) / (end - start);
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
 }

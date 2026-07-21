@@ -11,7 +11,7 @@ const application = new GameApplication();
 const view = new ForgeBilletView(canvas, browserViewport());
 
 view.update(application.getSnapshot());
-let activePress: { readonly sectionIndex: number; readonly startedAtMs: number } | null = null;
+let activePress: { readonly sectionIndex: number; readonly faceBias: number; readonly startedAtMs: number } | null = null;
 
 canvas.addEventListener("pointerdown", (event) => {
   const bounds = canvas.getBoundingClientRect();
@@ -24,24 +24,24 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
-  const sectionIndex = view.pickSection(viewportX, viewportY);
-  if (sectionIndex === null) {
+  const target = view.pickHammerTarget(viewportX, viewportY);
+  if (!target) {
     return;
   }
-  activePress = { sectionIndex, startedAtMs: Date.now() };
+  activePress = { ...target, startedAtMs: Date.now() };
   canvas.setPointerCapture(event.pointerId);
 });
 canvas.addEventListener("pointerup", (event) => {
   if (!activePress) {
     return;
   }
-  const { sectionIndex, startedAtMs } = activePress;
+  const { sectionIndex, faceBias, startedAtMs } = activePress;
   activePress = null;
   if (canvas.hasPointerCapture(event.pointerId)) {
     canvas.releasePointerCapture(event.pointerId);
   }
   const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  view.update(application.applyIntent({ kind: "hammer", sectionIndex, energy, lateralBias: 0 }), sectionIndex);
+  view.update(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }), sectionIndex);
 });
 canvas.addEventListener("pointercancel", () => {
   activePress = null;

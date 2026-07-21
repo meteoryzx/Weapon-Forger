@@ -1,6 +1,6 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
-export const FORGE_PARAMETER_VERSION = "r1a-1";
+export const FORGE_PARAMETER_VERSION = "r1g-1";
 
 export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
   id: "simulation-steel",
@@ -15,6 +15,9 @@ export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
 
 export const FORGE_RULES = {
   ambientTemperatureC: 20,
+  defaultSectionCount: 24,
+  crossSectionWidthBlocks: 4,
+  crossSectionHeightBlocks: 4,
   initialSectionLength: 14,
   initialSectionWidth: 32,
   initialSectionThickness: 8,
@@ -33,5 +36,7 @@ export const FORGE_RULES = {
   lengthShareOfSpread: 0.6,
   feedStepLength: 14,
   overheatDamagePerHeat: 0.22,
-  neighbourKernel: [0.25, 1, 0.25] as const,
+  neighbourKernel: [0.2, 1, 0.2] as const,
+  adjacentBlockInfluence: 0.42,
+  throughThicknessKernel: [1, 0.38, 0.12, 0.03] as const,
 } as const;

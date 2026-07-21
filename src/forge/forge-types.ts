@@ -25,9 +25,35 @@ export interface BladeSection {
   readonly damage: number;
   readonly integrity: number;
   readonly thermalDamage: number;
+  readonly verticalOffset: number;
   readonly lateralOffset: number;
   readonly cracked: boolean;
   readonly overheated: boolean;
+  readonly blocks: readonly BladeBlock[];
+}
+
+export interface BladeBlock {
+  readonly widthIndex: number;
+  readonly heightIndex: number;
+  readonly length: number;
+  readonly width: number;
+  readonly thickness: number;
+  readonly temperatureC: number;
+  readonly plasticity: number;
+  readonly stress: number;
+  readonly plasticStrain: number;
+  readonly damage: number;
+  readonly integrity: number;
+  readonly thermalDamage: number;
+  readonly verticalOffset: number;
+  readonly lateralOffset: number;
+  readonly cracked: boolean;
+  readonly overheated: boolean;
+}
+
+export interface WorkpieceGrid {
+  readonly widthBlocks: number;
+  readonly heightBlocks: number;
 }
 
 export interface JointState {
@@ -41,6 +67,7 @@ export interface WorkpieceState {
   readonly id: string;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
+  readonly grid: WorkpieceGrid;
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
 }
@@ -65,6 +92,7 @@ export interface HammerOperation {
   readonly sectionIndex: number;
   readonly energy: number;
   readonly lateralBias: -1 | 0 | 1;
+  readonly faceBias?: number;
 }
 
 // Reserved for the complete forging chain. S3a intentionally has no thermal-treatment rules yet.
@@ -87,6 +115,7 @@ export interface HammerIntent {
   readonly sectionIndex: number;
   readonly energy: number;
   readonly lateralBias: -1 | 0 | 1;
+  readonly faceBias?: number;
 }
 
 export interface RotateIntent {
@@ -118,6 +147,24 @@ export interface ForgeSnapshotSection {
   readonly plasticity: number;
   readonly thermalDamage: number;
   readonly damage: number;
+  readonly verticalOffset: number;
+  readonly lateralOffset: number;
+  readonly cracked: boolean;
+  readonly overheated: boolean;
+  readonly blocks: readonly ForgeSnapshotBlock[];
+}
+
+export interface ForgeSnapshotBlock {
+  readonly widthIndex: number;
+  readonly heightIndex: number;
+  readonly length: number;
+  readonly width: number;
+  readonly thickness: number;
+  readonly temperatureC: number;
+  readonly plasticity: number;
+  readonly thermalDamage: number;
+  readonly damage: number;
+  readonly verticalOffset: number;
   readonly lateralOffset: number;
   readonly cracked: boolean;
   readonly overheated: boolean;
@@ -127,6 +174,7 @@ export interface ForgeSnapshot {
   readonly parameterVersion: string;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
+  readonly grid: WorkpieceGrid;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;
