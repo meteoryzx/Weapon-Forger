@@ -248,7 +248,8 @@ function assertMaterial(material: ForgeMaterial): void {
 }
 
 function neighbourPlasticStrain(state: ForgeState, index: number): number {
-  const neighbours = [state.workpiece.sections[index - 1], state.workpiece.sections[index + 1]].filter(Boolean);
+  const neighbours = [state.workpiece.sections[index - 1], state.workpiece.sections[index + 1]]
+    .filter((section): section is BladeSection => section !== undefined);
   return neighbours.reduce((sum, section) => sum + section.plasticStrain, 0) / neighbours.length;
 }
 
