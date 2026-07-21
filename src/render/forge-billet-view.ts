@@ -84,15 +84,19 @@ export class ForgeBilletView {
     const rimLight = new DirectionalLight("#9fb9d0", 1.7);
     rimLight.position.set(280, 180, 220);
     this.scene.add(rimLight);
+    this.scene.add(this.camera);
 
-    this.scene.add(this.createAnvilModel());
+    const anvil = this.createAnvilModel();
+    anvil.scale.setScalar(0.92);
+    anvil.rotation.y = -0.24;
+    this.scene.add(anvil);
     this.scene.add(this.createHammerModel());
     const rotateLeftControl = { direction: -1 as const, group: this.createRotateControl(-1) };
     const rotateRightControl = { direction: 1 as const, group: this.createRotateControl(1) };
     this.rotateControls.push(rotateLeftControl, rotateRightControl);
-    this.scene.add(rotateLeftControl.group, rotateRightControl.group);
+    this.camera.add(rotateLeftControl.group, rotateRightControl.group);
     this.billet.scale.x = 0.58;
-    this.billetRig.position.set(-118, 13, 0);
+    this.billetRig.position.set(-96, 18, 0);
     this.billetRig.rotation.y = 0.3;
     this.billetRig.add(this.billet);
     this.scene.add(this.billetRig);
@@ -103,6 +107,7 @@ export class ForgeBilletView {
     this.snapshot = snapshot;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset;
+    this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
     const nextGeometry = createBilletGeometry(snapshot.sections, impactSectionIndex);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
@@ -123,6 +128,7 @@ export class ForgeBilletView {
     this.camera.position.set(-260, 300, 600);
     this.camera.lookAt(0, -28, 0);
     this.camera.updateProjectionMatrix();
+    this.positionRotateControls();
     this.render();
   }
 
@@ -176,10 +182,21 @@ export class ForgeBilletView {
     const arrow = new Mesh(createArrowGeometry(direction), new MeshBasicMaterial({ color: "#f3c36d" }));
     panel.position.z = -72;
     arrow.position.z = -71;
-    group.position.set(direction < 0 ? -142 : 142, -76, 122);
-    group.rotation.x = -Math.PI / 2;
     group.add(panel, arrow);
     return group;
+  }
+
+  private positionRotateControls(): void {
+    const y = this.camera.bottom + ROTATE_CONTROL_SIZE * 0.72;
+    const xInset = ROTATE_CONTROL_SIZE * 0.72;
+    for (const control of this.rotateControls) {
+      control.group.position.set(
+        control.direction < 0 ? this.camera.left + xInset : this.camera.right - xInset,
+        y,
+        -120,
+      );
+      control.group.rotation.set(0, 0, 0);
+    }
   }
 
   private createAnvilModel(): Group {
@@ -196,7 +213,7 @@ export class ForgeBilletView {
     const foot = new Mesh(new BoxGeometry(210, 20, 126), edge);
     foot.position.set(0, -151, 0);
     const horn = new Mesh(new ConeGeometry(55, 132, 4), steel);
-    horn.position.set(226, -8, 0);
+    horn.position.set(205, -8, 0);
     horn.rotation.z = -Math.PI / 2;
     anvil.add(face, body, foot, horn);
     return anvil;

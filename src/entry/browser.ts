@@ -58,7 +58,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
 
-  const step = key === "w" ? -1 : key === "s" ? 1 : null;
+  const step = key === "w" ? 1 : key === "s" ? -1 : null;
   if (step === null) {
     return;
   }
