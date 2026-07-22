@@ -24,12 +24,18 @@ import {
   Vector3,
 } from "three";
 
-import type { ForgeSnapshot, ForgeSnapshotSection, WorkpieceGrid } from "../forge/index.ts";
+import {
+  FORGE_RULES,
+  type ForgeSnapshot,
+  type ForgeSnapshotSection,
+  type HammerInfluencePreview,
+  type WorkpieceGrid,
+  type WorkpieceNode,
+} from "../forge/index.ts";
 
-const VISUAL_SUBDIVISIONS_PER_SECTION = 4;
-const VISUAL_THICKNESS_SCALE = 2.4;
 const DESIGN_HALF_HEIGHT = 117;
 const ROTATE_CONTROL_SIZE = 72;
+const BILLET_AXIAL_SCALE = 0.58;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
@@ -92,7 +98,7 @@ export class ForgeBilletView {
     this.scene.add(this.camera);
 
     const anvil = this.createAnvilModel();
-    anvil.scale.setScalar(0.92);
+    anvil.scale.set(BILLET_AXIAL_SCALE, 0.92, 1);
     anvil.rotation.y = -0.24;
     this.scene.add(anvil);
     this.scene.add(this.createHammerModel());
@@ -100,7 +106,7 @@ export class ForgeBilletView {
     const rotateRightControl = { direction: 1 as const, group: this.createRotateControl(1) };
     this.rotateControls.push(rotateLeftControl, rotateRightControl);
     this.camera.add(rotateLeftControl.group, rotateRightControl.group);
-    this.billet.scale.x = 0.58;
+    this.billet.scale.x = BILLET_AXIAL_SCALE;
     this.billetRig.position.set(-96, 18, 0);
     this.billetRig.rotation.y = 0.3;
     this.billetRig.add(this.billet);
@@ -108,12 +114,12 @@ export class ForgeBilletView {
     this.resize(viewport);
   }
 
-  update(snapshot: ForgeSnapshot, impactSectionIndex: number | null = null): void {
+  update(snapshot: ForgeSnapshot, hammerPreview: HammerInfluencePreview | null = null): void {
     this.snapshot = snapshot;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
-    this.billet.position.x = snapshot.feedOffset;
+    this.billet.position.x = snapshot.feedOffset * BILLET_AXIAL_SCALE;
     this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
-    const nextGeometry = createBilletGeometry(snapshot, impactSectionIndex);
+    const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
     this.render();
@@ -167,8 +173,8 @@ export class ForgeBilletView {
         localPoint.z,
       )
       : inverseLerp(
-        (section.verticalOffset - section.thickness / 2) * VISUAL_THICKNESS_SCALE,
-        (section.verticalOffset + section.thickness / 2) * VISUAL_THICKNESS_SCALE,
+        section.verticalOffset - section.thickness / 2,
+        section.verticalOffset + section.thickness / 2,
         localPoint.y,
       );
     return { sectionIndex, faceBias: clamp(faceBias, 0, 1) };
@@ -232,17 +238,17 @@ export class ForgeBilletView {
     const anvil = new Group();
     const steel = new MeshStandardMaterial({ color: "#414852", metalness: 0.52, roughness: 0.4, side: DoubleSide });
     const edge = new MeshStandardMaterial({ color: "#697482", metalness: 0.48, roughness: 0.3 });
-    const face = new Mesh(new BoxGeometry(320, 16, 150), edge);
+    const face = new Mesh(new BoxGeometry(FORGE_RULES.anvilFaceLength, 16, FORGE_RULES.anvilFaceWidth), edge);
     face.position.set(0, -8, 0);
     const body = this.createProfile(
-      [[-112, -16], [112, -16], [82, -38], [58, -88], [88, -112], [80, -152], [-80, -152], [-88, -112], [-58, -88], [-82, -38]],
-      94,
+      [[-78, -16], [78, -16], [60, -38], [45, -88], [64, -112], [58, -152], [-58, -152], [-64, -112], [-45, -88], [-60, -38]],
+      78,
       steel,
     );
-    const foot = new Mesh(new BoxGeometry(210, 20, 126), edge);
+    const foot = new Mesh(new BoxGeometry(160, 20, 98), edge);
     foot.position.set(0, -151, 0);
-    const horn = new Mesh(new ConeGeometry(55, 132, 4), steel);
-    horn.position.set(205, -8, 0);
+    const horn = new Mesh(new ConeGeometry(40, 100, 4), steel);
+    horn.position.set(162, -8, 0);
     horn.rotation.z = -Math.PI / 2;
     anvil.add(face, body, foot, horn);
     return anvil;
@@ -253,7 +259,7 @@ export class ForgeBilletView {
     const steel = new MeshStandardMaterial({ color: "#4d5662", metalness: 0.54, roughness: 0.3 });
     const wood = new MeshStandardMaterial({ color: "#844a29", metalness: 0.06, roughness: 0.48 });
     const headPosition = new Vector3(105, 112, 34);
-    const head = new Mesh(new BoxGeometry(58, 82, 58), steel);
+    const head = new Mesh(new BoxGeometry(56, 76, FORGE_RULES.hammerFaceWidth), steel);
     head.position.copy(headPosition);
     head.rotation.z = -0.16;
     const handle = this.createRoundToolBar(
@@ -306,22 +312,20 @@ export class ForgeBilletView {
 
 function createBilletGeometry(
   snapshot: ForgeSnapshot,
-  impactSectionIndex: number | null,
+  hammerPreview: HammerInfluencePreview | null,
 ): BufferGeometry {
-  const sections = snapshot.sections;
-  const sectionProfiles = sections.map((section) => sectionPerimeter(section, snapshot.grid));
   const perimeterVertexCount = (snapshot.grid.widthBlocks + snapshot.grid.heightBlocks) * 2;
-  const ringCount = sections.length * VISUAL_SUBDIVISIONS_PER_SECTION + 1;
+  const ringCount = snapshot.sections.length + 1;
   const positions: number[] = [];
   const colors: number[] = [];
   const indices: number[] = [];
 
   for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
-    const profile = profileAtRing(ringIndex, sections, sectionProfiles);
-    const impact = impactIntensityAtRing(ringIndex, impactSectionIndex);
-    const color = temperatureColor(profile.temperatureC, impact);
+    const profile = workpiecePerimeter(snapshot, ringIndex);
     profile.points.forEach((point, pointIndex) => {
-      positions.push(profile.position, point.y * VISUAL_THICKNESS_SCALE, point.z);
+      positions.push(point.axialPosition, point.verticalOffset, point.lateralOffset);
+      const preview = previewIntensityAtRingPoint(ringIndex, pointIndex, hammerPreview, snapshot.grid);
+      const color = temperatureColor(temperatureAtPlane(snapshot.sections, ringIndex), preview);
       const tint = perimeterTint(pointIndex, snapshot.grid);
       colors.push(color.r * tint, color.g * tint, color.b * tint);
     });
@@ -348,172 +352,45 @@ function createBilletGeometry(
   return geometry;
 }
 
-interface PerimeterPoint {
-  readonly y: number;
-  readonly z: number;
-}
-
-interface PerimeterProfile {
-  readonly position: number;
-  readonly temperatureC: number;
-  readonly points: readonly PerimeterPoint[];
-}
-
-function sectionPerimeter(section: ForgeSnapshotSection, grid: WorkpieceGrid): PerimeterProfile {
-  const points: PerimeterPoint[] = [];
-  const topHeight = grid.heightBlocks - 1;
-  const rightWidth = grid.widthBlocks - 1;
+function workpiecePerimeter(snapshot: ForgeSnapshot, axialIndex: number): { readonly points: readonly WorkpieceNode[] } {
+  const points: WorkpieceNode[] = [];
+  const grid = snapshot.grid;
 
   for (let boundary = 0; boundary < grid.widthBlocks; boundary += 1) {
-    points.push({
-      y: horizontalSurface(section, topHeight, boundary, "top"),
-      z: horizontalBoundary(section, topHeight, boundary),
-    });
+    points.push(workpieceNodeAt(snapshot, axialIndex, boundary, grid.heightBlocks));
   }
   for (let boundary = grid.heightBlocks; boundary > 0; boundary -= 1) {
-    points.push({
-      y: verticalBoundary(section, rightWidth, boundary),
-      z: verticalSurface(section, rightWidth, boundary, "right"),
-    });
+    points.push(workpieceNodeAt(snapshot, axialIndex, grid.widthBlocks, boundary));
   }
   for (let boundary = grid.widthBlocks; boundary > 0; boundary -= 1) {
-    points.push({
-      y: horizontalSurface(section, 0, boundary, "bottom"),
-      z: horizontalBoundary(section, 0, boundary),
-    });
+    points.push(workpieceNodeAt(snapshot, axialIndex, boundary, 0));
   }
   for (let boundary = 0; boundary < grid.heightBlocks; boundary += 1) {
-    points.push({
-      y: verticalBoundary(section, 0, boundary),
-      z: verticalSurface(section, 0, boundary, "left"),
-    });
+    points.push(workpieceNodeAt(snapshot, axialIndex, 0, boundary));
   }
 
-  return { position: section.position, temperatureC: section.temperatureC, points };
+  return { points };
 }
 
-function profileAtRing(
-  ringIndex: number,
-  sections: readonly ForgeSnapshotSection[],
-  profiles: readonly PerimeterProfile[],
-): PerimeterProfile {
-  const firstSection = sections[0];
-  const lastSection = sections.at(-1);
-  const firstProfile = profiles[0];
-  const lastProfile = profiles.at(-1);
-  if (!firstSection || !lastSection || !firstProfile || !lastProfile) {
-    throw new Error("A billet needs at least one section to render.");
-  }
-  if (ringIndex === 0) {
-    return { ...firstProfile, position: firstSection.position - firstSection.length / 2 };
-  }
-  const finalRingIndex = sections.length * VISUAL_SUBDIVISIONS_PER_SECTION;
-  if (ringIndex === finalRingIndex) {
-    return { ...lastProfile, position: lastSection.position + lastSection.length / 2 };
-  }
-
-  const sample = ringIndex / VISUAL_SUBDIVISIONS_PER_SECTION - 0.5;
-  const leftIndex = Math.floor(sample);
-  const t = smoothStep(sample - leftIndex);
-  const start = profileAtClamped(profiles, leftIndex);
-  const points = start.points.map((_, pointIndex) => ({
-    y: smoothProfileCoordinate(profiles, leftIndex, pointIndex, "y", t),
-    z: smoothProfileCoordinate(profiles, leftIndex, pointIndex, "z", t),
-  }));
-  return {
-    position: lerp(ringPositionAt(sections, leftIndex + 1), ringPositionAt(sections, leftIndex + 2), t),
-    temperatureC: smoothScalar(profiles, leftIndex, "temperatureC", t),
-    points,
-  };
-}
-
-function horizontalBoundary(section: ForgeSnapshotSection, heightIndex: number, boundary: number): number {
-  const touching = section.blocks.filter(
-    (block) => block.heightIndex === heightIndex
-      && (block.widthIndex === boundary - 1 || block.widthIndex === boundary),
-  );
-  return average(touching.map((block) => block.lateralOffset + (block.widthIndex < boundary ? block.width / 2 : -block.width / 2)));
-}
-
-function horizontalSurface(
-  section: ForgeSnapshotSection,
-  heightIndex: number,
-  boundary: number,
-  face: "top" | "bottom",
-): number {
-  const touching = section.blocks.filter(
-    (block) => block.heightIndex === heightIndex
-      && (block.widthIndex === boundary - 1 || block.widthIndex === boundary),
-  );
-  return average(touching.map((block) => block.verticalOffset + (face === "top" ? block.thickness / 2 : -block.thickness / 2)));
-}
-
-function verticalBoundary(section: ForgeSnapshotSection, widthIndex: number, boundary: number): number {
-  const touching = section.blocks.filter(
-    (block) => block.widthIndex === widthIndex
-      && (block.heightIndex === boundary - 1 || block.heightIndex === boundary),
-  );
-  return average(touching.map((block) => block.verticalOffset + (block.heightIndex < boundary ? block.thickness / 2 : -block.thickness / 2)));
-}
-
-function verticalSurface(
-  section: ForgeSnapshotSection,
+function workpieceNodeAt(
+  snapshot: ForgeSnapshot,
+  axialIndex: number,
   widthIndex: number,
-  boundary: number,
-  face: "left" | "right",
-): number {
-  const touching = section.blocks.filter(
-    (block) => block.widthIndex === widthIndex
-      && (block.heightIndex === boundary - 1 || block.heightIndex === boundary),
-  );
-  return average(touching.map((block) => block.lateralOffset + (face === "right" ? block.width / 2 : -block.width / 2)));
-}
-
-function smoothProfileCoordinate(
-  profiles: readonly PerimeterProfile[],
-  leftIndex: number,
-  pointIndex: number,
-  coordinate: keyof PerimeterPoint,
-  t: number,
-): number {
-  const valueAt = (index: number) => profileAtClamped(profiles, index).points[pointIndex]?.[coordinate] ?? 0;
-  return catmullRom(valueAt(leftIndex - 1), valueAt(leftIndex), valueAt(leftIndex + 1), valueAt(leftIndex + 2), t);
-}
-
-function smoothScalar(
-  profiles: readonly PerimeterProfile[],
-  leftIndex: number,
-  key: "temperatureC",
-  t: number,
-): number {
-  return catmullRom(
-    profileAtClamped(profiles, leftIndex - 1)[key],
-    profileAtClamped(profiles, leftIndex)[key],
-    profileAtClamped(profiles, leftIndex + 1)[key],
-    profileAtClamped(profiles, leftIndex + 2)[key],
-    t,
-  );
-}
-
-function profileAtClamped(profiles: readonly PerimeterProfile[], index: number): PerimeterProfile {
-  const profile = profiles[clamp(index, 0, profiles.length - 1)];
-  if (!profile) {
-    throw new Error("Missing billet profile.");
+  heightIndex: number,
+): WorkpieceNode {
+  const planeSize = (snapshot.grid.widthBlocks + 1) * (snapshot.grid.heightBlocks + 1);
+  const index = axialIndex * planeSize + heightIndex * (snapshot.grid.widthBlocks + 1) + widthIndex;
+  const node = snapshot.nodes[index];
+  if (!node || node.axialIndex !== axialIndex || node.widthIndex !== widthIndex || node.heightIndex !== heightIndex) {
+    throw new Error(`Missing billet node ${axialIndex}:${widthIndex}:${heightIndex}.`);
   }
-  return profile;
+  return node;
 }
 
-function ringPositionAt(sections: readonly ForgeSnapshotSection[], ringIndex: number): number {
-  if (ringIndex <= 0) {
-    const first = sections[0];
-    return first ? first.position - first.length / 2 : 0;
-  }
-  if (ringIndex >= sections.length) {
-    const last = sections.at(-1);
-    return last ? last.position + last.length / 2 : 0;
-  }
-  const previous = sections[ringIndex - 1];
-  return previous ? previous.position + previous.length / 2 : 0;
+function temperatureAtPlane(sections: readonly ForgeSnapshotSection[], axialIndex: number): number {
+  const temperatures = [sections[axialIndex - 1]?.temperatureC, sections[axialIndex]?.temperatureC]
+    .filter((value): value is number => value !== undefined);
+  return average(temperatures);
 }
 
 function appendEndCap(
@@ -552,29 +429,53 @@ function perimeterTint(pointIndex: number, grid: WorkpieceGrid): number {
   return 0.74;
 }
 
-function impactIntensityAtRing(ringIndex: number, impactSectionIndex: number | null): number {
-  if (impactSectionIndex === null) return 0;
-  const sample = ringIndex / VISUAL_SUBDIVISIONS_PER_SECTION - 0.5;
-  return Math.max(0, 1 - Math.abs(sample - impactSectionIndex) / 1.5);
+function previewIntensityAtRingPoint(
+  ringIndex: number,
+  pointIndex: number,
+  hammerPreview: HammerInfluencePreview | null,
+  grid: WorkpieceGrid,
+): number {
+  if (hammerPreview === null) return 0;
+  let intensity = 0;
+  for (const influence of hammerPreview.samples) {
+    if (!blockTouchesPerimeterPoint(influence.widthIndex, influence.heightIndex, pointIndex, grid)) {
+      continue;
+    }
+    if (influence.sectionIndex === ringIndex || influence.sectionIndex === ringIndex - 1) {
+      intensity = Math.max(intensity, influence.weight);
+    }
+  }
+  return clamp(intensity, 0, 1);
 }
 
-function catmullRom(previous: number, start: number, end: number, next: number, t: number): number {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return 0.5 * (
-    2 * start
-    + (-previous + end) * t
-    + (2 * previous - 5 * start + 4 * end - next) * t2
-    + (-previous + 3 * start - 3 * end + next) * t3
-  );
+function blockTouchesPerimeterPoint(
+  widthIndex: number,
+  heightIndex: number,
+  pointIndex: number,
+  grid: WorkpieceGrid,
+): boolean {
+  const topStart = 0;
+  const rightStart = grid.widthBlocks;
+  const bottomStart = grid.widthBlocks + grid.heightBlocks;
+  const leftStart = grid.widthBlocks * 2 + grid.heightBlocks;
+  if (pointIndex >= topStart && pointIndex < rightStart) {
+    const boundary = pointIndex;
+    return heightIndex === grid.heightBlocks - 1 && touchesBoundary(widthIndex, boundary);
+  }
+  if (pointIndex >= rightStart && pointIndex < bottomStart) {
+    const boundary = grid.heightBlocks - (pointIndex - rightStart);
+    return widthIndex === grid.widthBlocks - 1 && touchesBoundary(heightIndex, boundary);
+  }
+  if (pointIndex >= bottomStart && pointIndex < leftStart) {
+    const boundary = grid.widthBlocks - (pointIndex - bottomStart);
+    return heightIndex === 0 && touchesBoundary(widthIndex, boundary);
+  }
+  const boundary = pointIndex - leftStart;
+  return widthIndex === 0 && touchesBoundary(heightIndex, boundary);
 }
 
-function smoothStep(value: number): number {
-  return value * value * (3 - 2 * value);
-}
-
-function lerp(start: number, end: number, t: number): number {
-  return start + (end - start) * t;
+function touchesBoundary(index: number, boundary: number): boolean {
+  return index === boundary || index === boundary - 1;
 }
 
 function average(values: readonly number[]): number {

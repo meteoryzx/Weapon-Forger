@@ -49,7 +49,7 @@ wxApi.onTouchEnd(() => {
   const { sectionIndex, faceBias, startedAtMs } = activePress;
   activePress = null;
   const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  view.update(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }), sectionIndex);
+  view.update(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }));
 });
 wxApi.onTouchCancel(() => {
   activePress = null;

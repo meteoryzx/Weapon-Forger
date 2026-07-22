@@ -9,12 +9,17 @@ describe("R0 browser application", () => {
     const centerIndex = Math.floor(before.sections.length / 2);
     const after = application.applyIntent({ kind: "hammer", sectionIndex: centerIndex, energy: 0.85, lateralBias: 0 });
 
-    expect(before.sections).toHaveLength(24);
-    expect(before.grid).toEqual({ widthBlocks: 4, heightBlocks: 4 });
-    expect(before.sections[centerIndex]?.blocks).toHaveLength(16);
+    expect(before.sections).toHaveLength(168);
+    expect(before.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
+    expect(before.sections[centerIndex]?.blocks).toHaveLength(96);
     expect(before.sections[centerIndex]?.temperatureC).toBe(950);
-    const beforeTarget = before.sections[centerIndex]?.blocks.find((block) => block.widthIndex === 2 && block.heightIndex === 3);
-    const afterTarget = after.sections[centerIndex]?.blocks.find((block) => block.widthIndex === 2 && block.heightIndex === 3);
-    expect(afterTarget?.thickness).toBeLessThan(beforeTarget?.thickness ?? Infinity);
+    const planeSize = (before.grid.widthBlocks + 1) * (before.grid.heightBlocks + 1);
+    const centerWidth = before.grid.widthBlocks / 2;
+    const topNodeIndex = centerIndex * planeSize
+      + before.grid.heightBlocks * (before.grid.widthBlocks + 1)
+      + centerWidth;
+    expect(after.nodes[topNodeIndex]?.verticalOffset).toBeLessThan(
+      before.nodes[topNodeIndex]?.verticalOffset ?? -Infinity,
+    );
   });
 });

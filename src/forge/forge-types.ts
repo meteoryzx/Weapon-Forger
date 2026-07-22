@@ -32,12 +32,22 @@ export interface BladeSection {
   readonly blocks: readonly BladeBlock[];
 }
 
+export interface WorkpieceNode {
+  readonly axialIndex: number;
+  readonly widthIndex: number;
+  readonly heightIndex: number;
+  readonly axialPosition: number;
+  readonly lateralOffset: number;
+  readonly verticalOffset: number;
+}
+
 export interface BladeBlock {
   readonly widthIndex: number;
   readonly heightIndex: number;
   readonly length: number;
   readonly width: number;
   readonly thickness: number;
+  readonly volume: number;
   readonly temperatureC: number;
   readonly plasticity: number;
   readonly stress: number;
@@ -68,6 +78,7 @@ export interface WorkpieceState {
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
   readonly grid: WorkpieceGrid;
+  readonly nodes: readonly WorkpieceNode[];
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
 }
@@ -160,6 +171,7 @@ export interface ForgeSnapshotBlock {
   readonly length: number;
   readonly width: number;
   readonly thickness: number;
+  readonly volume: number;
   readonly temperatureC: number;
   readonly plasticity: number;
   readonly thermalDamage: number;
@@ -175,7 +187,22 @@ export interface ForgeSnapshot {
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
   readonly grid: WorkpieceGrid;
+  readonly nodes: readonly WorkpieceNode[];
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;
+}
+
+export interface HammerInfluenceSample {
+  readonly sectionIndex: number;
+  readonly widthIndex: number;
+  readonly heightIndex: number;
+  readonly weight: number;
+}
+
+export interface HammerInfluencePreview {
+  readonly sectionIndex: number;
+  readonly faceBias: number;
+  readonly energy: number;
+  readonly samples: readonly HammerInfluenceSample[];
 }
