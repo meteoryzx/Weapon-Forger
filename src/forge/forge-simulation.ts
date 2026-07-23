@@ -11,6 +11,7 @@ import type {
   ForgeState,
   HammerInfluencePreview,
   HammerOperation,
+  MoveBilletOperation,
   WorkpieceGrid,
   WorkpieceNode,
 } from "./forge-types.ts";
@@ -89,7 +90,7 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
   ));
   return {
     parameterVersion: FORGE_PARAMETER_VERSION,
-    phase: "forging",
+    phase: "heating",
     material: { ...material },
     workpiece: {
       id: "workpiece-0",
@@ -99,6 +100,13 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
       nodes,
       sections,
       joints: [],
+      thermal: {
+        location: "inspection",
+        peakTemperatureC: FORGE_RULES.ambientTemperatureC,
+        hotExposureSeconds: 0,
+        oxidationDose: 0,
+        overheatDose: 0,
+      },
     },
     operations: [],
   };
@@ -120,8 +128,14 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
             state.material,
             state.workpiece.grid,
           )),
+          thermal: {
+            ...state.workpiece.thermal,
+            peakTemperatureC: Math.max(state.workpiece.thermal.peakTemperatureC, operation.temperatureC),
+          },
         },
       }, operation);
+    case "move-billet":
+      return applyMoveBillet(state, operation);
     case "rotate":
       assertQuarterTurns(operation.quarterTurns);
       return appendOperation({
@@ -159,9 +173,21 @@ export function replayForgeState(initialState: ForgeState, operations: readonly 
   return operations.reduce(applyForgeOperation, cloneStateWithoutOperations(initialState));
 }
 
+export function previewThermalState(state: ForgeState, elapsedMs: number): ForgeState {
+  assertThermalDuration(elapsedMs);
+  return evolveThermalState(state, state.workpiece.thermal.location, elapsedMs);
+}
+
 export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
   return {
     parameterVersion: state.parameterVersion,
+    phase: state.phase,
+    billetLocation: state.workpiece.thermal.location,
+    averageTemperatureC: averageWorkpieceTemperature(state),
+    peakTemperatureC: state.workpiece.thermal.peakTemperatureC,
+    hotExposureSeconds: state.workpiece.thermal.hotExposureSeconds,
+    oxidationDose: state.workpiece.thermal.oxidationDose,
+    overheatDose: state.workpiece.thermal.overheatDose,
     orientationQuarterTurns: state.workpiece.orientationQuarterTurns,
     feedOffset: state.workpiece.feedOffset,
     grid: { ...state.workpiece.grid },
@@ -182,6 +208,196 @@ export function totalVolume(state: ForgeState): number {
 export function calculatePlasticity(temperatureC: number, material: ForgeMaterial = DEFAULT_FORGE_MATERIAL): number {
   const range = material.plasticityPeakC - material.plasticityStartC;
   return clamp((temperatureC - material.plasticityStartC) / range, 0, 1) * material.hotWorkability;
+}
+
+export function heatCapacityJPerKgK(temperatureC: number, material: ForgeMaterial = DEFAULT_FORGE_MATERIAL): number {
+  const temperatureK = clamp(temperatureC + 273.15, 298, 1809);
+  const segment = material.heatCapacitySegments.find((candidate, index) => (
+    temperatureK >= candidate.minimumK
+      && (temperatureK < candidate.maximumK || index === material.heatCapacitySegments.length - 1)
+  )) ?? material.heatCapacitySegments.at(-1);
+  if (!segment) throw new Error("Material needs heat-capacity data.");
+  const t = temperatureK / 1000;
+  const molar = segment.a + segment.b * t + segment.c * t ** 2 + segment.d * t ** 3 + segment.e / t ** 2;
+  return molar / material.molarMassKgPerMol;
+}
+
+function applyMoveBillet(state: ForgeState, operation: MoveBilletOperation): ForgeState {
+  assertThermalDuration(operation.elapsedMs);
+  if (operation.destination === state.workpiece.thermal.location) {
+    throw new Error("Billet destination must differ from its current location.");
+  }
+  const evolved = evolveThermalState(state, state.workpiece.thermal.location, operation.elapsedMs);
+  return appendOperation({
+    ...evolved,
+    workpiece: {
+      ...evolved.workpiece,
+      thermal: { ...evolved.workpiece.thermal, location: operation.destination },
+    },
+  }, operation);
+}
+
+function evolveThermalState(
+  state: ForgeState,
+  environment: "inspection" | "furnace",
+  elapsedMs: number,
+): ForgeState {
+  if (elapsedMs === 0) return state;
+  const physicalSeconds = elapsedMs / 1000 * FORGE_RULES.thermalTimeScale;
+  const surfaceAreaM2 = workpieceSurfaceAreaM2(state.workpiece.nodes, state.workpiece.grid);
+  const massKg = totalVolume(state) * 1e-9 * state.material.densityKgPerM3;
+  let temperatureC = averageWorkpieceTemperature(state);
+  let peakTemperatureC = state.workpiece.thermal.peakTemperatureC;
+  let hotExposureSeconds = state.workpiece.thermal.hotExposureSeconds;
+  let oxidationDose = state.workpiece.thermal.oxidationDose;
+  let overheatDose = state.workpiece.thermal.overheatDose;
+  let stressRecoveryDose = 0;
+  let remaining = physicalSeconds;
+
+  while (remaining > 0) {
+    const step = Math.min(FORGE_RULES.thermalStepSeconds, remaining);
+    const temperatureK = temperatureC + 273.15;
+    const oxidationBlend = clamp(oxidationDose / FORGE_RULES.oxidationEmissivityDose, 0, 1);
+    const emissivity = lerp(state.material.cleanEmissivity, state.material.oxidizedEmissivity, oxidationBlend);
+    const environmentGasC = environment === "furnace"
+      ? FORGE_RULES.furnaceGasTemperatureC
+      : FORGE_RULES.ambientTemperatureC;
+    const environmentWallC = environment === "furnace"
+      ? FORGE_RULES.furnaceWallTemperatureC
+      : FORGE_RULES.ambientTemperatureC;
+    const convection = (environment === "furnace"
+      ? FORGE_RULES.furnaceConvectionWPerM2K
+      : FORGE_RULES.airConvectionWPerM2K)
+      * surfaceAreaM2 * (environmentGasC - temperatureC);
+    const radiation = emissivity
+      * FORGE_RULES.stefanBoltzmannWPerM2K4
+      * surfaceAreaM2
+      * (environment === "furnace" ? FORGE_RULES.furnaceRadiationViewFactor : 1)
+      * ((environmentWallC + 273.15) ** 4 - temperatureK ** 4);
+    const heatCapacity = heatCapacityJPerKgK(temperatureC, state.material);
+    temperatureC = clamp(
+      temperatureC + (convection + radiation) / Math.max(massKg * heatCapacity, Number.EPSILON) * step,
+      FORGE_RULES.ambientTemperatureC,
+      1300,
+    );
+    peakTemperatureC = Math.max(peakTemperatureC, temperatureC);
+    if (temperatureC >= FORGE_RULES.hotExposureThresholdC) hotExposureSeconds += step;
+    const referenceK = FORGE_RULES.oxidationReferenceTemperatureC + 273.15;
+    const rate = Math.exp(
+      -state.material.oxidationActivationEnergyJPerMol / 8.314_462_618
+      * (1 / (temperatureC + 273.15) - 1 / referenceK),
+    );
+    oxidationDose += rate * step;
+    const overheatRatio = clamp(
+      (temperatureC - state.material.overheatTemperatureC) / (1300 - state.material.overheatTemperatureC),
+      0,
+      1,
+    );
+    overheatDose += overheatRatio * step;
+    stressRecoveryDose += calculatePlasticity(temperatureC, state.material) * step;
+    remaining -= step;
+  }
+
+  const damageIncrease = (overheatDose - state.workpiece.thermal.overheatDose)
+    * FORGE_RULES.overheatDamagePerPhysicalSecond;
+  const stressRecovery = 1 - Math.exp(
+    -stressRecoveryDose * FORGE_RULES.stressRecoveryPerPhysicalSecond * state.material.stressRecoveryAtPeak,
+  );
+  const sections = state.workpiece.sections.map((section, sectionIndex) => {
+    const blocks = section.blocks.map((block) => {
+      const thermalDamage = clamp(block.thermalDamage + damageIncrease, 0, 1);
+      return {
+        ...block,
+        temperatureC,
+        plasticity: calculatePlasticity(temperatureC, state.material),
+        stress: block.stress * (1 - stressRecovery),
+        thermalDamage,
+        overheated: block.overheated || thermalDamage > 0,
+      };
+    });
+    return summarizeSection({ ...section, blocks }, sectionIndex, state.workpiece.nodes, state.workpiece.grid);
+  });
+  return {
+    ...state,
+    workpiece: {
+      ...state.workpiece,
+      sections,
+      thermal: {
+        ...state.workpiece.thermal,
+        peakTemperatureC: roundThermal(peakTemperatureC),
+        hotExposureSeconds: roundThermal(hotExposureSeconds),
+        oxidationDose: roundThermal(oxidationDose),
+        overheatDose: roundThermal(overheatDose),
+      },
+    },
+  };
+}
+
+function averageWorkpieceTemperature(state: ForgeState): number {
+  const volume = totalVolume(state);
+  return state.workpiece.sections.reduce(
+    (sum, section) => sum + section.blocks.reduce(
+      (sectionSum, block) => sectionSum + block.temperatureC * block.volume,
+      0,
+    ),
+    0,
+  ) / volume;
+}
+
+function workpieceSurfaceAreaM2(nodes: readonly WorkpieceNode[], grid: WorkpieceGrid): number {
+  const axialCount = axialBlockCount(nodes, grid);
+  let area = 0;
+  const addQuad = (a: number, b: number, c: number, d: number) => {
+    const va = nodeVector(nodes[a]);
+    const vb = nodeVector(nodes[b]);
+    const vc = nodeVector(nodes[c]);
+    const vd = nodeVector(nodes[d]);
+    area += magnitude(cross(subtract(vb, va), subtract(vc, va))) / 2;
+    area += magnitude(cross(subtract(vc, va), subtract(vd, va))) / 2;
+  };
+  for (let axial = 0; axial < axialCount; axial += 1) {
+    for (let width = 0; width < grid.widthBlocks; width += 1) {
+      addQuad(
+        workpieceNodeIndex(axial, width, 0, grid),
+        workpieceNodeIndex(axial + 1, width, 0, grid),
+        workpieceNodeIndex(axial + 1, width + 1, 0, grid),
+        workpieceNodeIndex(axial, width + 1, 0, grid),
+      );
+      addQuad(
+        workpieceNodeIndex(axial, width, grid.heightBlocks, grid),
+        workpieceNodeIndex(axial, width + 1, grid.heightBlocks, grid),
+        workpieceNodeIndex(axial + 1, width + 1, grid.heightBlocks, grid),
+        workpieceNodeIndex(axial + 1, width, grid.heightBlocks, grid),
+      );
+    }
+    for (let height = 0; height < grid.heightBlocks; height += 1) {
+      addQuad(
+        workpieceNodeIndex(axial, 0, height, grid),
+        workpieceNodeIndex(axial, 0, height + 1, grid),
+        workpieceNodeIndex(axial + 1, 0, height + 1, grid),
+        workpieceNodeIndex(axial + 1, 0, height, grid),
+      );
+      addQuad(
+        workpieceNodeIndex(axial, grid.widthBlocks, height, grid),
+        workpieceNodeIndex(axial + 1, grid.widthBlocks, height, grid),
+        workpieceNodeIndex(axial + 1, grid.widthBlocks, height + 1, grid),
+        workpieceNodeIndex(axial, grid.widthBlocks, height + 1, grid),
+      );
+    }
+  }
+  for (const axial of [0, axialCount]) {
+    for (let width = 0; width < grid.widthBlocks; width += 1) {
+      for (let height = 0; height < grid.heightBlocks; height += 1) {
+        addQuad(
+          workpieceNodeIndex(axial, width, height, grid),
+          workpieceNodeIndex(axial, width + 1, height, grid),
+          workpieceNodeIndex(axial, width + 1, height + 1, grid),
+          workpieceNodeIndex(axial, width, height + 1, grid),
+        );
+      }
+    }
+  }
+  return area * 1e-6;
 }
 
 export function createHammerInfluencePreview(
@@ -904,6 +1120,7 @@ function cloneStateWithoutOperations(state: ForgeState): ForgeState {
         blocks: section.blocks.map((block) => ({ ...block })),
       })),
       joints: state.workpiece.joints.map((joint) => ({ ...joint, workpieceIds: [...joint.workpieceIds] })),
+      thermal: { ...state.workpiece.thermal },
     },
     operations: [],
   };
@@ -1125,6 +1342,18 @@ function assertMaterial(material: ForgeMaterial): void {
   if (material.stressRecoveryAtPeak < 0 || material.stressRecoveryAtPeak > 1) {
     throw new Error("Material peak stress recovery must be between zero and one.");
   }
+  if (material.densityKgPerM3 <= 0 || material.molarMassKgPerMol <= 0
+    || material.cleanEmissivity <= 0 || material.cleanEmissivity > 1
+    || material.oxidizedEmissivity < material.cleanEmissivity || material.oxidizedEmissivity > 1
+    || material.oxidationActivationEnergyJPerMol <= 0 || material.heatCapacitySegments.length === 0) {
+    throw new Error("Material thermal values must define density, emissivity, activation energy, and heat capacity.");
+  }
+}
+
+function assertThermalDuration(elapsedMs: number): void {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > FORGE_RULES.maximumThermalIntentMs) {
+    throw new Error("Thermal duration must be finite and inside the interaction limit.");
+  }
 }
 
 function assertHammerOperation(state: ForgeState, operation: HammerOperation): void {
@@ -1168,3 +1397,4 @@ function average(values: readonly number[]): number { return values.reduce((sum,
 function clamp(value: number, minimum: number, maximum: number): number { return Math.min(maximum, Math.max(minimum, value)); }
 function lerp(start: number, end: number, amount: number): number { return start + (end - start) * amount; }
 function roundWeight(value: number): number { return Math.round(value * 1_000) / 1_000; }
+function roundThermal(value: number): number { return Math.round(value * 1_000_000) / 1_000_000; }

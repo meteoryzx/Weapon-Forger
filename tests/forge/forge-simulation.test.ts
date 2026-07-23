@@ -7,6 +7,8 @@ import {
   createForgeSnapshot,
   createForgeState,
   createHammerInfluencePreview,
+  heatCapacityJPerKgK,
+  previewThermalState,
   replayForgeState,
   totalVolume,
   type BladeBlock,
@@ -45,6 +47,47 @@ function block(state: ForgeState, widthIndex = CENTER_LEFT, heightIndex = TOP, s
 }
 
 describe("forge simulation", () => {
+  it("uses temperature-dependent solid iron heat capacity", () => {
+    expect(heatCapacityJPerKgK(20)).toBeGreaterThan(430);
+    expect(heatCapacityJPerKgK(20)).toBeLessThan(470);
+    expect(heatCapacityJPerKgK(750)).toBeGreaterThan(1_100);
+    expect(heatCapacityJPerKgK(900)).toBeLessThan(800);
+  });
+
+  it("heats by furnace exposure and cools by air exposure without resetting history", () => {
+    let state = createForgeState();
+    state = applyForgeOperation(state, { kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+    const afterFifteenSeconds = previewThermalState(state, 15_000);
+    const afterThirtySeconds = previewThermalState(state, 30_000);
+    expect(createForgeSnapshot(afterFifteenSeconds).averageTemperatureC).toBeGreaterThan(650);
+    expect(createForgeSnapshot(afterThirtySeconds).averageTemperatureC).toBeGreaterThan(
+      createForgeSnapshot(afterFifteenSeconds).averageTemperatureC,
+    );
+
+    state = applyForgeOperation(state, { kind: "move-billet", destination: "inspection", elapsedMs: 25_000 });
+    const hotSnapshot = createForgeSnapshot(state);
+    const cooling = previewThermalState(state, 10_000);
+    expect(createForgeSnapshot(cooling).averageTemperatureC).toBeLessThan(hotSnapshot.averageTemperatureC);
+    expect(createForgeSnapshot(cooling).peakTemperatureC).toBe(hotSnapshot.peakTemperatureC);
+    expect(createForgeSnapshot(cooling).oxidationDose).toBeGreaterThan(hotSnapshot.oxidationDose);
+  });
+
+  it("replays furnace and inspection durations deterministically", () => {
+    const initial = createForgeState();
+    const operations: ForgeOperation[] = [
+      { kind: "move-billet", destination: "furnace", elapsedMs: 0 },
+      { kind: "move-billet", destination: "inspection", elapsedMs: 18_000 },
+      { kind: "move-billet", destination: "furnace", elapsedMs: 4_000 },
+      { kind: "move-billet", destination: "inspection", elapsedMs: 8_000 },
+    ];
+    const direct = replayForgeState(initial, operations);
+    const replayed = replayForgeState(JSON.parse(JSON.stringify(initial)), JSON.parse(JSON.stringify(operations)));
+
+    expect(replayed).toEqual(direct);
+    expect(createForgeSnapshot(direct).averageTemperatureC).toBeGreaterThan(700);
+    expect(createForgeSnapshot(direct).hotExposureSeconds).toBeGreaterThan(0);
+  });
+
   it("uses one physical unit system and a shared three-dimensional node lattice", () => {
     const state = createForgeState();
     const first = block(state, 0, 0, 0);
@@ -338,6 +381,8 @@ describe("forge simulation", () => {
     expect(() => applyForgeOperation(initial, { kind: "feed", step: 0 } as unknown as ForgeOperation)).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 3 } as unknown as ForgeOperation)).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0, faceBias: 1.1 })).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "inspection", elapsedMs: 1_000 })).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "furnace", elapsedMs: 120_001 })).toThrow();
     expect(initial.operations).toHaveLength(0);
   });
 });

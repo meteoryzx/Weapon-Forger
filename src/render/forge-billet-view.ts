@@ -32,6 +32,7 @@ import {
   type WorkpieceGrid,
   type WorkpieceNode,
 } from "../forge/index.ts";
+import { thermalSteelAppearance } from "./thermal-color.ts";
 
 const DESIGN_HALF_HEIGHT = 117;
 const ROTATE_CONTROL_SIZE = 72;
@@ -39,8 +40,8 @@ const BILLET_AXIAL_SCALE = 0.58;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
-  emissive: "#351008",
-  emissiveIntensity: 0.55,
+  emissive: "#000000",
+  emissiveIntensity: 0,
   vertexColors: true,
   side: DoubleSide,
 });
@@ -116,6 +117,9 @@ export class ForgeBilletView {
 
   update(snapshot: ForgeSnapshot, hammerPreview: HammerInfluencePreview | null = null): void {
     this.snapshot = snapshot;
+    const appearance = thermalSteelAppearance(snapshot.averageTemperatureC);
+    BILLET_MATERIAL.emissive.copy(appearance.emissive);
+    BILLET_MATERIAL.emissiveIntensity = appearance.emissiveIntensity;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset * BILLET_AXIAL_SCALE;
     this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
@@ -486,9 +490,7 @@ function average(values: readonly number[]): number {
 }
 
 function temperatureColor(temperatureC: number, impact: number): Color {
-  const heat = Math.min(1, Math.max(0, (temperatureC - 450) / 550));
-  const color = new Color("#5a2419").lerp(new Color("#ffad45"), heat);
-  return color.lerp(new Color("#fff2ae"), impact * 0.75);
+  return thermalSteelAppearance(temperatureC).surface.lerp(new Color("#fff2ae"), impact * 0.75);
 }
 
 function createArrowGeometry(direction: -1 | 1): ShapeGeometry {

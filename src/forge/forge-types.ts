@@ -1,4 +1,15 @@
-export type ForgePhase = "forging";
+export type ForgePhase = "heating" | "forging";
+export type BilletLocation = "inspection" | "furnace";
+
+export interface HeatCapacitySegment {
+  readonly minimumK: number;
+  readonly maximumK: number;
+  readonly a: number;
+  readonly b: number;
+  readonly c: number;
+  readonly d: number;
+  readonly e: number;
+}
 
 export interface ForgeMaterial {
   readonly id: string;
@@ -9,6 +20,12 @@ export interface ForgeMaterial {
   readonly plasticityPeakC: number;
   readonly overheatTemperatureC: number;
   readonly stressRecoveryAtPeak: number;
+  readonly densityKgPerM3: number;
+  readonly molarMassKgPerMol: number;
+  readonly cleanEmissivity: number;
+  readonly oxidizedEmissivity: number;
+  readonly oxidationActivationEnergyJPerMol: number;
+  readonly heatCapacitySegments: readonly HeatCapacitySegment[];
 }
 
 export interface BladeSection {
@@ -81,11 +98,27 @@ export interface WorkpieceState {
   readonly nodes: readonly WorkpieceNode[];
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
+  readonly thermal: WorkpieceThermalState;
+}
+
+export interface WorkpieceThermalState {
+  readonly location: BilletLocation;
+  readonly peakTemperatureC: number;
+  readonly hotExposureSeconds: number;
+  // A normalized Arrhenius time integral reserved for later scale growth.
+  readonly oxidationDose: number;
+  readonly overheatDose: number;
 }
 
 export interface HeatOperation {
   readonly kind: "heat";
   readonly temperatureC: number;
+}
+
+export interface MoveBilletOperation {
+  readonly kind: "move-billet";
+  readonly destination: BilletLocation;
+  readonly elapsedMs: number;
 }
 
 export interface RotateOperation {
@@ -118,8 +151,8 @@ export interface GrindOperation {
   readonly amount: number;
 }
 
-export type ForgeOperation = HeatOperation | RotateOperation | FeedOperation | HammerOperation | QuenchOperation | GrindOperation;
-export type S3aForgeOperation = HeatOperation | RotateOperation | FeedOperation | HammerOperation;
+export type ForgeOperation = HeatOperation | MoveBilletOperation | RotateOperation | FeedOperation | HammerOperation | QuenchOperation | GrindOperation;
+export type S3aForgeOperation = HeatOperation | MoveBilletOperation | RotateOperation | FeedOperation | HammerOperation;
 
 export interface HammerIntent {
   readonly kind: "hammer";
@@ -139,7 +172,13 @@ export interface FeedIntent {
   readonly step: 1 | -1;
 }
 
-export type ForgeIntent = HammerIntent | RotateIntent | FeedIntent;
+export interface MoveBilletIntent {
+  readonly kind: "move-billet";
+  readonly destination: BilletLocation;
+  readonly elapsedMs: number;
+}
+
+export type ForgeIntent = HammerIntent | RotateIntent | FeedIntent | MoveBilletIntent;
 
 export interface ForgeState {
   readonly parameterVersion: string;
@@ -184,6 +223,13 @@ export interface ForgeSnapshotBlock {
 
 export interface ForgeSnapshot {
   readonly parameterVersion: string;
+  readonly phase: ForgePhase;
+  readonly billetLocation: BilletLocation;
+  readonly averageTemperatureC: number;
+  readonly peakTemperatureC: number;
+  readonly hotExposureSeconds: number;
+  readonly oxidationDose: number;
+  readonly overheatDose: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
   readonly grid: WorkpieceGrid;

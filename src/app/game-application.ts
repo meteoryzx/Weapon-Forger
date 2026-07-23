@@ -1,8 +1,9 @@
 import {
   applyForgeIntent,
-  applyForgeOperation,
   createForgeSnapshot,
   createForgeState,
+  FORGE_RULES,
+  previewThermalState,
   type ForgeIntent,
   type ForgeSnapshot,
   type ForgeState,
@@ -10,19 +11,32 @@ import {
 
 export class GameApplication {
   private state: ForgeState;
+  private previewState: ForgeState;
+  private previewElapsedMs = 0;
 
   constructor() {
-    const initial = createForgeState();
-    // R0 keeps the billet in a visible forging state so click-to-deform can be verified.
-    this.state = applyForgeOperation(initial, { kind: "heat", temperatureC: 950 });
+    this.state = createForgeState();
+    this.previewState = this.state;
   }
 
-  getSnapshot(): ForgeSnapshot {
-    return createForgeSnapshot(this.state);
+  getSnapshot(elapsedMs = 0): ForgeSnapshot {
+    const boundedElapsed = Math.min(Math.max(elapsedMs, 0), FORGE_RULES.maximumThermalIntentMs);
+    if (boundedElapsed < this.previewElapsedMs) {
+      this.previewState = this.state;
+      this.previewElapsedMs = 0;
+    }
+    const delta = boundedElapsed - this.previewElapsedMs;
+    if (delta > 0) {
+      this.previewState = previewThermalState(this.previewState, delta);
+      this.previewElapsedMs = boundedElapsed;
+    }
+    return createForgeSnapshot(this.previewState);
   }
 
   applyIntent(intent: ForgeIntent): ForgeSnapshot {
     this.state = applyForgeIntent(this.state, intent);
+    this.previewState = this.state;
+    this.previewElapsedMs = 0;
     return this.getSnapshot();
   }
 }
