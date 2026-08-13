@@ -1,0 +1,46 @@
+name: 可玩切片
+description: 定义一条可由作者验证的玩家行为
+title: "[Slice] "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 玩家结果
+      description: 完成后玩家能看见、操作或理解什么？
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 范围
+      description: 列出本切片会做和明确不会做的内容。
+    validations:
+      required: true
+  - type: textarea
+    id: interfaces
+    attributes:
+      label: 接口与目录
+      description: 会触及哪些公共契约和仓库目录？
+    validations:
+      required: true
+  - type: textarea
+    id: automated
+    attributes:
+      label: 自动验收
+      description: 写出测试、构建和可机械判断的通过条件。
+    validations:
+      required: true
+  - type: textarea
+    id: experience
+    attributes:
+      label: 作者体验验收
+      description: 写出浏览器或微信中的中文试玩路径与预期现象。
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险与恢复点
+      description: 最主要风险、止损条件和安全回退提交。
+    validations:
+      required: true

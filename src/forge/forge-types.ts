@@ -106,7 +106,7 @@ export interface HammerOperation {
   readonly faceBias?: number;
 }
 
-// Reserved for the complete forging chain. S3a intentionally has no thermal-treatment rules yet.
+// Reserved for later slices of the complete forging chain.
 export interface QuenchOperation {
   readonly kind: "quench";
   readonly medium: "water" | "oil";
@@ -119,7 +119,6 @@ export interface GrindOperation {
 }
 
 export type ForgeOperation = HeatOperation | RotateOperation | FeedOperation | HammerOperation | QuenchOperation | GrindOperation;
-export type S3aForgeOperation = HeatOperation | RotateOperation | FeedOperation | HammerOperation;
 
 export interface HammerIntent {
   readonly kind: "hammer";

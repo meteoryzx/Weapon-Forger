@@ -147,7 +147,7 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
       return appendOperation(applyHammer(state, operation), operation);
     case "quench":
     case "grind":
-      throw new Error(`${operation.kind} is reserved for S3c and cannot run in S3a.`);
+      throw new Error(`${operation.kind} is reserved for a later forging-chain slice.`);
   }
 }
 
