@@ -1,23 +1,30 @@
 {
   "name": "weapon-forger",
-  "uuid": "7032bb41-caf9-4af8-ab17-fc88f7674f9f",
-  "creator": {
-    "version": "3.8.8"
-  },
+  "version": "0.1.0",
+  "private": true,
   "type": "module",
   "engines": {
     "node": ">=24 <25"
   },
   "scripts": {
-    "doctor": "node scripts/doctor.mjs",
-    "typecheck": "tsc -p tsconfig.logic.json",
-    "validate:data": "node scripts/validate-data.mjs",
-    "test": "node --test",
-    "check": "npm run doctor && npm run typecheck && npm run validate:data && npm test",
-    "sample:forge": "node scripts/forge-samples.mjs",
-    "build:web": "node scripts/build-web.mjs"
+    "dev": "vite --config vite.web.config.ts",
+    "build:web": "vite build --config vite.web.config.ts",
+    "build:wechat": "vite build --config vite.wechat.config.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --config vitest.config.ts",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run test && npm run build:web && npm run build:wechat && npm run test:e2e"
+  },
+  "dependencies": {
+    "three": "0.185.1"
   },
   "devDependencies": {
-    "typescript": "5.8.2"
+    "@playwright/test": "1.61.1",
+    "@types/node": "24.4.0",
+    "@types/three": "0.185.1",
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
   }
 }
