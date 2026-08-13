@@ -1,12 +1,10 @@
 import { GameApplication } from "../app/game-application.ts";
-import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
+import { FORGE_RULES } from "../forge/index.ts";
 import type { WechatApi } from "../platform/wechat-types.ts";
-import { ForgeBilletView } from "../render/forge-billet-view.ts";
+import { FurnaceView } from "../render/furnace-view.ts";
 
 const wxApi = (globalThis as { readonly wx?: WechatApi }).wx;
-if (!wxApi) {
-  throw new Error("Wechat entry requires the wx Mini Game API.");
-}
+if (!wxApi) throw new Error("Wechat entry requires the wx Mini Game API.");
 
 const systemInfo = wxApi.getSystemInfoSync();
 const canvas = wxApi.createCanvas();
@@ -19,38 +17,30 @@ const viewport = {
 };
 
 const application = new GameApplication();
-const view = new ForgeBilletView(canvas, viewport);
-
-view.update(application.getSnapshot());
-let activePress: { readonly sectionIndex: number; readonly faceBias: number; readonly startedAtMs: number } | null = null;
+const view = new FurnaceView(canvas, viewport);
+let periodStartedAtMs = Date.now();
+let latestSnapshot = application.getSnapshot();
+let lastThermalPreviewAtMs = -Infinity;
 
 wxApi.onTouchStart((event) => {
   const touch = event.touches[0];
-  if (!touch) {
-    return;
-  }
-  const quarterTurns = view.pickRotateControl(touch.clientX, touch.clientY);
-  if (quarterTurns !== null) {
-    activePress = null;
-    view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
-    return;
-  }
+  const now = performance.now();
+  if (!touch || view.isAnimating(now) || !view.pickToggle(touch.clientX, touch.clientY)) return;
+  const snapshot = latestSnapshot;
+  const destination = snapshot.billetLocation === "inspection" ? "furnace" : "inspection";
+  const elapsedMs = Math.min(Date.now() - periodStartedAtMs, FORGE_RULES.maximumThermalIntentMs);
+  application.applyIntent({ kind: "move-billet", destination, elapsedMs });
+  periodStartedAtMs = Date.now();
+  latestSnapshot = application.getSnapshot();
+  view.update(latestSnapshot, now);
+});
 
-  const target = view.pickHammerTarget(touch.clientX, touch.clientY);
-  if (!target) {
-    return;
+const renderFrame = (nowMs: number) => {
+  if (nowMs - lastThermalPreviewAtMs >= 100) {
+    latestSnapshot = application.getSnapshot(Date.now() - periodStartedAtMs);
+    lastThermalPreviewAtMs = nowMs;
   }
-  activePress = { ...target, startedAtMs: Date.now() };
-});
-wxApi.onTouchEnd(() => {
-  if (!activePress) {
-    return;
-  }
-  const { sectionIndex, faceBias, startedAtMs } = activePress;
-  activePress = null;
-  const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  view.update(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }));
-});
-wxApi.onTouchCancel(() => {
-  activePress = null;
-});
+  view.update(latestSnapshot, nowMs);
+  globalThis.requestAnimationFrame(renderFrame);
+};
+globalThis.requestAnimationFrame(renderFrame);

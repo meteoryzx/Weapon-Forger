@@ -1,148 +1,49 @@
 import { GameApplication } from "../app/game-application.ts";
-import { createHammerInfluencePreview, type HammerInfluencePreview } from "../forge/index.ts";
-import { HAMMER_INPUT_RULES, hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
-import { ForgeBilletView } from "../render/forge-billet-view.ts";
+import { FORGE_RULES } from "../forge/index.ts";
+import { FurnaceView } from "../render/furnace-view.ts";
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game");
-if (!canvas) {
-  throw new Error("Missing #game canvas.");
-}
+if (!canvas) throw new Error("Missing #game canvas.");
 
 const application = new GameApplication();
-const view = new ForgeBilletView(canvas, browserViewport());
-
-view.update(application.getSnapshot());
-let activePress: { readonly sectionIndex: number; readonly faceBias: number; readonly startedAtMs: number } | null = null;
-let hoverTarget: { readonly sectionIndex: number; readonly faceBias: number } | null = null;
-let activePreview: HammerInfluencePreview | null = null;
-let chargeFrame: number | null = null;
+const view = new FurnaceView(canvas, browserViewport());
+let periodStartedAtMs = Date.now();
+let animationFrame = 0;
+let latestSnapshot = application.getSnapshot();
+let lastThermalPreviewAtMs = -Infinity;
 
 canvas.addEventListener("pointerdown", (event) => {
+  const now = performance.now();
+  if (view.isAnimating(now)) return;
   const bounds = canvas.getBoundingClientRect();
-  const viewportX = event.clientX - bounds.left;
-  const viewportY = event.clientY - bounds.top;
-  const quarterTurns = view.pickRotateControl(viewportX, viewportY);
-  if (quarterTurns !== null) {
-    activePress = null;
-    hoverTarget = null;
-    stopChargePreview();
-    updateView(application.applyIntent({ kind: "rotate", quarterTurns }), null);
-    return;
-  }
+  if (!view.pickToggle(event.clientX - bounds.left, event.clientY - bounds.top)) return;
+  const snapshot = latestSnapshot;
+  const destination = snapshot.billetLocation === "inspection" ? "furnace" : "inspection";
+  const elapsedMs = Math.min(Date.now() - periodStartedAtMs, FORGE_RULES.maximumThermalIntentMs);
+  application.applyIntent({ kind: "move-billet", destination, elapsedMs });
+  periodStartedAtMs = Date.now();
+  const next = application.getSnapshot();
+  latestSnapshot = next;
+  canvas.dataset.billetLocation = next.billetLocation;
+  view.update(next, now);
+});
 
-  const target = view.pickHammerTarget(viewportX, viewportY);
-  if (!target) {
-    return;
-  }
-  activePress = { ...target, startedAtMs: Date.now() };
-  hoverTarget = target;
-  updatePreview(target, HAMMER_INPUT_RULES.lightHammerEnergy);
-  startChargePreview();
-  canvas.setPointerCapture(event.pointerId);
-});
-canvas.addEventListener("pointermove", (event) => {
-  const bounds = canvas.getBoundingClientRect();
-  const viewportX = event.clientX - bounds.left;
-  const viewportY = event.clientY - bounds.top;
-  const target = view.pickHammerTarget(viewportX, viewportY);
-  if (activePress) {
-    return;
-  }
-  hoverTarget = target;
-  updatePreview(target, HAMMER_INPUT_RULES.lightHammerEnergy);
-});
-canvas.addEventListener("pointerup", (event) => {
-  if (!activePress) {
-    return;
-  }
-  const { sectionIndex, faceBias, startedAtMs } = activePress;
-  activePress = null;
-  stopChargePreview();
-  if (canvas.hasPointerCapture(event.pointerId)) {
-    canvas.releasePointerCapture(event.pointerId);
-  }
-  const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  updateView(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }), null);
-  const bounds = canvas.getBoundingClientRect();
-  const nextTarget = view.pickHammerTarget(event.clientX - bounds.left, event.clientY - bounds.top);
-  hoverTarget = nextTarget;
-  updatePreview(nextTarget, HAMMER_INPUT_RULES.lightHammerEnergy);
-});
-canvas.addEventListener("pointercancel", () => {
-  activePress = null;
-  hoverTarget = null;
-  stopChargePreview();
-  updateView(application.getSnapshot(), null);
-});
-canvas.addEventListener("pointerleave", () => {
-  if (activePress) {
-    return;
-  }
-  hoverTarget = null;
-  updatePreview(null, HAMMER_INPUT_RULES.lightHammerEnergy);
-});
-window.addEventListener("keydown", (event) => {
-  if (event.repeat) {
-    return;
-  }
-  const key = event.key.toLowerCase();
-  const quarterTurns = key === "a" ? -1 : key === "d" ? 1 : null;
-  if (quarterTurns !== null) {
-    event.preventDefault();
-    hoverTarget = null;
-    stopChargePreview();
-    updateView(application.applyIntent({ kind: "rotate", quarterTurns }), null);
-    return;
-  }
-
-  const step = key === "w" ? 1 : key === "s" ? -1 : null;
-  if (step === null) {
-    return;
-  }
-
-  event.preventDefault();
-  activePress = null;
-  hoverTarget = null;
-  stopChargePreview();
-  updateView(application.applyIntent({ kind: "feed", step }), null);
-});
 window.addEventListener("resize", () => view.resize(browserViewport()));
-window.addEventListener("beforeunload", () => view.dispose());
+window.addEventListener("beforeunload", () => {
+  window.cancelAnimationFrame(animationFrame);
+  view.dispose();
+});
 
-function updatePreview(target: { readonly sectionIndex: number; readonly faceBias: number } | null, energy: number): void {
-  const preview = target
-    ? createHammerInfluencePreview(application.getSnapshot(), { ...target, energy })
-    : null;
-  updateView(application.getSnapshot(), preview);
-}
-
-function updateView(snapshot = application.getSnapshot(), preview = activePreview): void {
-  activePreview = preview;
-  view.update(snapshot, preview);
-}
-
-function startChargePreview(): void {
-  if (chargeFrame !== null) {
-    return;
+const renderFrame = (nowMs: number) => {
+  if (nowMs - lastThermalPreviewAtMs >= 100) {
+    latestSnapshot = application.getSnapshot(Date.now() - periodStartedAtMs);
+    canvas.dataset.billetLocation = latestSnapshot.billetLocation;
+    lastThermalPreviewAtMs = nowMs;
   }
-  const tick = () => {
-    if (!activePress) {
-      chargeFrame = null;
-      return;
-    }
-    updatePreview(activePress, hammerEnergyForPressDuration(Date.now() - activePress.startedAtMs));
-    chargeFrame = window.requestAnimationFrame(tick);
-  };
-  chargeFrame = window.requestAnimationFrame(tick);
-}
-
-function stopChargePreview(): void {
-  if (chargeFrame === null) {
-    return;
-  }
-  window.cancelAnimationFrame(chargeFrame);
-  chargeFrame = null;
-}
+  view.update(latestSnapshot, nowMs);
+  animationFrame = window.requestAnimationFrame(renderFrame);
+};
+animationFrame = window.requestAnimationFrame(renderFrame);
 
 function browserViewport() {
   return {

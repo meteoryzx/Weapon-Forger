@@ -1,6 +1,6 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
-export const FORGE_PARAMETER_VERSION = "r1h-8";
+export const FORGE_PARAMETER_VERSION = "r1i-1";
 
 const WORKPIECE_LENGTH = 336;
 const WORKPIECE_WIDTH = 48;
@@ -16,10 +16,36 @@ export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
   plasticityPeakC: 1000,
   overheatTemperatureC: 1150,
   stressRecoveryAtPeak: 0.75,
+  densityKgPerM3: 7_850,
+  molarMassKgPerMol: 0.055_845,
+  cleanEmissivity: 0.35,
+  oxidizedEmissivity: 0.8,
+  oxidationActivationEnergyJPerMol: 150_000,
+  // NIST-JANAF solid iron Shomate coefficients, Cp in J/(mol K), t = K / 1000.
+  heatCapacitySegments: [
+    { minimumK: 298, maximumK: 700, a: 18.42868, b: 24.64301, c: -8.91372, d: 9.664706, e: -0.012643 },
+    { minimumK: 700, maximumK: 1042, a: -57_767.65, b: 137_919.7, c: -122_773.2, d: 38_682.42, e: 3_993.08 },
+    { minimumK: 1042, maximumK: 1100, a: -325.8859, b: 28.92876, c: 0, d: 0, e: 411.9629 },
+    { minimumK: 1100, maximumK: 1809, a: -776.7387, b: 919.4005, c: -383.7184, d: 57.08148, e: 242.1369 },
+  ],
 };
 
 export const FORGE_RULES = {
   ambientTemperatureC: 20,
+  furnaceGasTemperatureC: 1_150,
+  furnaceWallTemperatureC: 1_250,
+  furnaceConvectionWPerM2K: 45,
+  furnaceRadiationViewFactor: 0.85,
+  airConvectionWPerM2K: 12,
+  stefanBoltzmannWPerM2K4: 5.670_374_419e-8,
+  thermalTimeScale: 6,
+  thermalStepSeconds: 0.1,
+  maximumThermalIntentMs: 120_000,
+  hotExposureThresholdC: 600,
+  oxidationReferenceTemperatureC: 1_000,
+  oxidationEmissivityDose: 90,
+  stressRecoveryPerPhysicalSecond: 0.004,
+  overheatDamagePerPhysicalSecond: 0.001,
   workpieceLength: WORKPIECE_LENGTH,
   simulationCellSize: SIMULATION_CELL_SIZE,
   defaultSectionCount: WORKPIECE_LENGTH / SIMULATION_CELL_SIZE,

@@ -2,24 +2,26 @@ import { describe, expect, it } from "vitest";
 
 import { GameApplication } from "../../src/app/game-application.ts";
 
-describe("R0 browser application", () => {
-  it("starts with a heated solid block grid and applies a local hammer intent", () => {
+describe("heating application", () => {
+  it("starts cold, heats in the furnace, and cools at the inspection position", () => {
     const application = new GameApplication();
-    const before = application.getSnapshot();
-    const centerIndex = Math.floor(before.sections.length / 2);
-    const after = application.applyIntent({ kind: "hammer", sectionIndex: centerIndex, energy: 0.85, lateralBias: 0 });
+    const initial = application.getSnapshot();
 
-    expect(before.sections).toHaveLength(168);
-    expect(before.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
-    expect(before.sections[centerIndex]?.blocks).toHaveLength(96);
-    expect(before.sections[centerIndex]?.temperatureC).toBe(950);
-    const planeSize = (before.grid.widthBlocks + 1) * (before.grid.heightBlocks + 1);
-    const centerWidth = before.grid.widthBlocks / 2;
-    const topNodeIndex = centerIndex * planeSize
-      + before.grid.heightBlocks * (before.grid.widthBlocks + 1)
-      + centerWidth;
-    expect(after.nodes[topNodeIndex]?.verticalOffset).toBeLessThan(
-      before.nodes[topNodeIndex]?.verticalOffset ?? -Infinity,
-    );
+    expect(initial.phase).toBe("heating");
+    expect(initial.billetLocation).toBe("inspection");
+    expect(initial.averageTemperatureC).toBe(20);
+    expect(initial.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
+
+    application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+    const heatingPreview = application.getSnapshot(15_000);
+    expect(heatingPreview.billetLocation).toBe("furnace");
+    expect(heatingPreview.averageTemperatureC).toBeGreaterThan(650);
+
+    const inspected = application.applyIntent({
+      kind: "move-billet", destination: "inspection", elapsedMs: 15_000,
+    });
+    expect(inspected.averageTemperatureC).toBeCloseTo(heatingPreview.averageTemperatureC, 0);
+    const coolingPreview = application.getSnapshot(10_000);
+    expect(coolingPreview.averageTemperatureC).toBeLessThan(inspected.averageTemperatureC);
   });
 });
