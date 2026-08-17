@@ -7,10 +7,28 @@
     <style>
       html, body, #game { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #151817; }
       #game { display: block; touch-action: none; }
+      #hud { position: fixed; left: 0; right: 0; top: 0; padding: 10px 14px; color: #e8e6df; font-family: system-ui, sans-serif; pointer-events: none; z-index: 10; }
+      #hud-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+      #hud-actions { display: flex; gap: 8px; flex-wrap: wrap; pointer-events: auto; }
+      #hud-actions button { background: #2a2f33; color: #e8e6df; border: 1px solid #4a5258; border-radius: 6px; padding: 7px 14px; font-size: 14px; cursor: pointer; }
+      #hud-actions button:hover { background: #3a4146; }
+      #hud-hint { font-size: 13px; color: #a9b0b5; margin-top: 8px; max-width: 640px; line-height: 1.5; }
+      #story { position: fixed; inset: 0; background: rgba(12, 13, 12, 0.94); color: #e8e6df; font-family: system-ui, sans-serif; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; z-index: 20; }
+      #story-text { max-width: 560px; line-height: 1.7; font-size: 15px; white-space: pre-wrap; }
+      #story-restart { margin-top: 24px; background: #2a2f33; color: #e8e6df; border: 1px solid #4a5258; border-radius: 6px; padding: 10px 20px; font-size: 15px; cursor: pointer; }
     </style>
   </head>
   <body>
     <canvas id="game" aria-label="打了个铁开发画布"></canvas>
+    <div id="hud">
+      <div id="hud-title"></div>
+      <div id="hud-actions"></div>
+      <div id="hud-hint"></div>
+    </div>
+    <div id="story">
+      <div id="story-text"></div>
+      <button id="story-restart">重新锻造</button>
+    </div>
     <script type="module" src="/src/entry/browser.ts"></script>
   </body>
 </html>

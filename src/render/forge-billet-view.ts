@@ -204,7 +204,7 @@ export class ForgeBilletView {
 
   dispose(): void {
     this.billet.geometry.dispose();
-    BILLET_MATERIAL.dispose();
+    // BILLET_MATERIAL is shared across view instances; do not dispose it here.
     this.renderer.dispose();
   }
 

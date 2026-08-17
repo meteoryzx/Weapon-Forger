@@ -5,6 +5,7 @@ import {
   FORGE_RULES,
   previewThermalState,
   type ForgeIntent,
+  type ForgeMaterial,
   type ForgeSnapshot,
   type ForgeState,
 } from "../forge/index.ts";
@@ -14,9 +15,13 @@ export class GameApplication {
   private previewState: ForgeState;
   private previewElapsedMs = 0;
 
-  constructor() {
-    this.state = createForgeState();
+  constructor(material?: ForgeMaterial) {
+    this.state = createForgeState(material ? { material } : {});
     this.previewState = this.state;
+  }
+
+  getState(): ForgeState {
+    return this.state;
   }
 
   getSnapshot(elapsedMs = 0): ForgeSnapshot {
@@ -38,5 +43,12 @@ export class GameApplication {
     this.previewState = this.state;
     this.previewElapsedMs = 0;
     return this.getSnapshot();
+  }
+
+  // Freezes the currently previewed thermal state into the committed state,
+  // used when the player leaves the furnace stage so forging starts hot.
+  commitPreview(): void {
+    this.state = this.previewState;
+    this.previewElapsedMs = 0;
   }
 }

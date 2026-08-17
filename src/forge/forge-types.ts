@@ -13,7 +13,10 @@ export interface HeatCapacitySegment {
 
 export interface ForgeMaterial {
   readonly id: string;
+  // 含碳量 0–1，是「成分」这个根基量的主数字；焊合时按体积加权平均。
+  readonly carbon: number;
   readonly hotWorkability: number;
+  readonly hardenability: number;
   readonly coldStressMultiplier: number;
   readonly damageResistance: number;
   readonly plasticityStartC: number;
@@ -46,6 +49,8 @@ export interface BladeSection {
   readonly lateralOffset: number;
   readonly cracked: boolean;
   readonly overheated: boolean;
+  // 0..1 grind progress on this section's edge, accumulated by grinding along the edge.
+  readonly groundAmount: number;
   readonly blocks: readonly BladeBlock[];
 }
 
@@ -90,8 +95,26 @@ export interface JointState {
   readonly integrity: number;
 }
 
+export type QuenchMedium = "water" | "oil";
+
+export interface QuenchState {
+  // null until the player quenches; medium and the temperature it started from
+  // are the only real facts the hardness/brittleness derivation needs.
+  readonly medium: QuenchMedium | null;
+  readonly startTemperatureC: number | null;
+}
+
+export interface TemperState {
+  // 回火温度；null 表示未回火。温度越高越韧越软。
+  readonly temperatureC: number | null;
+}
+
 export interface WorkpieceState {
   readonly id: string;
+  // 每个工件自带材料：焊合会按体积混合 carbon，故材料必须随工件走。
+  readonly material: ForgeMaterial;
+  // 焊合层数；初始 1。大马士革 = 反复切割+焊合 → 层数翻倍。
+  readonly layerCount: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
   readonly grid: WorkpieceGrid;
@@ -99,6 +122,8 @@ export interface WorkpieceState {
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
   readonly thermal: WorkpieceThermalState;
+  readonly quench: QuenchState;
+  readonly temper: TemperState;
 }
 
 export interface WorkpieceThermalState {
@@ -108,6 +133,11 @@ export interface WorkpieceThermalState {
   // A normalized Arrhenius time integral reserved for later scale growth.
   readonly oxidationDose: number;
   readonly overheatDose: number;
+}
+
+export interface SelectMaterialOperation {
+  readonly kind: "select-material";
+  readonly materialId: string;
 }
 
 export interface HeatOperation {
@@ -139,10 +169,9 @@ export interface HammerOperation {
   readonly faceBias?: number;
 }
 
-// Reserved for later slices of the complete forging chain.
 export interface QuenchOperation {
   readonly kind: "quench";
-  readonly medium: "water" | "oil";
+  readonly medium: QuenchMedium;
 }
 
 export interface GrindOperation {
@@ -151,7 +180,41 @@ export interface GrindOperation {
   readonly amount: number;
 }
 
-export type ForgeOperation = HeatOperation | MoveBilletOperation | RotateOperation | FeedOperation | HammerOperation | QuenchOperation | GrindOperation;
+// 切割：把当前工件在 sectionIndex 处一分为二，后半段移入工作台 bench。
+export interface CutOperation {
+  readonly kind: "cut";
+  readonly sectionIndex: number;
+}
+
+// 焊合：把当前工件与 bench[benchIndex] 加热后锻成一块；层数相加、carbon 按体积平均。
+export interface WeldOperation {
+  readonly kind: "weld";
+  readonly benchIndex: number;
+}
+
+// 回火：设定回火温度，调「硬↔韧」。
+export interface TemperOperation {
+  readonly kind: "temper";
+  readonly temperatureC: number;
+}
+
+export type ForgeOperation =
+  | SelectMaterialOperation
+  | HeatOperation
+  | MoveBilletOperation
+  | RotateOperation
+  | FeedOperation
+  | HammerOperation
+  | QuenchOperation
+  | GrindOperation
+  | CutOperation
+  | WeldOperation
+  | TemperOperation;
+
+export interface SelectMaterialIntent {
+  readonly kind: "select-material";
+  readonly materialId: string;
+}
 
 export interface HammerIntent {
   readonly kind: "hammer";
@@ -177,13 +240,50 @@ export interface MoveBilletIntent {
   readonly elapsedMs: number;
 }
 
-export type ForgeIntent = HammerIntent | RotateIntent | FeedIntent | MoveBilletIntent;
+export interface QuenchIntent {
+  readonly kind: "quench";
+  readonly medium: QuenchMedium;
+}
+
+export interface GrindIntent {
+  readonly kind: "grind";
+  readonly sectionIndex: number;
+  readonly amount: number;
+}
+
+export interface CutIntent {
+  readonly kind: "cut";
+  readonly sectionIndex: number;
+}
+
+export interface WeldIntent {
+  readonly kind: "weld";
+  readonly benchIndex: number;
+}
+
+export interface TemperIntent {
+  readonly kind: "temper";
+  readonly temperatureC: number;
+}
+
+export type ForgeIntent =
+  | SelectMaterialIntent
+  | HammerIntent
+  | RotateIntent
+  | FeedIntent
+  | MoveBilletIntent
+  | QuenchIntent
+  | GrindIntent
+  | CutIntent
+  | WeldIntent
+  | TemperIntent;
 
 export interface ForgeState {
   readonly parameterVersion: string;
   readonly phase: ForgePhase;
-  readonly material: ForgeMaterial;
+  // 当前正在加工的工件；其余切割下来的工件放在 bench，供焊合取用。
   readonly workpiece: WorkpieceState;
+  readonly bench: readonly WorkpieceState[];
   readonly operations: readonly ForgeOperation[];
 }
 
@@ -200,6 +300,7 @@ export interface ForgeSnapshotSection {
   readonly lateralOffset: number;
   readonly cracked: boolean;
   readonly overheated: boolean;
+  readonly groundAmount: number;
   readonly blocks: readonly ForgeSnapshotBlock[];
 }
 
@@ -236,6 +337,14 @@ export interface ForgeSnapshot {
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;
+  readonly quenchMedium: QuenchMedium | null;
+  readonly quenched: boolean;
+  readonly edgeCoverage: number;
+  readonly edgeEvenness: number;
+  readonly layerCount: number;
+  readonly carbon: number;
+  readonly temperTemperatureC: number | null;
+  readonly benchCount: number;
 }
 
 export interface HammerInfluenceSample {
