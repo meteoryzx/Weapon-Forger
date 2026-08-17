@@ -8,14 +8,10 @@ const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
 const hudTitle = document.querySelector<HTMLElement>("#hud-title")!;
 const hudActions = document.querySelector<HTMLElement>("#hud-actions")!;
 const hudHint = document.querySelector<HTMLElement>("#hud-hint")!;
-const storyOverlay = document.querySelector<HTMLElement>("#story")!;
-const storyText = document.querySelector<HTMLElement>("#story-text")!;
-const storyRestart = document.querySelector<HTMLButtonElement>("#story-restart")!;
-if (!canvas || !hudTitle || !hudActions || !hudHint || !storyOverlay || !storyText || !storyRestart) {
-  throw new Error("Missing a HUD element.");
-}
+const resultOverlay = document.querySelector<HTMLElement>("#story")!;
+const resultText = document.querySelector<HTMLElement>("#story-text")!;
+const resultRestart = document.querySelector<HTMLButtonElement>("#story-restart")!;
 
-const DEBUG = new URLSearchParams(window.location.search).has("debug");
 const flow = new DemoFlow();
 let view: FurnaceView | ForgeBilletView | null = null;
 let latestSnapshot: ForgeSnapshot | null = null;
@@ -35,7 +31,7 @@ function stageTitle(stage: DemoStage): string {
     case "forge": return "锻打";
     case "quench": return "淬火";
     case "grind": return "研磨";
-    case "story": return "冒险故事";
+    case "done": return "锻造完成";
   }
 }
 
@@ -46,7 +42,7 @@ function stageHint(stage: DemoStage): string {
     case "forge": return "点击钢坯落锤，长按蓄力重击；A/D 转面，W/S 送料。完成后点「完成锻打」。";
     case "quench": return "选择淬火介质：水淬更硬但更脆，油淬温和。";
     case "grind": return "点击钢坯刃口研磨，磨出锋利均匀的刃。完成后点「完成研磨」。";
-    case "story": return "";
+    case "done": return "";
   }
 }
 
@@ -100,32 +96,26 @@ function renderHud(): void {
     case "grind":
       add("完成研磨", () => { flow.advance(); enterStage(); });
       break;
-    case "story":
+    case "done":
       break;
   }
 }
 
-function renderStory(): void {
-  const story = flow.getStory();
-  const weapon = flow.getWeapon();
-  if (!story || !weapon) return;
+// R1 只展示「原始状态」：这是锻造的交付物（外观 + 原始数值），不是六维、不是故事。
+function renderResult(snapshot: ForgeSnapshot): void {
   const lines = [
-    `【${story.npcName} 的冒险】`,
+    "【锻造完成 · 原始状态】",
     "",
-    ...story.events.map((event) => `${event.title}：${event.text}`),
-    "",
-    `结局：${story.ending.title}——${story.ending.text}`,
+    `材料含碳：${snapshot.carbon.toFixed(2)}`,
+    `层数：${snapshot.layerCount}`,
+    `当前温度：${snapshot.averageTemperatureC.toFixed(0)}℃`,
+    `淬火：${snapshot.quenchMedium ?? "未淬火"}`,
+    `回火：${snapshot.temperTemperatureC === null ? "未回火" : `${snapshot.temperTemperatureC}℃`}`,
+    `裂纹：${snapshot.hasCracks ? "有" : "无"}`,
+    `刃口研磨：${Math.round(snapshot.edgeCoverage * 100)}%（均匀度 ${Math.round(snapshot.edgeEvenness * 100)}%）`,
+    `工作台上待处理钢坯：${snapshot.benchCount} 块`,
   ];
-  if (DEBUG) {
-    const dims = weapon.dimensions;
-    lines.push(
-      "",
-      `（调试）六维：锋利 ${dims.sharpness.toFixed(2)} · 硬度 ${dims.hardness.toFixed(2)} · 韧性 ${dims.toughness.toFixed(2)} · 重量 ${dims.weight.toFixed(2)} · 平衡 ${dims.balance.toFixed(2)} · 外观 ${dims.appearance.toFixed(2)}`,
-      `（调试）特性：${weapon.traits.map((trait) => trait.label).join("、") || "无"}`,
-      `（调试）缺陷：${weapon.flaws.map((flaw) => flaw.label).join("、") || "无"}`,
-    );
-  }
-  storyText.textContent = lines.join("\n");
+  resultText.textContent = lines.join("\n");
 }
 
 function enterStage(): void {
@@ -133,7 +123,7 @@ function enterStage(): void {
   syncView();
   latestSnapshot = stage === "heat" || stage === "forge" || stage === "quench" || stage === "grind"
     ? flow.getSnapshot()
-    : null;
+    : stage === "done" ? flow.getSnapshot() : null;
   if (stage === "heat") periodStartedAtMs = Date.now();
   if (latestSnapshot) {
     canvas.dataset.billetLocation = latestSnapshot.billetLocation;
@@ -142,8 +132,8 @@ function enterStage(): void {
   }
   renderHud();
   document.body.dataset.stage = stage;
-  storyOverlay.style.display = stage === "story" ? "flex" : "none";
-  if (stage === "story") renderStory();
+  resultOverlay.style.display = stage === "done" ? "flex" : "none";
+  if (stage === "done" && latestSnapshot) renderResult(latestSnapshot);
 }
 
 canvas.addEventListener("pointerdown", (event) => {
@@ -219,7 +209,7 @@ window.addEventListener("keydown", (event) => {
   if (view instanceof ForgeBilletView && latestSnapshot) view.update(latestSnapshot);
 });
 
-storyRestart.addEventListener("click", () => {
+resultRestart.addEventListener("click", () => {
   flow.restart();
   enterStage();
 });
