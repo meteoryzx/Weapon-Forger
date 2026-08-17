@@ -20,8 +20,17 @@ test("input is locked during travel and the furnace can return the billet", asyn
   const canvas = page.locator("#game");
   await expect(canvas).toHaveAttribute("data-billet-location", "inspection");
 
-  await canvas.click({ position: { x: 326, y: 410 } });
-  await canvas.click({ position: { x: 890, y: 390 } });
+  await canvas.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const points: readonly (readonly [number, number])[] = [[326, 410], [890, 390]];
+    for (const [x, y] of points) {
+      element.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        clientX: bounds.left + x,
+        clientY: bounds.top + y,
+      }));
+    }
+  });
   await expect(canvas).toHaveAttribute("data-billet-location", "furnace");
 
   await page.waitForTimeout(750);
