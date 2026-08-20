@@ -32,7 +32,9 @@ import {
 import { thermalSteelAppearance } from "./thermal-color.ts";
 
 const BILLET_AXIAL_SCALE = 0.58;
-const WORKSTATION_YAW = Math.PI / 12;
+const WORKSTATION_YAW = Math.PI / 24;
+const BILLET_YAW = Math.PI / 4;
+const BILLET_CENTER_OFFSET = FORGE_RULES.workpieceLength * BILLET_AXIAL_SCALE / 2;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
@@ -108,8 +110,14 @@ export class ForgeBilletView {
     anvil.rotation.y = WORKSTATION_YAW;
     this.scene.add(anvil);
     this.billet.scale.x = BILLET_AXIAL_SCALE;
-    this.billetRig.position.set(-96, 0, 0);
-    this.billetRig.rotation.y = WORKSTATION_YAW;
+    // The local billet geometry starts at x=0, so rotate around its midpoint
+    // while keeping that midpoint at the anvil center in the top view.
+    this.billetRig.position.set(
+      -BILLET_CENTER_OFFSET * Math.cos(BILLET_YAW),
+      0,
+      BILLET_CENTER_OFFSET * Math.sin(BILLET_YAW),
+    );
+    this.billetRig.rotation.y = BILLET_YAW;
     this.billetRig.add(this.billet);
     this.billetRig.add(this.billetHitTarget);
     this.impactMarker.visible = false;
@@ -131,7 +139,7 @@ export class ForgeBilletView {
     // The anvil face is at world Y=0. Place the lowest billet surface exactly
     // on that plane; do not hide an intersection by changing camera angle.
     this.billet.position.y = halfHeight;
-    this.billetHitTarget.position.x = this.billet.position.x;
+    this.billetHitTarget.position.x = this.billet.position.x + FORGE_RULES.workpieceLength / 2;
     this.billetHitTarget.position.y = this.billet.position.y;
     this.billetHitTarget.rotation.x = this.billet.rotation.x;
     this.updateImpactMarker(snapshot, hammerPreview);
@@ -146,7 +154,7 @@ export class ForgeBilletView {
     this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
     this.renderer.setSize(viewport.width, viewport.height, false);
     this.camera.aspect = viewport.width / viewport.height;
-    this.camera.position.set(0, 190, 360);
+    this.camera.position.set(0, 240, 390);
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
     this.render();
