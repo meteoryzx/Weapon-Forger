@@ -15,6 +15,7 @@ import {
   Vector2,
   WebGLRenderer,
   BoxGeometry,
+  CylinderGeometry,
   DoubleSide,
   ExtrudeGeometry,
   Shape,
@@ -60,6 +61,19 @@ export interface HammerPickTarget {
   readonly faceBias: number;
 }
 
+export type ForgeStation =
+  | "materials"
+  | "furnace"
+  | "anvil"
+  | "cut"
+  | "weld"
+  | "quench-water"
+  | "quench-oil"
+  | "temper"
+  | "grind";
+
+export type ForgeMaterialPick = "mild-steel" | "high-carbon-steel" | "spring-steel";
+
 export class ForgeBilletView {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
@@ -73,6 +87,8 @@ export class ForgeBilletView {
     new BoxGeometry(FORGE_RULES.workpieceLength, 24, FORGE_RULES.initialSectionWidth),
     new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   );
+  private readonly stationMeshes = new Map<ForgeStation, Mesh>();
+  private readonly materialMeshes = new Map<ForgeMaterialPick, Mesh>();
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -97,6 +113,7 @@ export class ForgeBilletView {
     rimLight.position.set(280, 180, 220);
     this.scene.add(rimLight);
     this.scene.add(this.camera);
+    this.createStationModels();
 
     const anvil = this.createAnvilModel();
     anvil.scale.set(BILLET_AXIAL_SCALE, 0.92, 1);
@@ -119,7 +136,11 @@ export class ForgeBilletView {
     this.resize(viewport);
   }
 
-  update(snapshot: ForgeSnapshot, hammerPreview: HammerInfluencePreview | null = null): void {
+  update(
+    snapshot: ForgeSnapshot,
+    hammerPreview: HammerInfluencePreview | null = null,
+    activeStation: ForgeStation = "anvil",
+  ): void {
     this.snapshot = snapshot;
     const appearance = thermalSteelAppearance(snapshot.averageTemperatureC);
     BILLET_MATERIAL.emissive.copy(appearance.emissive);
@@ -138,6 +159,7 @@ export class ForgeBilletView {
     const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
+    this.updateStationEmphasis(activeStation);
     this.render();
   }
 
@@ -154,6 +176,16 @@ export class ForgeBilletView {
 
   pickSection(viewportX: number, viewportY: number): number | null {
     return this.pickHammerTarget(viewportX, viewportY)?.sectionIndex ?? null;
+  }
+
+  pickStation(viewportX: number, viewportY: number): ForgeStation | null {
+    const hit = this.pickObject(viewportX, viewportY, [...this.stationMeshes.values()], false);
+    return (hit?.object.userData.station as ForgeStation | undefined) ?? null;
+  }
+
+  pickMaterial(viewportX: number, viewportY: number): ForgeMaterialPick | null {
+    const hit = this.pickObject(viewportX, viewportY, [...this.materialMeshes.values()], false);
+    return (hit?.object.userData.materialId as ForgeMaterialPick | undefined) ?? null;
   }
 
   pickHammerTarget(viewportX: number, viewportY: number): HammerPickTarget | null {
@@ -202,6 +234,10 @@ export class ForgeBilletView {
     this.billet.geometry.dispose();
     this.billetHitTarget.geometry.dispose();
     (this.billetHitTarget.material as MeshBasicMaterial).dispose();
+    for (const mesh of [...this.stationMeshes.values(), ...this.materialMeshes.values()]) {
+      mesh.geometry.dispose();
+      (mesh.material as MeshStandardMaterial).dispose();
+    }
     // BILLET_MATERIAL is shared across view instances; do not dispose it here.
     this.renderer.dispose();
   }
@@ -225,6 +261,54 @@ export class ForgeBilletView {
     foot.position.set(0, -151, 0);
     anvil.add(face, body, foot);
     return anvil;
+  }
+
+  private createStationModels(): void {
+    const definitions: readonly [ForgeStation, [number, number, number], [number, number, number], string][] = [
+      ["materials", [-260, 14, -132], [112, 28, 60], "#4f5961"],
+      ["furnace", [-260, 28, -20], [100, 56, 92], "#8b3f28"],
+      ["cut", [-250, 14, 98], [104, 28, 66], "#7a7f86"],
+      ["weld", [250, 14, 98], [104, 28, 66], "#536c74"],
+      ["quench-water", [250, 16, -4], [84, 32, 62], "#315d72"],
+      ["quench-oil", [250, 16, -96], [84, 32, 62], "#5a4a2f"],
+      ["temper", [180, 22, -190], [112, 44, 70], "#774a38"],
+      ["grind", [-190, 24, 205], [104, 48, 74], "#646d77"],
+    ];
+    for (const [station, position, size, color] of definitions) {
+      const mesh = new Mesh(
+        new BoxGeometry(...size),
+        new MeshStandardMaterial({ color, metalness: 0.25, roughness: 0.7, emissive: "#000000" }),
+      );
+      mesh.position.set(...position);
+      mesh.userData.station = station;
+      this.stationMeshes.set(station, mesh);
+      this.scene.add(mesh);
+    }
+
+    const materials: readonly [ForgeMaterialPick, string][] = [
+      ["mild-steel", "#78838c"],
+      ["spring-steel", "#9e8d72"],
+      ["high-carbon-steel", "#b86f45"],
+    ];
+    materials.forEach(([materialId, color], index) => {
+      const mesh = new Mesh(
+        new CylinderGeometry(18, 21, 8, 12),
+        new MeshStandardMaterial({ color, metalness: 0.75, roughness: 0.32 }),
+      );
+      mesh.rotation.z = Math.PI / 2;
+      mesh.position.set(-285 + index * 35, 42, -132);
+      mesh.userData.materialId = materialId;
+      this.materialMeshes.set(materialId, mesh);
+      this.scene.add(mesh);
+    });
+  }
+
+  private updateStationEmphasis(activeStation: ForgeStation): void {
+    for (const [station, mesh] of this.stationMeshes) {
+      const material = mesh.material as MeshStandardMaterial;
+      material.emissive.set(station === activeStation ? "#d8a36b" : "#000000");
+      material.emissiveIntensity = station === activeStation ? 0.45 : 0;
+    }
   }
 
   private createProfile(points: readonly [number, number][], depth: number, material: MeshStandardMaterial): Mesh {
@@ -263,8 +347,12 @@ function createBilletGeometry(
     profile.points.forEach((point, pointIndex) => {
       positions.push(point.axialPosition, point.verticalOffset, point.lateralOffset);
       const preview = previewIntensityAtRingPoint(ringIndex, pointIndex, hammerPreview, snapshot.grid);
-      const color = temperatureColor(temperatureAtPlane(snapshot.sections, ringIndex), preview);
-      const tint = perimeterTint(pointIndex, snapshot.grid);
+      const sectionIndex = Math.min(ringIndex, snapshot.sections.length - 1);
+      const section = snapshot.sections[sectionIndex];
+      const color = temperatureColor(temperatureAtPlane(snapshot.sections, ringIndex), preview)
+        .lerp(materialColor(snapshot.carbon), 0.12)
+        .lerp(new Color("#c9b58d"), Math.min(0.16, Math.max(0, snapshot.layerCount - 1) * 0.03));
+      const tint = perimeterTint(pointIndex, snapshot.grid) * (1 - (section?.groundAmount ?? 0) * 0.12);
       colors.push(color.r * tint, color.g * tint, color.b * tint);
     });
   }
@@ -295,19 +383,32 @@ function workpiecePerimeter(snapshot: ForgeSnapshot, axialIndex: number): { read
   const grid = snapshot.grid;
 
   for (let boundary = 0; boundary < grid.widthBlocks; boundary += 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, boundary, grid.heightBlocks));
+    points.push(groundedNode(snapshot, axialIndex, boundary, grid.heightBlocks));
   }
   for (let boundary = grid.heightBlocks; boundary > 0; boundary -= 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, grid.widthBlocks, boundary));
+    points.push(groundedNode(snapshot, axialIndex, grid.widthBlocks, boundary));
   }
   for (let boundary = grid.widthBlocks; boundary > 0; boundary -= 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, boundary, 0));
+    points.push(groundedNode(snapshot, axialIndex, boundary, 0));
   }
   for (let boundary = 0; boundary < grid.heightBlocks; boundary += 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, 0, boundary));
+    points.push(groundedNode(snapshot, axialIndex, 0, boundary));
   }
 
   return { points };
+}
+
+function groundedNode(
+  snapshot: ForgeSnapshot,
+  axialIndex: number,
+  widthIndex: number,
+  heightIndex: number,
+): WorkpieceNode {
+  const node = workpieceNodeAt(snapshot, axialIndex, widthIndex, heightIndex);
+  if (heightIndex !== snapshot.grid.heightBlocks) return node;
+  const sectionIndex = Math.min(axialIndex, snapshot.sections.length - 1);
+  const groundAmount = snapshot.sections[sectionIndex]?.groundAmount ?? 0;
+  return { ...node, verticalOffset: node.verticalOffset - groundAmount * 1.6 };
 }
 
 function workpieceNodeAt(
@@ -425,6 +526,10 @@ function average(values: readonly number[]): number {
 
 function temperatureColor(temperatureC: number, impact: number): Color {
   return thermalSteelAppearance(temperatureC).surface.lerp(new Color("#fff2ae"), impact * 0.75);
+}
+
+function materialColor(carbon: number): Color {
+  return new Color().setHSL(0.08, 0.2, lerp(0.58, 0.34, clamp(carbon, 0, 1)));
 }
 
 function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSection[]): number | null {
