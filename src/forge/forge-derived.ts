@@ -16,6 +16,9 @@ export interface ForgeFacts {
   readonly peakTemperatureC: number;
   readonly hotExposureSeconds: number;
   readonly stress: number;
+  readonly plasticStrain: number;
+  readonly elasticStrain: number;
+  readonly mechanicalWorkJ: number;
   readonly damage: number;
   readonly cracked: boolean;
   readonly quenchMedium: "water" | "oil" | null;
@@ -133,6 +136,9 @@ export function createForgeFacts(state: ForgeState, snapshot = createForgeSnapsh
     ? 0
     : sections.reduce((sum, section) => sum + section.thickness, 0) / sections.length;
   const stress = average(sections.map((section) => section.stress));
+  const plasticStrain = average(sections.map((section) => section.plasticStrain));
+  const elasticStrain = average(sections.map((section) => section.elasticStrain));
+  const mechanicalWorkJ = sections.reduce((sum, section) => sum + section.mechanicalWorkJ, 0);
   const damage = average(sections.map((section) => section.damage));
   const jointIntegrity = average(state.workpiece.joints.map((joint) => joint.integrity), 1);
 
@@ -150,6 +156,9 @@ export function createForgeFacts(state: ForgeState, snapshot = createForgeSnapsh
     peakTemperatureC: snapshot.peakTemperatureC,
     hotExposureSeconds: snapshot.hotExposureSeconds,
     stress,
+    plasticStrain,
+    elasticStrain,
+    mechanicalWorkJ,
     damage: clamp(Math.max(damage, snapshot.hasCracks ? 1 : 0)),
     cracked: snapshot.hasCracks,
     quenchMedium: state.workpiece.quench.medium,

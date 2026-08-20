@@ -10,7 +10,7 @@ The core produces three reusable layers:
 - `ForgeSnapshot`: a read-only projection for a renderer.
 - `ForgeFacts` and `ForgeDerivedData`: stable inputs and outputs for a downstream ruleset.
 
-`applyForgeIntent(state, intent)` is the normal input boundary. `replayForgeState(initialState, operations)` is the deterministic replay boundary. A host may use `createForgeState`, apply intents, serialize the state, and replay the same operations without importing the game application or renderer.
+`applyForgeIntent(state, intent)` is the normal input boundary. `replayForgeState(initialState, operations)` is the deterministic replay boundary. A host may use `createForgeState`, apply intents, serialize the state, and replay the same operations without importing the game application or renderer. The current core parameter version is `physics-2`; it records equivalent plastic strain, recoverable elastic strain, residual stress, damage, and absorbed mechanical work per block.
 
 ## Downstream profiles
 
@@ -23,6 +23,7 @@ Every derived attribute declares its source fact IDs. Profiles also have an expl
 ## Versioning rules
 
 - Changing the shape or meaning of `ForgeState`, `ForgeIntent`, `ForgeOperation`, or `ForgeSnapshot` requires a public contract/version decision and migration coverage.
+- Mechanical response is shared: tools provide a load and contact footprint, while material response derives stress, strain, damage, integrity, and mechanical work from the same state. A new operation must not write a fixed damage increment directly.
 - Changing a rule value requires updating the parameter version and fixed samples when the result changes.
 - Changing a downstream formula requires changing only that profile's version unless the raw forge contract changes.
 - The core does not own downstream balancing, combat terms, story text, or monetization terms.

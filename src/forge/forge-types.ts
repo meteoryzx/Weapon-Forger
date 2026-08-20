@@ -16,7 +16,6 @@ export interface ForgeMaterial {
   readonly carbon: number;
   readonly hotWorkability: number;
   readonly hardenability: number;
-  readonly coldStressMultiplier: number;
   readonly damageResistance: number;
   readonly plasticityStartC: number;
   readonly plasticityPeakC: number;
@@ -24,6 +23,10 @@ export interface ForgeMaterial {
   readonly stressRecoveryAtPeak: number;
   readonly densityKgPerM3: number;
   readonly molarMassKgPerMol: number;
+  // Mechanical response parameters for the shared reduced-order model.
+  readonly yieldStrengthAmbientMPa: number;
+  readonly yieldStrengthHotMPa: number;
+  readonly workHardeningExponent: number;
   readonly cleanEmissivity: number;
   readonly oxidizedEmissivity: number;
   readonly oxidationActivationEnergyJPerMol: number;
@@ -39,8 +42,12 @@ export interface BladeSection {
   readonly plasticity: number;
   // A normalized residual-stress index, not a real-world MPa measurement.
   readonly stress: number;
-  // A normalized record of repeated local shaping for deterministic damage checks.
+  // Accumulated equivalent plastic strain, not an operation counter.
   readonly plasticStrain: number;
+  // Recoverable strain retained as residual elastic energy after a load.
+  readonly elasticStrain: number;
+  // Mechanical work absorbed by this cell, in joules in the model's unit scale.
+  readonly mechanicalWorkJ: number;
   readonly damage: number;
   readonly integrity: number;
   readonly thermalDamage: number;
@@ -73,6 +80,8 @@ export interface BladeBlock {
   readonly plasticity: number;
   readonly stress: number;
   readonly plasticStrain: number;
+  readonly elasticStrain: number;
+  readonly mechanicalWorkJ: number;
   readonly damage: number;
   readonly integrity: number;
   readonly thermalDamage: number;
@@ -302,6 +311,10 @@ export interface ForgeSnapshotSection {
   readonly thickness: number;
   readonly temperatureC: number;
   readonly plasticity: number;
+  readonly stress: number;
+  readonly plasticStrain: number;
+  readonly elasticStrain: number;
+  readonly mechanicalWorkJ: number;
   readonly thermalDamage: number;
   readonly damage: number;
   readonly verticalOffset: number;
@@ -321,6 +334,10 @@ export interface ForgeSnapshotBlock {
   readonly volume: number;
   readonly temperatureC: number;
   readonly plasticity: number;
+  readonly stress: number;
+  readonly plasticStrain: number;
+  readonly elasticStrain: number;
+  readonly mechanicalWorkJ: number;
   readonly thermalDamage: number;
   readonly damage: number;
   readonly verticalOffset: number;

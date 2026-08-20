@@ -1,6 +1,6 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
-export const FORGE_PARAMETER_VERSION = "demo-1";
+export const FORGE_PARAMETER_VERSION = "physics-2";
 
 const WORKPIECE_LENGTH = 336;
 const WORKPIECE_WIDTH = 48;
@@ -20,7 +20,6 @@ export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
   carbon: 0.2,
   hotWorkability: 1,
   hardenability: 0.55,
-  coldStressMultiplier: 1,
   damageResistance: 1,
   plasticityStartC: 700,
   plasticityPeakC: 1000,
@@ -28,6 +27,9 @@ export const DEFAULT_FORGE_MATERIAL: ForgeMaterial = {
   stressRecoveryAtPeak: 0.75,
   densityKgPerM3: 7_850,
   molarMassKgPerMol: 0.055_845,
+  yieldStrengthAmbientMPa: 250,
+  yieldStrengthHotMPa: 65,
+  workHardeningExponent: 0.45,
   cleanEmissivity: 0.35,
   oxidizedEmissivity: 0.8,
   oxidationActivationEnergyJPerMol: 150_000,
@@ -40,7 +42,6 @@ export const HIGH_CARBON_STEEL: ForgeMaterial = {
   carbon: 0.9,
   hotWorkability: 0.9,
   hardenability: 0.95,
-  coldStressMultiplier: 1.15,
   damageResistance: 0.8,
   plasticityStartC: 680,
   plasticityPeakC: 980,
@@ -48,6 +49,9 @@ export const HIGH_CARBON_STEEL: ForgeMaterial = {
   stressRecoveryAtPeak: 0.7,
   densityKgPerM3: 7_850,
   molarMassKgPerMol: 0.055_845,
+  yieldStrengthAmbientMPa: 520,
+  yieldStrengthHotMPa: 90,
+  workHardeningExponent: 0.5,
   cleanEmissivity: 0.35,
   oxidizedEmissivity: 0.8,
   oxidationActivationEnergyJPerMol: 150_000,
@@ -60,7 +64,6 @@ export const SPRING_STEEL: ForgeMaterial = {
   carbon: 0.65,
   hotWorkability: 0.95,
   hardenability: 0.82,
-  coldStressMultiplier: 1.05,
   damageResistance: 0.92,
   plasticityStartC: 690,
   plasticityPeakC: 990,
@@ -68,6 +71,9 @@ export const SPRING_STEEL: ForgeMaterial = {
   stressRecoveryAtPeak: 0.72,
   densityKgPerM3: 7_850,
   molarMassKgPerMol: 0.055_845,
+  yieldStrengthAmbientMPa: 900,
+  yieldStrengthHotMPa: 105,
+  workHardeningExponent: 0.55,
   cleanEmissivity: 0.35,
   oxidizedEmissivity: 0.8,
   oxidationActivationEnergyJPerMol: 150_000,
@@ -124,18 +130,19 @@ export const FORGE_RULES = {
   anvilFriction: 0.28,
   maximumNodeCorrection: 0.35,
 
-  // Stress and damage use the same physical footprint and contact depth as geometry.
-  coldStressAtFullEnergy: 0.98,
-  hotStressAtFullEnergy: 0.08,
-  hammerStressSaturation: 0.55,
+  // The shared material response uses equivalent strain and exponential
+  // accumulation; these are calibration knobs, not per-hit rewards.
+  elasticStrainReference: 0.06,
+  plasticFlowAtZeroPlasticity: 0.04,
+  plasticFlowAtPeakPlasticity: 0.96,
+  stressAccumulationScale: 1.1,
+  coldDamageStressContribution: 2,
+  hardeningReferenceStrain: 0.25,
+  localisationStrainReference: 0.12,
+  thinSectionRiskStart: 0.35,
+  damageAccumulationScale: 2.4,
+  damageTriaxialityExponent: 1.35,
   crackIntegrityThreshold: 0.3,
-  plasticStrainPerCompression: 10,
-  localisationStrainRange: 0.12,
-  damageSafePlasticity: 0.72,
-  damageOverloadFloor: 0.2,
-  coldImpactDamage: 0.1,
-  localisationDamage: 0.15,
-  thinSectionDamage: 0.12,
   lateralBendAtFullEnergy: 0.8,
   feedStepLength: 14,
   overheatDamagePerHeat: 0.22,

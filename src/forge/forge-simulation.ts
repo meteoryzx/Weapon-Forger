@@ -1,4 +1,5 @@
 import { DEFAULT_FORGE_MATERIAL, FORGE_MATERIALS, FORGE_PARAMETER_VERSION, FORGE_RULES } from "./forge-rules.ts";
+import { integrateMechanicalResponse } from "./forge-physics.ts";
 import type {
   BladeBlock,
   BladeSection,
@@ -486,7 +487,8 @@ function evolveThermalState(
         ...block,
         temperatureC,
         plasticity: calculatePlasticity(temperatureC, state.workpiece.material),
-        stress: block.stress * (1 - stressRecovery),
+        stress: block.stress * Math.exp(-stressRecovery),
+        elasticStrain: block.elasticStrain * Math.exp(-stressRecovery),
         thermalDamage,
         overheated: block.overheated || thermalDamage > 0,
       };
@@ -624,6 +626,7 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
   const target = contactTargetFor(targetSection, face, operation.faceBias ?? 0.5);
   const contactCells = findContactCells(state.workpiece.sections, target, face, state.workpiece.grid);
   if (contactCells.length === 0) return state;
+  const supportRatio = hammerSupportRatio(targetSection, state.workpiece.feedOffset, state.workpiece.nodes);
 
   const plasticity = contactCells.reduce((sum, item) => (
     sum + (state.workpiece.sections[item.sectionIndex]?.blocks.find(
@@ -656,7 +659,14 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
       if (!before) throw new Error("Missing block state during hammer solve.");
       const weight = blockImpactWeight(section, before, target, face);
       return weight > 0
-        ? updateHammerState(before, geometry, operation, weight, state.workpiece.material, neighbourPlasticStrain(state, sectionIndex, before))
+        ? updateHammerState(
+          before,
+          geometry,
+          weight,
+          state.workpiece.material,
+          neighbourPlasticStrain(state, sectionIndex, before),
+          supportRatio,
+        )
         : geometry;
     });
     return summarizeSection({ ...section, blocks: updatedBlocks }, sectionIndex, nodes, state.workpiece.grid);
@@ -1101,6 +1111,8 @@ function createSection(
       plasticity: 0,
       stress: 0,
       plasticStrain: 0,
+      elasticStrain: 0,
+      mechanicalWorkJ: 0,
       damage: 0,
       integrity: 1,
       thermalDamage: 0,
@@ -1120,6 +1132,8 @@ function createSection(
     plasticity: 0,
     stress: 0,
     plasticStrain: 0,
+    elasticStrain: 0,
+    mechanicalWorkJ: 0,
     damage: 0,
     integrity: 1,
     thermalDamage: 0,
@@ -1186,6 +1200,8 @@ function summarizeSection(
     plasticity: weighted((block) => block.plasticity),
     stress: weighted((block) => block.stress),
     plasticStrain: weighted((block) => block.plasticStrain),
+    elasticStrain: weighted((block) => block.elasticStrain),
+    mechanicalWorkJ: section.blocks.reduce((sum, block) => sum + block.mechanicalWorkJ, 0),
     damage: weighted((block) => block.damage),
     integrity: Math.min(...section.blocks.map((block) => block.integrity)),
     thermalDamage: weighted((block) => block.thermalDamage),
@@ -1199,55 +1215,56 @@ function summarizeSection(
 function updateHammerState(
   before: BladeBlock,
   geometry: BladeBlock,
-  operation: HammerOperation,
   impactWeight: number,
   material: ForgeMaterial,
   neighbourStrain: number,
+  supportRatio: number,
 ): BladeBlock {
-  const geometricStrain = average([
-    Math.abs(Math.log(Math.max(geometry.length, 0.001) / Math.max(before.length, 0.001))),
-    Math.abs(Math.log(Math.max(geometry.width, 0.001) / Math.max(before.width, 0.001))),
-    Math.abs(Math.log(Math.max(geometry.thickness, 0.001) / Math.max(before.thickness, 0.001))),
-  ]);
-  const stressIncrease = impactWeight * operation.energy * material.coldStressMultiplier * lerp(
-    FORGE_RULES.hotStressAtFullEnergy,
-    FORGE_RULES.coldStressAtFullEnergy,
-    1 - before.plasticity,
-  );
-  const stress = clamp(
-    before.stress + stressIncrease * (1 - before.stress * FORGE_RULES.hammerStressSaturation),
+  const thinness = clamp(
+    (FORGE_RULES.simulationCellSize - geometry.thickness) / FORGE_RULES.simulationCellSize,
     0,
     1,
   );
-  const plasticStrain = before.plasticStrain + geometricStrain * FORGE_RULES.plasticStrainPerCompression;
-  const localisation = clamp((plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainRange, 0, 1);
-  const thinness = clamp((FORGE_RULES.simulationCellSize - geometry.thickness) / FORGE_RULES.simulationCellSize, 0, 1);
-  const coldness = clamp(
-    (FORGE_RULES.damageSafePlasticity - before.plasticity) / FORGE_RULES.damageSafePlasticity,
+  const thinSectionRisk = clamp(
+    (thinness - FORGE_RULES.thinSectionRiskStart) / Math.max(1 - FORGE_RULES.thinSectionRiskStart, Number.EPSILON),
     0,
     1,
   );
-  const allowableEnergy = FORGE_RULES.damageOverloadFloor + before.plasticity * (1 - FORGE_RULES.damageOverloadFloor);
-  const overload = clamp(
-    (operation.energy - allowableEnergy) / Math.max(1 - allowableEnergy, 0.001),
-    0,
-    1,
+  const response = integrateMechanicalResponse(
+    before,
+    {
+      length: before.length,
+      width: before.width,
+      thickness: before.thickness,
+      volume: before.volume,
+    },
+    {
+      length: geometry.length,
+      width: geometry.width,
+      thickness: geometry.thickness,
+      volume: geometry.volume,
+    },
+    material,
+    {
+      impactWeight,
+      localisation: clamp(
+        (before.plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainReference,
+        0,
+        1,
+      ),
+      thinSectionRisk,
+      supportRatio,
+    },
   );
-  const thinSectionRisk = clamp((thinness - 0.35) / 0.65, 0, 1);
-  const damageIncrease = impactWeight * overload * (
-    coldness * FORGE_RULES.coldImpactDamage
-    + coldness * localisation * FORGE_RULES.localisationDamage
-    + thinSectionRisk * FORGE_RULES.thinSectionDamage
-  ) * (1 + before.thermalDamage) / material.damageResistance;
-  const damage = clamp(before.damage + damageIncrease, 0, 1);
-  const integrity = Math.max(0, 1 - damage);
   return {
     ...geometry,
-    stress,
-    plasticStrain,
-    damage,
-    integrity,
-    cracked: before.cracked || integrity <= FORGE_RULES.crackIntegrityThreshold,
+    stress: response.stress,
+    plasticStrain: response.plasticStrain,
+    elasticStrain: response.elasticStrain,
+    mechanicalWorkJ: response.mechanicalWorkJ,
+    damage: response.damage,
+    integrity: response.integrity,
+    cracked: before.cracked || response.integrity <= FORGE_RULES.crackIntegrityThreshold,
   };
 }
 
@@ -1267,7 +1284,8 @@ function applyHeat(
       ...block,
       temperatureC,
       plasticity,
-      stress: block.stress * (1 - plasticity * material.stressRecoveryAtPeak),
+      stress: block.stress * Math.exp(-plasticity * material.stressRecoveryAtPeak),
+      elasticStrain: block.elasticStrain * Math.exp(-plasticity * material.stressRecoveryAtPeak),
       thermalDamage,
       overheated: block.overheated || thermalDamage > 0,
     };
@@ -1283,6 +1301,10 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
     thickness: section.thickness,
     temperatureC: section.temperatureC,
     plasticity: section.plasticity,
+    stress: section.stress,
+    plasticStrain: section.plasticStrain,
+    elasticStrain: section.elasticStrain,
+    mechanicalWorkJ: section.mechanicalWorkJ,
     thermalDamage: section.thermalDamage,
     damage: section.damage,
     verticalOffset: section.verticalOffset,
@@ -1299,6 +1321,10 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
       volume: block.volume,
       temperatureC: block.temperatureC,
       plasticity: block.plasticity,
+      stress: block.stress,
+      plasticStrain: block.plasticStrain,
+      elasticStrain: block.elasticStrain,
+      mechanicalWorkJ: block.mechanicalWorkJ,
       thermalDamage: block.thermalDamage,
       damage: block.damage,
       verticalOffset: block.verticalOffset,
@@ -1535,6 +1561,17 @@ function clampFeedOffset(feedOffset: number, nodes: readonly WorkpieceNode[]): n
   return clamp(feedOffset, -(Math.max(...axial) - Math.min(...axial)) / 2, (Math.max(...axial) - Math.min(...axial)) / 2);
 }
 
+function hammerSupportRatio(
+  section: Pick<BladeSection, "position">,
+  feedOffset: number,
+  nodes: readonly WorkpieceNode[],
+): number {
+  const axial = nodes.map((node) => node.axialPosition);
+  const workpieceCenter = (Math.min(...axial) + Math.max(...axial)) / 2;
+  const positionOnAnvil = section.position + feedOffset - workpieceCenter;
+  return clamp(1 - Math.abs(positionOnAnvil) / (FORGE_RULES.anvilFaceLength / 2), 0, 1);
+}
+
 function assertTemperature(temperatureC: number): void {
   if (!Number.isFinite(temperatureC) || temperatureC < FORGE_RULES.ambientTemperatureC || temperatureC > 1300) {
     throw new Error("Heat temperature must be between ambient temperature and 1300C.");
@@ -1542,7 +1579,7 @@ function assertTemperature(temperatureC: number): void {
 }
 
 function assertMaterial(material: ForgeMaterial): void {
-  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.coldStressMultiplier <= 0 || material.damageResistance <= 0) {
+  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.damageResistance <= 0) {
     throw new Error("Material workability values must be positive and hot workability at most one.");
   }
   if (material.hardenability <= 0 || material.hardenability > 1) {
@@ -1557,6 +1594,11 @@ function assertMaterial(material: ForgeMaterial): void {
   }
   if (material.stressRecoveryAtPeak < 0 || material.stressRecoveryAtPeak > 1) {
     throw new Error("Material peak stress recovery must be between zero and one.");
+  }
+  if (material.yieldStrengthAmbientMPa <= 0 || material.yieldStrengthHotMPa <= 0
+    || material.yieldStrengthHotMPa >= material.yieldStrengthAmbientMPa
+    || material.workHardeningExponent <= 0) {
+    throw new Error("Material mechanical response values must define a positive hot-softening curve.");
   }
   if (material.densityKgPerM3 <= 0 || material.molarMassKgPerMol <= 0
     || material.cleanEmissivity <= 0 || material.cleanEmissivity > 1
