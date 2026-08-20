@@ -15,7 +15,6 @@ import {
   Vector2,
   WebGLRenderer,
   BoxGeometry,
-  ConeGeometry,
   DoubleSide,
   ExtrudeGeometry,
   Shape,
@@ -33,6 +32,7 @@ import {
 import { thermalSteelAppearance } from "./thermal-color.ts";
 
 const BILLET_AXIAL_SCALE = 0.58;
+const WORKSTATION_YAW = Math.PI / 12;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
@@ -103,11 +103,13 @@ export class ForgeBilletView {
 
     const anvil = this.createAnvilModel();
     anvil.scale.set(BILLET_AXIAL_SCALE, 0.92, 1);
-    anvil.rotation.y = -0.24;
+    // User-space x+ is right, y+ is inward, z+ is up. In Three.js this is a
+    // positive yaw around world Y, so the top view reads counter-clockwise.
+    anvil.rotation.y = WORKSTATION_YAW;
     this.scene.add(anvil);
     this.billet.scale.x = BILLET_AXIAL_SCALE;
-    this.billetRig.position.set(-96, 6, 0);
-    this.billetRig.rotation.y = 0.3;
+    this.billetRig.position.set(-96, 0, 0);
+    this.billetRig.rotation.y = WORKSTATION_YAW;
     this.billetRig.add(this.billet);
     this.billetRig.add(this.billetHitTarget);
     this.impactMarker.visible = false;
@@ -123,7 +125,12 @@ export class ForgeBilletView {
     BILLET_MATERIAL.emissiveIntensity = appearance.emissiveIntensity;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset * BILLET_AXIAL_SCALE;
-    this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
+    const halfHeight = snapshot.orientationQuarterTurns % 2 === 0
+      ? FORGE_RULES.initialSectionThickness / 2
+      : FORGE_RULES.initialSectionWidth / 2;
+    // The anvil face is at world Y=0. Place the lowest billet surface exactly
+    // on that plane; do not hide an intersection by changing camera angle.
+    this.billet.position.y = halfHeight;
     this.billetHitTarget.position.x = this.billet.position.x;
     this.billetHitTarget.position.y = this.billet.position.y;
     this.billetHitTarget.rotation.x = this.billet.rotation.x;
@@ -139,8 +146,8 @@ export class ForgeBilletView {
     this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
     this.renderer.setSize(viewport.width, viewport.height, false);
     this.camera.aspect = viewport.width / viewport.height;
-    this.camera.position.set(0, 96, 360);
-    this.camera.lookAt(0, -4, 0);
+    this.camera.position.set(0, 190, 360);
+    this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
     this.render();
   }
@@ -244,10 +251,7 @@ export class ForgeBilletView {
     );
     const foot = new Mesh(new BoxGeometry(160, 20, 98), edge);
     foot.position.set(0, -151, 0);
-    const horn = new Mesh(new ConeGeometry(40, 100, 4), steel);
-    horn.position.set(162, -8, 0);
-    horn.rotation.z = -Math.PI / 2;
-    anvil.add(face, body, foot, horn);
+    anvil.add(face, body, foot);
     return anvil;
   }
 
