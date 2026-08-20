@@ -15,10 +15,10 @@ import {
   Vector2,
   WebGLRenderer,
   BoxGeometry,
+  CircleGeometry,
   DoubleSide,
   ExtrudeGeometry,
   Shape,
-  SphereGeometry,
 } from "three";
 
 import {
@@ -75,8 +75,14 @@ export class ForgeBilletView {
     new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   );
   private readonly impactMarker = new Mesh(
-    new SphereGeometry(7, 16, 8),
-    new MeshBasicMaterial({ color: "#fff2ae", transparent: true, opacity: 0.9 }),
+    new CircleGeometry(7, 24),
+    new MeshBasicMaterial({
+      color: "#ffffff",
+      transparent: true,
+      opacity: 0.92,
+      depthWrite: false,
+      side: DoubleSide,
+    }),
   );
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
@@ -154,7 +160,7 @@ export class ForgeBilletView {
     this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
     this.renderer.setSize(viewport.width, viewport.height, false);
     this.camera.aspect = viewport.width / viewport.height;
-    this.camera.position.set(0, 240, 390);
+    this.camera.position.set(0, 280, 420);
     this.camera.lookAt(0, 0, 0);
     this.camera.updateProjectionMatrix();
     this.render();
@@ -227,20 +233,55 @@ export class ForgeBilletView {
       return;
     }
 
-    const turns = snapshot.orientationQuarterTurns;
+    const struckFace = struckFaceForOrientation(snapshot.orientationQuarterTurns);
     const faceBias = clamp(hammerPreview.faceBias, 0, 1);
-    if (turns % 2 === 0) {
-      this.impactMarker.position.set(
-        section.position,
-        section.verticalOffset + section.thickness / 2 + 5,
-        section.lateralOffset + lerp(-section.width / 2, section.width / 2, faceBias),
-      );
-    } else {
-      this.impactMarker.position.set(
-        section.position,
-        section.verticalOffset + lerp(-section.thickness / 2, section.thickness / 2, faceBias),
-        section.lateralOffset + section.width / 2 + 5,
-      );
+    const verticalTangent = lerp(
+      section.verticalOffset - section.thickness / 2,
+      section.verticalOffset + section.thickness / 2,
+      faceBias,
+    );
+    const lateralTangent = lerp(
+      section.lateralOffset - section.width / 2,
+      section.lateralOffset + section.width / 2,
+      faceBias,
+    );
+
+    // Keep this mapping identical to forge-simulation's contactTargetFor.
+    // The marker is a child of the billet, so its local surface position also
+    // follows feed, quarter-turns, and the deformed mesh as one object.
+    switch (struckFace) {
+      case "top":
+        this.impactMarker.position.set(
+          section.position,
+          section.verticalOffset + section.thickness / 2 + 0.8,
+          lateralTangent,
+        );
+        this.impactMarker.rotation.set(-Math.PI / 2, 0, 0);
+        break;
+      case "bottom":
+        this.impactMarker.position.set(
+          section.position,
+          section.verticalOffset - section.thickness / 2 - 0.8,
+          lateralTangent,
+        );
+        this.impactMarker.rotation.set(Math.PI / 2, 0, 0);
+        break;
+      case "left":
+        this.impactMarker.position.set(
+          section.position,
+          verticalTangent,
+          section.lateralOffset - section.width / 2 - 0.8,
+        );
+        this.impactMarker.rotation.set(0, -Math.PI / 2, 0);
+        break;
+      case "right":
+        this.impactMarker.position.set(
+          section.position,
+          verticalTangent,
+          section.lateralOffset + section.width / 2 + 0.8,
+        );
+        this.impactMarker.rotation.set(0, Math.PI / 2, 0);
+        break;
     }
     this.impactMarker.scale.setScalar(0.75 + hammerPreview.energy * 0.55);
     this.impactMarker.visible = true;
@@ -468,6 +509,21 @@ function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSectio
     (section) => position >= section.position - section.length / 2 && position <= section.position + section.length / 2,
   );
   return index >= 0 ? index : null;
+}
+
+type StruckFace = "top" | "bottom" | "left" | "right";
+
+function struckFaceForOrientation(orientationQuarterTurns: 0 | 1 | 2 | 3): StruckFace {
+  switch (orientationQuarterTurns) {
+    case 0:
+      return "top";
+    case 1:
+      return "left";
+    case 2:
+      return "bottom";
+    case 3:
+      return "right";
+  }
 }
 
 function inverseLerp(start: number, end: number, value: number): number {
