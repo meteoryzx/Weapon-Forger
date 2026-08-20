@@ -15,7 +15,6 @@ import {
   Vector2,
   WebGLRenderer,
   BoxGeometry,
-  CircleGeometry,
   DoubleSide,
   ExtrudeGeometry,
   Shape,
@@ -74,16 +73,6 @@ export class ForgeBilletView {
     new BoxGeometry(FORGE_RULES.workpieceLength, 24, FORGE_RULES.initialSectionWidth),
     new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   );
-  private readonly impactMarker = new Mesh(
-    new CircleGeometry(7, 24),
-    new MeshBasicMaterial({
-      color: "#ffffff",
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: false,
-      side: DoubleSide,
-    }),
-  );
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -126,8 +115,6 @@ export class ForgeBilletView {
     this.billetRig.rotation.y = BILLET_YAW;
     this.billetRig.add(this.billet);
     this.billetRig.add(this.billetHitTarget);
-    this.impactMarker.visible = false;
-    this.billet.add(this.impactMarker);
     this.scene.add(this.billetRig);
     this.resize(viewport);
   }
@@ -148,7 +135,6 @@ export class ForgeBilletView {
     this.billetHitTarget.position.x = this.billet.position.x + FORGE_RULES.workpieceLength / 2;
     this.billetHitTarget.position.y = this.billet.position.y;
     this.billetHitTarget.rotation.x = this.billet.rotation.x;
-    this.updateImpactMarker(snapshot, hammerPreview);
     const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
@@ -216,75 +202,12 @@ export class ForgeBilletView {
     this.billet.geometry.dispose();
     this.billetHitTarget.geometry.dispose();
     (this.billetHitTarget.material as MeshBasicMaterial).dispose();
-    this.impactMarker.geometry.dispose();
-    (this.impactMarker.material as MeshBasicMaterial).dispose();
     // BILLET_MATERIAL is shared across view instances; do not dispose it here.
     this.renderer.dispose();
   }
 
   private render(): void {
     this.renderer.render(this.scene, this.camera);
-  }
-
-  private updateImpactMarker(snapshot: ForgeSnapshot, hammerPreview: HammerInfluencePreview | null): void {
-    const section = hammerPreview ? snapshot.sections[hammerPreview.sectionIndex] : undefined;
-    if (!section || !hammerPreview) {
-      this.impactMarker.visible = false;
-      return;
-    }
-
-    const struckFace = struckFaceForOrientation(snapshot.orientationQuarterTurns);
-    const faceBias = clamp(hammerPreview.faceBias, 0, 1);
-    const verticalTangent = lerp(
-      section.verticalOffset - section.thickness / 2,
-      section.verticalOffset + section.thickness / 2,
-      faceBias,
-    );
-    const lateralTangent = lerp(
-      section.lateralOffset - section.width / 2,
-      section.lateralOffset + section.width / 2,
-      faceBias,
-    );
-
-    // Keep this mapping identical to forge-simulation's contactTargetFor.
-    // The marker is a child of the billet, so its local surface position also
-    // follows feed, quarter-turns, and the deformed mesh as one object.
-    switch (struckFace) {
-      case "top":
-        this.impactMarker.position.set(
-          section.position,
-          section.verticalOffset + section.thickness / 2 + 0.8,
-          lateralTangent,
-        );
-        this.impactMarker.rotation.set(-Math.PI / 2, 0, 0);
-        break;
-      case "bottom":
-        this.impactMarker.position.set(
-          section.position,
-          section.verticalOffset - section.thickness / 2 - 0.8,
-          lateralTangent,
-        );
-        this.impactMarker.rotation.set(Math.PI / 2, 0, 0);
-        break;
-      case "left":
-        this.impactMarker.position.set(
-          section.position,
-          verticalTangent,
-          section.lateralOffset - section.width / 2 - 0.8,
-        );
-        this.impactMarker.rotation.set(0, -Math.PI / 2, 0);
-        break;
-      case "right":
-        this.impactMarker.position.set(
-          section.position,
-          verticalTangent,
-          section.lateralOffset + section.width / 2 + 0.8,
-        );
-        this.impactMarker.rotation.set(0, Math.PI / 2, 0);
-        break;
-    }
-    this.impactMarker.scale.setScalar(0.75 + hammerPreview.energy * 0.55);
-    this.impactMarker.visible = true;
   }
 
   private createAnvilModel(): Group {
@@ -509,21 +432,6 @@ function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSectio
     (section) => position >= section.position - section.length / 2 && position <= section.position + section.length / 2,
   );
   return index >= 0 ? index : null;
-}
-
-type StruckFace = "top" | "bottom" | "left" | "right";
-
-function struckFaceForOrientation(orientationQuarterTurns: 0 | 1 | 2 | 3): StruckFace {
-  switch (orientationQuarterTurns) {
-    case 0:
-      return "top";
-    case 1:
-      return "left";
-    case 2:
-      return "bottom";
-    case 3:
-      return "right";
-  }
 }
 
 function inverseLerp(start: number, end: number, value: number): number {
