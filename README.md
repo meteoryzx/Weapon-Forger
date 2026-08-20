@@ -4,10 +4,15 @@
 
 ## 当前状态
 
-- Demo 已实现并通过全部自动检查（待作者体验验收）：完整锻造闭环 —— 选料 → 加热 → 锻打 → 淬火 → 研磨 → 六维评估 → 确定性故事。
-- 下一步：作者在浏览器按验收清单试玩一次，给出体验判断；通过后归档，进入精修改进。
+- 当前分支：`feat/R1i-furnace-heating`，HEAD `27bfb78`，属于未完成的 WIP，不是已验收版本。
+- 当前已验证：锻造核心的确定性状态、局部锤击形变、转面、送料、基础加热和可扩展派生接口。
+- 当前未验收：第一人称锻造工作站、八个工艺的独立可玩操作、完整 R1 工艺链和统一物理模型。
+- 当前工作重点：先建立统一的热-力-几何-界面状态，再以第一人称工作站验证锤击、切割、焊合、加热、淬火、回火和研磨。
+- 六维评估、冒险故事和动作游戏属性属于下游 profile，不属于 forge 核心；它们尚未在当前仓库实现。
 
-项目决策与实时交接以 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 为准；AI 和工程协作规则以 [`AGENTS.md`](AGENTS.md) 为准。
+项目决策与实时交接以 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 为准；AI 和工程协作规则以 [`AGENTS.md`](AGENTS.md) 为准；代码边界见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
+
+新接手者阅读顺序：`AGENTS.md` -> `PROJECT_PLAN.md` -> `docs/ARCHITECTURE.md` -> `docs/FORGE_CORE_API.md` -> `docs/FORGE_UNIFIED_PHYSICS.md` -> Git 状态和历史。
 
 ## 本地运行
 
@@ -29,9 +34,7 @@ src/
   app/       组装依赖与控制流程
   entry/     浏览器和微信运行入口
   platform/  输入与平台能力适配
-  forge/     确定性锻造状态、操作与回放
-  evaluate/  最终状态到隐藏六维、特性与缺陷
-  story/     武器数据到确定性事件与结局
+  forge/     可迁移的确定性锻造状态、操作、回放与派生接口
   render/    Three.js 程序化场景与状态可视化
 tests/       按源码边界组织的逻辑、平台和端到端测试
 scripts/     可重复的开发与验证脚本
@@ -40,3 +43,11 @@ wechat/      微信小游戏宿主配置
 ```
 
 `dist/`、`node_modules/`、`test-results/` 和 Playwright 报告均为本地产物，不进入 Git。旧 Cocos 路线仅保留在 Git 历史中，不是现行工程的一部分。
+
+## 协作与交付
+
+- 新工作从短期功能分支开始，不直接修改 `main`。
+- 提交前必须说明范围、验证命令和未验证边界；提交信息使用 `[阶段/模块] 可读动作`。
+- 业务代码、公共接口、依赖、目录所有权和许可证变更必须在计划或 PR 中明确说明。
+- `npm run check`、作者体验验收和完整差异检查都通过后，才可合并到 `main`。
+- 当前仓库没有 `LICENSE`；许可证和公开范围不是默认决定，需由作者单独确认。
