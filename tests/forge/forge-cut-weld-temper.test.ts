@@ -30,8 +30,19 @@ describe("cut, weld, temper", () => {
     expect(cut.workpiece.layerCount).toBe(1);
   });
 
+  it("switches the active workpiece without losing either raw state", () => {
+    const initial = createForgeState({ sectionCount: 8 });
+    const cut = applyForgeOperation(initial, { kind: "cut", sectionIndex: 4 });
+    const selected = applyForgeOperation(cut, { kind: "select-workpiece", benchIndex: 0 });
+
+    expect(selected.workpiece.id).toBe(cut.bench[0]?.id);
+    expect(selected.bench[0]?.id).toBe(cut.workpiece.id);
+    expect(createForgeSnapshot(selected).workpieceId).toBe(selected.workpiece.id);
+  });
+
   it("temper records a temperature and rejects an invalid one", () => {
     const tempered = applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "temper", temperatureC: 200 });
+    expect(tempered.workpiece.temper.temperatureC).toBe(200);
     expect(createForgeSnapshot(tempered).temperTemperatureC).toBe(200);
     expect(() => applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "temper", temperatureC: 600 })).toThrow();
   });
@@ -44,6 +55,8 @@ describe("cut, weld, temper", () => {
     // 低碳 0.2 与高碳 0.9 等体积混合 → 0.55；层数 1+1=2。
     expect(createForgeSnapshot(welded).carbon).toBeCloseTo(0.55, 8);
     expect(createForgeSnapshot(welded).layerCount).toBe(2);
+    expect(welded.workpiece.joints[0]?.integrity).toBeGreaterThanOrEqual(0);
+    expect(welded.workpiece.joints[0]?.integrity).toBeLessThanOrEqual(1);
     expect(welded.bench).toHaveLength(0);
   });
 

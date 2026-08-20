@@ -9,19 +9,17 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
-  OrthographicCamera,
+  PerspectiveCamera,
   Raycaster,
   Scene,
-  ShapeGeometry,
   Vector2,
   WebGLRenderer,
   BoxGeometry,
   ConeGeometry,
-  CylinderGeometry,
   DoubleSide,
   ExtrudeGeometry,
   Shape,
-  Vector3,
+  SphereGeometry,
 } from "three";
 
 import {
@@ -34,8 +32,6 @@ import {
 } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
 
-const DESIGN_HALF_HEIGHT = 117;
-const ROTATE_CONTROL_SIZE = 72;
 const BILLET_AXIAL_SCALE = 0.58;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
@@ -66,13 +62,20 @@ export interface HammerPickTarget {
 export class ForgeBilletView {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
-  private readonly camera = new OrthographicCamera(-320, 320, 180, -180, 0.1, 2000);
+  private readonly camera = new PerspectiveCamera(52, 1, 0.1, 2000);
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
-  // The rig establishes the fixed presentation angle; the billet spins inside it on its own long axis.
+  // The camera is the worker's eye line; the billet spins inside the fixed anvil station.
   private readonly billetRig = new Group();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
-  private readonly rotateControls: { readonly direction: -1 | 1; readonly group: Group }[] = [];
+  private readonly billetHitTarget = new Mesh(
+    new BoxGeometry(FORGE_RULES.workpieceLength, 24, FORGE_RULES.initialSectionWidth),
+    new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  private readonly impactMarker = new Mesh(
+    new SphereGeometry(7, 16, 8),
+    new MeshBasicMaterial({ color: "#fff2ae", transparent: true, opacity: 0.9 }),
+  );
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -102,15 +105,13 @@ export class ForgeBilletView {
     anvil.scale.set(BILLET_AXIAL_SCALE, 0.92, 1);
     anvil.rotation.y = -0.24;
     this.scene.add(anvil);
-    this.scene.add(this.createHammerModel());
-    const rotateLeftControl = { direction: -1 as const, group: this.createRotateControl(-1) };
-    const rotateRightControl = { direction: 1 as const, group: this.createRotateControl(1) };
-    this.rotateControls.push(rotateLeftControl, rotateRightControl);
-    this.camera.add(rotateLeftControl.group, rotateRightControl.group);
     this.billet.scale.x = BILLET_AXIAL_SCALE;
-    this.billetRig.position.set(-96, 18, 0);
+    this.billetRig.position.set(-96, 6, 0);
     this.billetRig.rotation.y = 0.3;
     this.billetRig.add(this.billet);
+    this.billetRig.add(this.billetHitTarget);
+    this.impactMarker.visible = false;
+    this.billet.add(this.impactMarker);
     this.scene.add(this.billetRig);
     this.resize(viewport);
   }
@@ -123,6 +124,10 @@ export class ForgeBilletView {
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset * BILLET_AXIAL_SCALE;
     this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
+    this.billetHitTarget.position.x = this.billet.position.x;
+    this.billetHitTarget.position.y = this.billet.position.y;
+    this.billetHitTarget.rotation.x = this.billet.rotation.x;
+    this.updateImpactMarker(snapshot, hammerPreview);
     const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
@@ -133,17 +138,10 @@ export class ForgeBilletView {
     this.viewport = viewport;
     this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
     this.renderer.setSize(viewport.width, viewport.height, false);
-    const aspect = viewport.width / viewport.height;
-    const halfHeight = DESIGN_HALF_HEIGHT * Math.max(1, (16 / 9) / aspect);
-    const halfWidth = halfHeight * aspect;
-    this.camera.left = -halfWidth;
-    this.camera.right = halfWidth;
-    this.camera.top = halfHeight;
-    this.camera.bottom = -halfHeight;
-    this.camera.position.set(-260, 300, 600);
-    this.camera.lookAt(0, -28, 0);
+    this.camera.aspect = viewport.width / viewport.height;
+    this.camera.position.set(0, 96, 360);
+    this.camera.lookAt(0, -4, 0);
     this.camera.updateProjectionMatrix();
-    this.positionRotateControls();
     this.render();
   }
 
@@ -155,7 +153,7 @@ export class ForgeBilletView {
     if (!this.snapshot) {
       return null;
     }
-    const hit = this.pickObject(viewportX, viewportY, [this.billet], false);
+    const hit = this.pickObject(viewportX, viewportY, [this.billet, this.billetHitTarget], false);
     if (!hit) {
       return null;
     }
@@ -184,15 +182,6 @@ export class ForgeBilletView {
     return { sectionIndex, faceBias: clamp(faceBias, 0, 1) };
   }
 
-  pickRotateControl(viewportX: number, viewportY: number): -1 | 1 | null {
-    for (const control of this.rotateControls) {
-      if (this.pickObject(viewportX, viewportY, [control.group], true)) {
-        return control.direction;
-      }
-    }
-    return null;
-  }
-
   private pickObject(viewportX: number, viewportY: number, objects: Object3D[], recursive: boolean) {
     this.pointer.set(
       (viewportX / this.viewport.width) * 2 - 1,
@@ -204,6 +193,10 @@ export class ForgeBilletView {
 
   dispose(): void {
     this.billet.geometry.dispose();
+    this.billetHitTarget.geometry.dispose();
+    (this.billetHitTarget.material as MeshBasicMaterial).dispose();
+    this.impactMarker.geometry.dispose();
+    (this.impactMarker.material as MeshBasicMaterial).dispose();
     // BILLET_MATERIAL is shared across view instances; do not dispose it here.
     this.renderer.dispose();
   }
@@ -212,30 +205,30 @@ export class ForgeBilletView {
     this.renderer.render(this.scene, this.camera);
   }
 
-  private createRotateControl(direction: -1 | 1): Group {
-    const group = new Group();
-    const panel = new Mesh(
-      new BoxGeometry(ROTATE_CONTROL_SIZE, ROTATE_CONTROL_SIZE, 1),
-      new MeshBasicMaterial({ color: "#29323a" }),
-    );
-    const arrow = new Mesh(createArrowGeometry(direction), new MeshBasicMaterial({ color: "#f3c36d" }));
-    panel.position.z = -72;
-    arrow.position.z = -71;
-    group.add(panel, arrow);
-    return group;
-  }
-
-  private positionRotateControls(): void {
-    const y = this.camera.bottom + ROTATE_CONTROL_SIZE * 0.72;
-    const xInset = ROTATE_CONTROL_SIZE * 0.72;
-    for (const control of this.rotateControls) {
-      control.group.position.set(
-        control.direction < 0 ? this.camera.left + xInset : this.camera.right - xInset,
-        y,
-        -120,
-      );
-      control.group.rotation.set(0, 0, 0);
+  private updateImpactMarker(snapshot: ForgeSnapshot, hammerPreview: HammerInfluencePreview | null): void {
+    const section = hammerPreview ? snapshot.sections[hammerPreview.sectionIndex] : undefined;
+    if (!section || !hammerPreview) {
+      this.impactMarker.visible = false;
+      return;
     }
+
+    const turns = snapshot.orientationQuarterTurns;
+    const faceBias = clamp(hammerPreview.faceBias, 0, 1);
+    if (turns % 2 === 0) {
+      this.impactMarker.position.set(
+        section.position,
+        section.verticalOffset + section.thickness / 2 + 5,
+        section.lateralOffset + lerp(-section.width / 2, section.width / 2, faceBias),
+      );
+    } else {
+      this.impactMarker.position.set(
+        section.position,
+        section.verticalOffset + lerp(-section.thickness / 2, section.thickness / 2, faceBias),
+        section.lateralOffset + section.width / 2 + 5,
+      );
+    }
+    this.impactMarker.scale.setScalar(0.75 + hammerPreview.energy * 0.55);
+    this.impactMarker.visible = true;
   }
 
   private createAnvilModel(): Group {
@@ -256,41 +249,6 @@ export class ForgeBilletView {
     horn.rotation.z = -Math.PI / 2;
     anvil.add(face, body, foot, horn);
     return anvil;
-  }
-
-  private createHammerModel(): Group {
-    const hammer = new Group();
-    const steel = new MeshStandardMaterial({ color: "#4d5662", metalness: 0.54, roughness: 0.3 });
-    const wood = new MeshStandardMaterial({ color: "#844a29", metalness: 0.06, roughness: 0.48 });
-    const headPosition = new Vector3(105, 112, 34);
-    const head = new Mesh(new BoxGeometry(56, 76, FORGE_RULES.hammerFaceWidth), steel);
-    head.position.copy(headPosition);
-    head.rotation.z = -0.16;
-    const handle = this.createRoundToolBar(
-      headPosition.clone().add(new Vector3(18, -30, -8)),
-      new Vector3(330, -12, 180),
-      18,
-      wood,
-    );
-
-    hammer.add(head, handle);
-    return hammer;
-  }
-
-  private createToolBar(start: Vector3, end: Vector3, width: number, material: MeshStandardMaterial): Mesh {
-    const direction = end.clone().sub(start);
-    const bar = new Mesh(new BoxGeometry(direction.length(), width, width), material);
-    bar.position.copy(start).add(end).multiplyScalar(0.5);
-    bar.quaternion.setFromUnitVectors(new Vector3(1, 0, 0), direction.normalize());
-    return bar;
-  }
-
-  private createRoundToolBar(start: Vector3, end: Vector3, diameter: number, material: MeshStandardMaterial): Mesh {
-    const direction = end.clone().sub(start);
-    const bar = new Mesh(new CylinderGeometry(diameter / 2, diameter / 2, direction.length(), 12), material);
-    bar.position.copy(start).add(end).multiplyScalar(0.5);
-    bar.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), direction.normalize());
-    return bar;
   }
 
   private createProfile(points: readonly [number, number][], depth: number, material: MeshStandardMaterial): Mesh {
@@ -493,21 +451,6 @@ function temperatureColor(temperatureC: number, impact: number): Color {
   return thermalSteelAppearance(temperatureC).surface.lerp(new Color("#fff2ae"), impact * 0.75);
 }
 
-function createArrowGeometry(direction: -1 | 1): ShapeGeometry {
-  const shape = new Shape();
-  const points: [number, number][] = direction < 0
-    ? [[-28, 0], [-1, -22], [-1, -8], [12, -8], [12, 8], [-1, 8], [-1, 22]]
-    : [[28, 0], [1, -22], [1, -8], [-12, -8], [-12, 8], [1, 8], [1, 22]];
-  const [first, ...rest] = points;
-  if (!first) {
-    throw new Error("A rotate arrow needs at least one point.");
-  }
-  shape.moveTo(first[0], first[1]);
-  rest.forEach((point) => shape.lineTo(point[0], point[1]));
-  shape.closePath();
-  return new ShapeGeometry(shape);
-}
-
 function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSection[]): number | null {
   const index = sections.findIndex(
     (section) => position >= section.position - section.length / 2 && position <= section.position + section.length / 2,
@@ -517,6 +460,10 @@ function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSectio
 
 function inverseLerp(start: number, end: number, value: number): number {
   return end === start ? 0.5 : (value - start) / (end - start);
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

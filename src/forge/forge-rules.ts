@@ -54,8 +54,28 @@ export const HIGH_CARBON_STEEL: ForgeMaterial = {
   heatCapacitySegments: IRON_HEAT_CAPACITY_SEGMENTS,
 };
 
+// 弹簧钢：保留较高的韧性与硬化能力，作为可反复塑形的材料样本。
+export const SPRING_STEEL: ForgeMaterial = {
+  id: "spring-steel",
+  carbon: 0.65,
+  hotWorkability: 0.95,
+  hardenability: 0.82,
+  coldStressMultiplier: 1.05,
+  damageResistance: 0.92,
+  plasticityStartC: 690,
+  plasticityPeakC: 990,
+  overheatTemperatureC: 1130,
+  stressRecoveryAtPeak: 0.72,
+  densityKgPerM3: 7_850,
+  molarMassKgPerMol: 0.055_845,
+  cleanEmissivity: 0.35,
+  oxidizedEmissivity: 0.8,
+  oxidationActivationEnergyJPerMol: 150_000,
+  heatCapacitySegments: IRON_HEAT_CAPACITY_SEGMENTS,
+};
+
 // 选料界面的数据来源；新增材料只需在此登记并保证字段齐全。
-export const FORGE_MATERIALS: readonly ForgeMaterial[] = [DEFAULT_FORGE_MATERIAL, HIGH_CARBON_STEEL];
+export const FORGE_MATERIALS: readonly ForgeMaterial[] = [DEFAULT_FORGE_MATERIAL, HIGH_CARBON_STEEL, SPRING_STEEL];
 
 export const FORGE_RULES = {
   ambientTemperatureC: 20,
@@ -107,9 +127,12 @@ export const FORGE_RULES = {
   // Stress and damage use the same physical footprint and contact depth as geometry.
   coldStressAtFullEnergy: 0.98,
   hotStressAtFullEnergy: 0.08,
+  hammerStressSaturation: 0.55,
   crackIntegrityThreshold: 0.3,
   plasticStrainPerCompression: 10,
   localisationStrainRange: 0.12,
+  damageSafePlasticity: 0.72,
+  damageOverloadFloor: 0.2,
   coldImpactDamage: 0.1,
   localisationDamage: 0.15,
   thinSectionDamage: 0.12,
@@ -121,4 +144,25 @@ export const FORGE_RULES = {
   // interpreted by evaluate from the quench start temperature and medium.
   quenchIdealStartC: 860,
   quenchMinimumStartC: 720,
+} as const;
+
+// 派生层的平衡旋钮集中在这里；下游 profile 只负责选择如何消费这些基础事实。
+export const FORGE_DERIVATION_RULES = {
+  hardnessCarbonWeight: 0.35,
+  hardnessQuenchWeight: 0.45,
+  hardnessTemperWeight: 0.2,
+  toughnessMaterialWeight: 0.45,
+  toughnessDamageWeight: 0.3,
+  toughnessHeatTreatmentWeight: 0.25,
+  edgeCoverageWeight: 0.65,
+  edgeEvennessWeight: 0.35,
+  appearanceEvennessWeight: 0.5,
+  appearanceCoverageWeight: 0.25,
+  appearanceLayerWeight: 0.25,
+  oilQuenchFactor: 0.82,
+  layeredAppearanceReference: 4,
+  thicknessReference: 8,
+  weightReferenceVolume: 1_000_000,
+  quenchTemperatureWindowC: 180,
+  temperSofteningRangeC: 500,
 } as const;

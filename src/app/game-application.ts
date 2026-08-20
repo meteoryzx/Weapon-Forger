@@ -2,7 +2,10 @@ import {
   applyForgeIntent,
   createForgeSnapshot,
   createForgeState,
+  deriveForgeData,
   FORGE_RULES,
+  type ForgeDerivationProfile,
+  type ForgeDerivedData,
   previewThermalState,
   type ForgeIntent,
   type ForgeMaterial,
@@ -22,6 +25,10 @@ export class GameApplication {
 
   getState(): ForgeState {
     return this.state;
+  }
+
+  getDerivedData(profile?: ForgeDerivationProfile): ForgeDerivedData {
+    return deriveForgeData(this.state, profile);
   }
 
   getSnapshot(elapsedMs = 0): ForgeSnapshot {

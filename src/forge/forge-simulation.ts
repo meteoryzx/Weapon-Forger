@@ -89,7 +89,6 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
   const material = options.material ?? DEFAULT_FORGE_MATERIAL;
   return {
     parameterVersion: FORGE_PARAMETER_VERSION,
-    phase: "heating",
     workpiece: createWorkpiece(material, "workpiece-0", sectionCount),
     bench: [],
     operations: [],
@@ -131,6 +130,8 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
   switch (operation.kind) {
     case "select-material":
       return applySelectMaterial(state, operation);
+    case "select-workpiece":
+      return applySelectWorkpiece(state, operation);
     case "heat":
       assertTemperature(operation.temperatureC);
       return appendOperation({
@@ -205,7 +206,8 @@ export function previewThermalState(state: ForgeState, elapsedMs: number): Forge
 export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
   return {
     parameterVersion: state.parameterVersion,
-    phase: state.phase,
+    workpieceId: state.workpiece.id,
+    materialId: state.workpiece.material.id,
     billetLocation: state.workpiece.thermal.location,
     averageTemperatureC: averageWorkpieceTemperature(state),
     peakTemperatureC: state.workpiece.thermal.peakTemperatureC,
@@ -1212,15 +1214,30 @@ function updateHammerState(
     FORGE_RULES.coldStressAtFullEnergy,
     1 - before.plasticity,
   );
-  const stress = before.stress + stressIncrease;
+  const stress = clamp(
+    before.stress + stressIncrease * (1 - before.stress * FORGE_RULES.hammerStressSaturation),
+    0,
+    1,
+  );
   const plasticStrain = before.plasticStrain + geometricStrain * FORGE_RULES.plasticStrainPerCompression;
   const localisation = clamp((plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainRange, 0, 1);
   const thinness = clamp((FORGE_RULES.simulationCellSize - geometry.thickness) / FORGE_RULES.simulationCellSize, 0, 1);
-  const coldness = (1 - before.plasticity) ** 3;
-  const damageIncrease = impactWeight * operation.energy * coldness * (
-    FORGE_RULES.coldImpactDamage
-    + localisation * FORGE_RULES.localisationDamage
-    + thinness * FORGE_RULES.thinSectionDamage
+  const coldness = clamp(
+    (FORGE_RULES.damageSafePlasticity - before.plasticity) / FORGE_RULES.damageSafePlasticity,
+    0,
+    1,
+  );
+  const allowableEnergy = FORGE_RULES.damageOverloadFloor + before.plasticity * (1 - FORGE_RULES.damageOverloadFloor);
+  const overload = clamp(
+    (operation.energy - allowableEnergy) / Math.max(1 - allowableEnergy, 0.001),
+    0,
+    1,
+  );
+  const thinSectionRisk = clamp((thinness - 0.35) / 0.65, 0, 1);
+  const damageIncrease = impactWeight * overload * (
+    coldness * FORGE_RULES.coldImpactDamage
+    + coldness * localisation * FORGE_RULES.localisationDamage
+    + thinSectionRisk * FORGE_RULES.thinSectionDamage
   ) * (1 + before.thermalDamage) / material.damageResistance;
   const damage = clamp(before.damage + damageIncrease, 0, 1);
   const integrity = Math.max(0, 1 - damage);
@@ -1557,9 +1574,17 @@ function assertThermalDuration(elapsedMs: number): void {
 
 function assertHammerOperation(state: ForgeState, operation: HammerOperation): void {
   assertHammerTarget(state.workpiece.sections, operation);
-  if (operation.lateralBias !== -1 && operation.lateralBias !== 0 && operation.lateralBias !== 1) {
-    throw new Error("Hammer lateral bias must be -1, 0, or 1.");
+}
+
+function applySelectWorkpiece(state: ForgeState, operation: { readonly kind: "select-workpiece"; readonly benchIndex: number }): ForgeState {
+  if (!Number.isInteger(operation.benchIndex) || operation.benchIndex < 0 || operation.benchIndex >= state.bench.length) {
+    throw new Error("Selected workpiece must exist on the bench.");
   }
+  const selected = state.bench[operation.benchIndex];
+  if (!selected) throw new Error("Selected workpiece must exist on the bench.");
+  const bench = state.bench.slice();
+  bench[operation.benchIndex] = state.workpiece;
+  return appendOperation({ ...state, workpiece: selected, bench }, operation);
 }
 
 function assertHammerTarget(

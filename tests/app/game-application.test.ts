@@ -7,7 +7,6 @@ describe("heating application", () => {
     const application = new GameApplication();
     const initial = application.getSnapshot();
 
-    expect(initial.phase).toBe("heating");
     expect(initial.billetLocation).toBe("inspection");
     expect(initial.averageTemperatureC).toBe(20);
     expect(initial.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });

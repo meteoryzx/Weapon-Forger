@@ -1,4 +1,3 @@
-export type ForgePhase = "heating" | "forging";
 export type BilletLocation = "inspection" | "furnace";
 
 export interface HeatCapacitySegment {
@@ -140,6 +139,11 @@ export interface SelectMaterialOperation {
   readonly materialId: string;
 }
 
+export interface SelectWorkpieceOperation {
+  readonly kind: "select-workpiece";
+  readonly benchIndex: number;
+}
+
 export interface HeatOperation {
   readonly kind: "heat";
   readonly temperatureC: number;
@@ -165,7 +169,6 @@ export interface HammerOperation {
   readonly kind: "hammer";
   readonly sectionIndex: number;
   readonly energy: number;
-  readonly lateralBias: -1 | 0 | 1;
   readonly faceBias?: number;
 }
 
@@ -200,6 +203,7 @@ export interface TemperOperation {
 
 export type ForgeOperation =
   | SelectMaterialOperation
+  | SelectWorkpieceOperation
   | HeatOperation
   | MoveBilletOperation
   | RotateOperation
@@ -216,11 +220,15 @@ export interface SelectMaterialIntent {
   readonly materialId: string;
 }
 
+export interface SelectWorkpieceIntent {
+  readonly kind: "select-workpiece";
+  readonly benchIndex: number;
+}
+
 export interface HammerIntent {
   readonly kind: "hammer";
   readonly sectionIndex: number;
   readonly energy: number;
-  readonly lateralBias: -1 | 0 | 1;
   readonly faceBias?: number;
 }
 
@@ -268,6 +276,7 @@ export interface TemperIntent {
 
 export type ForgeIntent =
   | SelectMaterialIntent
+  | SelectWorkpieceIntent
   | HammerIntent
   | RotateIntent
   | FeedIntent
@@ -280,7 +289,6 @@ export type ForgeIntent =
 
 export interface ForgeState {
   readonly parameterVersion: string;
-  readonly phase: ForgePhase;
   // 当前正在加工的工件；其余切割下来的工件放在 bench，供焊合取用。
   readonly workpiece: WorkpieceState;
   readonly bench: readonly WorkpieceState[];
@@ -323,7 +331,8 @@ export interface ForgeSnapshotBlock {
 
 export interface ForgeSnapshot {
   readonly parameterVersion: string;
-  readonly phase: ForgePhase;
+  readonly workpieceId: string;
+  readonly materialId: string;
   readonly billetLocation: BilletLocation;
   readonly averageTemperatureC: number;
   readonly peakTemperatureC: number;
