@@ -15,7 +15,7 @@ const hudState = document.querySelector<HTMLElement>("#hud-state")!;
 // This page is one independent operation station, not a button-driven process flow.
 const application = new GameApplication(SPRING_STEEL);
 application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
-application.getSnapshot(15_000);
+application.getSnapshot(25_000);
 application.commitPreview();
 let view: ForgeBilletView | null = null;
 let latestSnapshot: ForgeSnapshot = application.getSnapshot();
@@ -48,7 +48,7 @@ function updateView(hammerPreview = null): void {
 }
 
 hudTitle.textContent = "铁砧 · 锤击";
-hudHint.textContent = "点击钢坯选择落锤位置，按住再松开控制力度；A/D 转面，W/S 送料。画面中的工件才是操作对象。";
+hudHint.textContent = "高温钢坯 · 砧面工作站";
 view = new ForgeBilletView(canvas, viewport());
 updateView();
 
