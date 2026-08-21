@@ -2,10 +2,12 @@
 
 开始前请阅读：
 
-1. `AGENTS.md`
-2. `PROJECT_PLAN.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/FORGE_CORE_API.md`
+1. `README.md`
+2. `docs/README.md`
+3. `AGENTS.md`
+4. `PROJECT_PLAN.md`
+5. `docs/ARCHITECTURE.md`
+6. `docs/FORGE_CORE_API.md`
 
 ## 开发流程
 
