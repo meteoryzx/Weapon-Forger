@@ -33,6 +33,7 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await page.mouse.move(590, 440, { steps: 3 });
   await page.mouse.up();
   await expect(page.locator("body")).toHaveAttribute("data-bench-count", "2");
+  await expect(page.locator("body")).toHaveAttribute("data-bench-material-ids", "spring-steel,high-carbon-steel");
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
@@ -41,9 +42,11 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await page.mouse.move(120, 470);
   await page.mouse.down();
-  await page.mouse.move(960, 300, { steps: 5 });
+  await page.mouse.move(1040, 370, { steps: 5 });
   await page.mouse.up();
   await expect(page.locator("#hud-state")).toContainText("焊合 1");
+  await expect(page.locator("body")).toHaveAttribute("data-carbon", "0.900000");
+  await expect(page.locator("body")).toHaveAttribute("data-layer-count", "2");
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");

@@ -5,6 +5,7 @@ import {
   createForgeSnapshot,
   createForgeState,
   replayForgeState,
+  SPRING_STEEL,
   totalVolume,
   type ForgeOperation,
   type WorkpieceState,
@@ -28,6 +29,14 @@ describe("cut, weld, temper", () => {
     expect(cut.bench[0]?.sections).toHaveLength(4);
     expect(volumeOf(cut.workpiece) + volumeOf(cut.bench[0]!)).toBeCloseTo(before, 8);
     expect(cut.workpiece.layerCount).toBe(1);
+
+    const frontLastNode = cut.workpiece.nodes[cut.workpiece.nodes.length - 1];
+    const backFirstNode = cut.bench[0]?.nodes[0];
+    const backLastNode = cut.bench[0]?.nodes[cut.bench[0].nodes.length - 1];
+    expect(cut.workpiece.nodes[0]?.axialIndex).toBe(0);
+    expect(backFirstNode?.axialIndex).toBe(0);
+    expect(backFirstNode?.axialPosition).toBeCloseTo(0, 8);
+    expect(backLastNode?.axialPosition).toBeCloseTo(frontLastNode?.axialPosition ?? 0, 8);
   });
 
   it("switches the active workpiece without losing either raw state", () => {
@@ -49,6 +58,7 @@ describe("cut, weld, temper", () => {
 
   it("weld mixes carbon by volume and doubles layer count (damascus)", () => {
     let state = createForgeState({ sectionCount: 8 });
+    const onePieceVolume = totalVolume(state);
     state = applyForgeOperation(state, { kind: "select-material", materialId: "high-carbon-steel" });
     const welded = applyForgeOperation(state, { kind: "weld", benchIndex: 0 });
 
@@ -58,6 +68,32 @@ describe("cut, weld, temper", () => {
     expect(welded.workpiece.joints[0]?.integrity).toBeGreaterThanOrEqual(0);
     expect(welded.workpiece.joints[0]?.integrity).toBeLessThanOrEqual(1);
     expect(welded.bench).toHaveLength(0);
+    expect(welded.workpiece.sections).toHaveLength(16);
+    expect(totalVolume(welded)).toBeCloseTo(onePieceVolume * 2, 8);
+    expect(welded.workpiece.sections[8]?.position).toBeCloseTo(
+      (welded.workpiece.sections[7]?.position ?? 0) + (welded.workpiece.sections[7]?.length ?? 0),
+      8,
+    );
+  });
+
+  it("can weld the selected cut half instead of the unrelated bench workpiece", () => {
+    let state = createForgeState({ material: SPRING_STEEL, sectionCount: 8 });
+    state = applyForgeOperation(state, { kind: "select-material", materialId: "high-carbon-steel" });
+    state = applyForgeOperation(state, { kind: "select-workpiece", benchIndex: 0 });
+    const originalVolume = totalVolume(state);
+    state = applyForgeOperation(state, { kind: "cut", sectionIndex: 4 });
+
+    expect(state.bench.map((piece) => piece.material.id)).toEqual(["spring-steel", "high-carbon-steel"]);
+    const welded = applyForgeOperation(state, { kind: "weld", benchIndex: 1 });
+
+    expect(createForgeSnapshot(welded).carbon).toBeCloseTo(0.9, 8);
+    expect(createForgeSnapshot(welded).layerCount).toBe(2);
+    expect(totalVolume(welded)).toBeCloseTo(originalVolume, 8);
+    expect(welded.workpiece.joints[0]?.workpieceIds).toEqual([
+      "workpiece-1-front",
+      "workpiece-1-back",
+    ]);
+    expect(welded.bench.map((piece) => piece.material.id)).toEqual(["spring-steel"]);
   });
 
   it("replays a free-combination chain deterministically", () => {

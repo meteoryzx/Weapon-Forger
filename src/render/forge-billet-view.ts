@@ -27,6 +27,7 @@ import {
   FORGE_RULES,
   type ForgeSnapshot,
   type ForgeSnapshotSection,
+  type ForgeSnapshotWorkpiece,
   type HammerInfluencePreview,
   type WorkpieceGrid,
   type WorkpieceNode,
@@ -125,8 +126,9 @@ export class ForgeBilletView {
   // The camera is the worker's eye line; the billet spins inside the fixed anvil station.
   private readonly billetRig = new Group();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
-  private readonly weldBenchRig = new Group();
-  private readonly weldBenchBillet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
+  private readonly weldBenchRigs: Group[] = [];
+  private readonly weldBenchBillets: Mesh[] = [];
+  private readonly weldBenchItemTargets: Mesh[] = [];
   private readonly billetHitTarget = new Mesh(
     new BoxGeometry(FORGE_RULES.workpieceLength, 24, FORGE_RULES.initialSectionWidth),
     new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
@@ -187,10 +189,6 @@ export class ForgeBilletView {
     anvil.rotation.y = WORKSTATION_YAW;
     this.scene.add(anvil);
     this.billet.scale.x = BILLET_AXIAL_SCALE;
-    this.weldBenchBillet.scale.x = BILLET_AXIAL_SCALE;
-    this.weldBenchRig.rotation.y = BILLET_YAW;
-    this.weldBenchRig.add(this.weldBenchBillet);
-    this.scene.add(this.weldBenchRig);
     // The local billet geometry starts at x=0, so rotate around its midpoint
     // while keeping that midpoint at the anvil center in the top view.
     this.billetRig.position.set(
@@ -241,14 +239,7 @@ export class ForgeBilletView {
     const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
-    this.weldBenchBillet.geometry.dispose();
-    this.weldBenchBillet.geometry = nextGeometry.clone();
-    this.weldBenchRig.position.set(
-      STATION_ANCHORS.weld[0] + BILLET_CENTER_OFFSET * 0.55,
-      STATION_ANCHORS.weld[1],
-      STATION_ANCHORS.weld[2],
-    );
-    this.weldBenchRig.visible = activeStation === "weld" && snapshot.benchCount > 0;
+    this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
     this.render();
   }
@@ -305,8 +296,9 @@ export class ForgeBilletView {
     return (hit?.object.userData.materialId as ForgeMaterialPick | undefined) ?? null;
   }
 
-  pickWeldBench(viewportX: number, viewportY: number): boolean {
-    return this.pickObject(viewportX, viewportY, [this.weldBenchTarget], false) !== null;
+  pickWeldBench(viewportX: number, viewportY: number): number | null {
+    const hit = this.pickObject(viewportX, viewportY, this.weldBenchItemTargets, false);
+    return (hit?.object.userData.weldBenchIndex as number | undefined) ?? null;
   }
 
   pickQuenchBasin(viewportX: number, viewportY: number, station: QuenchStation): boolean {
@@ -368,7 +360,11 @@ export class ForgeBilletView {
 
   dispose(): void {
     this.billet.geometry.dispose();
-    this.weldBenchBillet.geometry.dispose();
+    this.weldBenchBillets.forEach((billet) => billet.geometry.dispose());
+    this.weldBenchItemTargets.forEach((target) => {
+      target.geometry.dispose();
+      (target.material as MeshBasicMaterial).dispose();
+    });
     this.billetHitTarget.geometry.dispose();
     (this.billetHitTarget.material as MeshBasicMaterial).dispose();
     for (const mesh of [...this.stationMeshes.values(), ...this.materialMeshes.values()]) {
@@ -381,6 +377,59 @@ export class ForgeBilletView {
 
   private render(): void {
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private updateWeldBenchItems(
+    bench: readonly ForgeSnapshotWorkpiece[],
+    visible: boolean,
+  ): void {
+    while (this.weldBenchRigs.length < bench.length) {
+      const rig = new Group();
+      rig.rotation.y = BILLET_YAW;
+      const billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
+      const target = new Mesh(
+        new BoxGeometry(1, 1, 1),
+        new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+      );
+      rig.add(billet, target);
+      this.weldBenchRigs.push(rig);
+      this.weldBenchBillets.push(billet);
+      this.weldBenchItemTargets.push(target);
+      this.scene.add(rig);
+    }
+    const rawLengths = bench.map((workpiece) => Math.max(
+      workpiece.sections.reduce((sum, section) => sum + section.length, 0),
+      24,
+    ));
+    const displayScale = BILLET_AXIAL_SCALE * 0.24;
+    const displayLength = rawLengths.map((length) => length * displayScale);
+    const slotPositions = [-70, 70] as const;
+    bench.forEach((workpiece, index) => {
+      const rig = this.weldBenchRigs[index];
+      const billet = this.weldBenchBillets[index];
+      const target = this.weldBenchItemTargets[index];
+      if (!rig || !billet || !target) return;
+      const rawLength = rawLengths[index] ?? 24;
+      const length = displayLength[index] ?? 24;
+      billet.geometry.dispose();
+      billet.geometry = createBilletGeometry(workpiece, null);
+      billet.scale.set(displayScale, 1, 1);
+      billet.position.set(-rawLength / 2, FORGE_RULES.initialSectionThickness / 2, 0);
+      target.geometry.dispose();
+      target.geometry = new BoxGeometry(length, 24, FORGE_RULES.initialSectionWidth * 0.72);
+      target.position.set(0, FORGE_RULES.initialSectionThickness / 2, 0);
+      target.userData.weldBenchIndex = index;
+      rig.position.set(
+        STATION_ANCHORS.weld[0] + (slotPositions[index] ?? 0),
+        STATION_ANCHORS.weld[1],
+        STATION_ANCHORS.weld[2],
+      );
+      rig.visible = visible;
+    });
+    for (let index = bench.length; index < this.weldBenchRigs.length; index += 1) {
+      const rig = this.weldBenchRigs[index];
+      if (rig) rig.visible = false;
+    }
   }
 
   private createAnvilModel(): Group {
@@ -569,7 +618,7 @@ export class ForgeBilletView {
 }
 
 function createBilletGeometry(
-  snapshot: ForgeSnapshot,
+  snapshot: ForgeSnapshotWorkpiece,
   hammerPreview: HammerInfluencePreview | null,
 ): BufferGeometry {
   const perimeterVertexCount = (snapshot.grid.widthBlocks + snapshot.grid.heightBlocks) * 2;
@@ -614,7 +663,7 @@ function createBilletGeometry(
   return geometry;
 }
 
-function workpiecePerimeter(snapshot: ForgeSnapshot, axialIndex: number): { readonly points: readonly WorkpieceNode[] } {
+function workpiecePerimeter(snapshot: ForgeSnapshotWorkpiece, axialIndex: number): { readonly points: readonly WorkpieceNode[] } {
   const points: WorkpieceNode[] = [];
   const grid = snapshot.grid;
 
@@ -635,7 +684,7 @@ function workpiecePerimeter(snapshot: ForgeSnapshot, axialIndex: number): { read
 }
 
 function groundedNode(
-  snapshot: ForgeSnapshot,
+  snapshot: ForgeSnapshotWorkpiece,
   axialIndex: number,
   widthIndex: number,
   heightIndex: number,
@@ -648,7 +697,7 @@ function groundedNode(
 }
 
 function workpieceNodeAt(
-  snapshot: ForgeSnapshot,
+  snapshot: ForgeSnapshotWorkpiece,
   axialIndex: number,
   widthIndex: number,
   heightIndex: number,

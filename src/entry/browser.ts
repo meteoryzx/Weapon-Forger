@@ -100,6 +100,11 @@ function renderState(): void {
   document.body.dataset.verbCount = String(completedVerbs.length);
   document.body.dataset.temperatureC = latestSnapshot.averageTemperatureC.toFixed(2);
   document.body.dataset.benchCount = String(latestSnapshot.benchCount);
+  document.body.dataset.benchMaterialIds = state.bench.map((piece) => piece.material.id).join(",");
+  document.body.dataset.benchWorkpieceIds = state.bench.map((piece) => piece.id).join(",");
+  document.body.dataset.workpieceId = latestSnapshot.workpieceId;
+  document.body.dataset.layerCount = String(latestSnapshot.layerCount);
+  document.body.dataset.carbon = latestSnapshot.carbon.toFixed(6);
   document.body.dataset.cameraState = view?.isCameraTransitioning() ? "moving" : "settled";
 }
 
@@ -179,9 +184,10 @@ function finishGesture(endX: number, endY: number): void {
       sectionIndex: gesture.target.sectionIndex,
       amount: Math.min(1, Math.max(0.08, (distance + elapsedMs * 0.08) / 260)),
     });
-  } else if (gesture.kind === "weld" && latestSnapshot.benchCount > 0
-    && (view?.pickWeldBench(endX, endY) || distance > 110)) {
-    application.applyIntent({ kind: "weld", benchIndex: 0 });
+  } else if (gesture.kind === "weld" && latestSnapshot.benchCount > 0) {
+    const pickedBenchIndex = view?.pickWeldBench(endX, endY) ?? null;
+    const benchIndex = pickedBenchIndex ?? (latestSnapshot.benchCount === 1 && distance > 110 ? 0 : null);
+    if (benchIndex !== null) application.applyIntent({ kind: "weld", benchIndex });
   } else if (gesture.kind === "quench") {
     const station = activeStation as QuenchStation;
     if (view?.pickQuenchBasin(endX, endY, station) || distance > 110) {

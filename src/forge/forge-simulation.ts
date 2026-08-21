@@ -9,6 +9,7 @@ import type {
   ForgeSnapshot,
   ForgeSnapshotBlock,
   ForgeSnapshotSection,
+  ForgeSnapshotWorkpiece,
   ForgeState,
   CutOperation,
   GrindOperation,
@@ -205,31 +206,46 @@ export function previewThermalState(state: ForgeState, elapsedMs: number): Forge
 }
 
 export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
+  const workpiece = snapshotWorkpiece(state.workpiece);
   return {
     parameterVersion: state.parameterVersion,
     workpieceId: state.workpiece.id,
     materialId: state.workpiece.material.id,
     billetLocation: state.workpiece.thermal.location,
-    averageTemperatureC: averageWorkpieceTemperature(state),
+    averageTemperatureC: workpiece.averageTemperatureC,
     peakTemperatureC: state.workpiece.thermal.peakTemperatureC,
     hotExposureSeconds: state.workpiece.thermal.hotExposureSeconds,
     oxidationDose: state.workpiece.thermal.oxidationDose,
     overheatDose: state.workpiece.thermal.overheatDose,
     orientationQuarterTurns: state.workpiece.orientationQuarterTurns,
     feedOffset: state.workpiece.feedOffset,
-    grid: { ...state.workpiece.grid },
-    nodes: state.workpiece.nodes.map((node) => ({ ...node })),
+    grid: workpiece.grid,
+    nodes: workpiece.nodes,
     hasCracks: state.workpiece.sections.some((section) => section.cracked),
     hasOverheatedSections: state.workpiece.sections.some((section) => section.overheated),
     quenchMedium: state.workpiece.quench.medium,
     quenched: state.workpiece.quench.medium !== null,
     edgeCoverage: edgeCoverage(state.workpiece.sections),
     edgeEvenness: edgeEvenness(state.workpiece.sections),
-    layerCount: state.workpiece.layerCount,
-    carbon: state.workpiece.material.carbon,
+    layerCount: workpiece.layerCount,
+    carbon: workpiece.carbon,
     temperTemperatureC: state.workpiece.temper.temperatureC,
     benchCount: state.bench.length,
-    sections: state.workpiece.sections.map(sectionSnapshot),
+    bench: state.bench.map(snapshotWorkpiece),
+    sections: workpiece.sections,
+  };
+}
+
+function snapshotWorkpiece(workpiece: WorkpieceState): ForgeSnapshotWorkpiece {
+  return {
+    workpieceId: workpiece.id,
+    materialId: workpiece.material.id,
+    averageTemperatureC: averageWorkpieceTemperatureOf(workpiece),
+    grid: { ...workpiece.grid },
+    nodes: workpiece.nodes.map((node) => ({ ...node })),
+    sections: workpiece.sections.map(sectionSnapshot),
+    layerCount: workpiece.layerCount,
+    carbon: workpiece.material.carbon,
   };
 }
 
@@ -327,23 +343,14 @@ function applySelectMaterial(state: ForgeState, operation: SelectMaterialOperati
   }, operation);
 }
 
-// 切割：把当前工件在 sectionIndex 处一分为二。前半段留在当前工件，后半段成为
-// bench 上的一块独立工件。两半共用同一份节点点阵（几何派生的体积/碳按截面算，
-// 不依赖节点索引），渲染只读当前工件的截面，故共享点阵不造成错乱。
+// 切割：把当前工件在 sectionIndex 处一分为二。两半都拥有独立、从零开始的
+// 点阵坐标；后半段不能继续引用原工件的节点索引，否则后续锤击会读到错误截面。
 function applyCut(state: ForgeState, operation: CutOperation): ForgeState {
   assertCutOperation(state, operation);
   const { workpiece } = state;
   const cutIndex = operation.sectionIndex;
-  const front: WorkpieceState = {
-    ...workpiece,
-    id: `${workpiece.id}-front`,
-    sections: workpiece.sections.slice(0, cutIndex),
-  };
-  const back: WorkpieceState = {
-    ...workpiece,
-    id: `${workpiece.id}-back`,
-    sections: workpiece.sections.slice(cutIndex),
-  };
+  const front = sliceWorkpiece(workpiece, 0, cutIndex, `${workpiece.id}-front`);
+  const back = sliceWorkpiece(workpiece, cutIndex, workpiece.sections.length, `${workpiece.id}-back`);
   return appendOperation({
     ...state,
     workpiece: front,
@@ -351,8 +358,8 @@ function applyCut(state: ForgeState, operation: CutOperation): ForgeState {
   }, operation);
 }
 
-// 焊合：把当前工件与 bench[benchIndex] 加热锻成一块。层数相加、carbon 按体积
-// 加权平均。这是大马士革/夹钢的涌现点——没有「大马士革按钮」，只有切割+焊合。
+// 焊合：把当前工件与 bench[benchIndex] 沿轴向拼成一个连续点阵。层数相加，材料
+// 按体积混合；没有「大马士革按钮」，大马士革只由切割、焊合和后续塑形涌现。
 function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
   const other = state.bench[operation.benchIndex];
   if (!other) throw new Error("Weld bench index must reference an existing piece.");
@@ -362,16 +369,21 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
   const bVolume = totalVolumeOf(b);
   const total = aVolume + bVolume;
   const averageByVolume = (x: number, y: number) => (x * aVolume + y * bVolume) / Math.max(total, Number.EPSILON);
-  const material: ForgeMaterial = {
-    ...a.material,
-    carbon: averageByVolume(a.material.carbon, b.material.carbon),
-    hardenability: averageByVolume(a.material.hardenability, b.material.hardenability),
-    damageResistance: averageByVolume(a.material.damageResistance, b.material.damageResistance),
-  };
+  const material = mixMaterials(a.material, b.material, averageByVolume);
+  const mergedGeometry = mergeWorkpieceGeometry(a, b);
   const welded: WorkpieceState = {
     ...a,
     material,
     layerCount: a.layerCount + b.layerCount,
+    nodes: mergedGeometry.nodes,
+    sections: mergedGeometry.sections,
+    thermal: {
+      ...a.thermal,
+      peakTemperatureC: Math.max(a.thermal.peakTemperatureC, b.thermal.peakTemperatureC),
+      hotExposureSeconds: a.thermal.hotExposureSeconds + b.thermal.hotExposureSeconds,
+      oxidationDose: a.thermal.oxidationDose + b.thermal.oxidationDose,
+      overheatDose: a.thermal.overheatDose + b.thermal.overheatDose,
+    },
     joints: [
       ...a.joints,
       ...b.joints,
@@ -379,7 +391,7 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
         id: `${a.id}-weld-${b.id}`,
         workpieceIds: [a.id, b.id],
         contactArea: Math.min(aVolume, bVolume),
-        integrity: weldIntegrity(state),
+        integrity: weldIntegrity(a, b, material),
       },
     ],
   };
@@ -391,8 +403,14 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
 }
 
 // 焊合质量 = 当前温度进入可锻窗口的程度；冷焊 → 完整性低 → 后续出「未焊合」缺陷。
-function weldIntegrity(state: ForgeState): number {
-  return calculatePlasticity(averageWorkpieceTemperature(state), state.workpiece.material);
+function weldIntegrity(a: WorkpieceState, b: WorkpieceState, material: ForgeMaterial): number {
+  const aVolume = totalVolumeOf(a);
+  const bVolume = totalVolumeOf(b);
+  const temperature = (
+    averageWorkpieceTemperatureOf(a) * aVolume
+    + averageWorkpieceTemperatureOf(b) * bVolume
+  ) / Math.max(aVolume + bVolume, Number.EPSILON);
+  return calculatePlasticity(temperature, material);
 }
 
 // 回火：只记录回火温度；硬度↔韧性的解释在 evaluate 里做，forge 保持纯状态转移。
@@ -412,6 +430,149 @@ function totalVolumeOf(workpiece: WorkpieceState): number {
     (total, section) => total + section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0),
     0,
   );
+}
+
+function sliceWorkpiece(
+  workpiece: WorkpieceState,
+  startSection: number,
+  endSection: number,
+  id: string,
+): WorkpieceState {
+  const sectionCount = endSection - startSection;
+  const baseNode = workpiece.nodes[workpieceNodeIndex(startSection, 0, 0, workpiece.grid)];
+  if (!baseNode) throw new Error("Missing cut boundary node.");
+  const nodes = [] as WorkpieceNode[];
+  for (let axialIndex = 0; axialIndex <= sectionCount; axialIndex += 1) {
+    const sourceAxialIndex = startSection + axialIndex;
+    for (let heightIndex = 0; heightIndex <= workpiece.grid.heightBlocks; heightIndex += 1) {
+      for (let widthIndex = 0; widthIndex <= workpiece.grid.widthBlocks; widthIndex += 1) {
+        const source = workpiece.nodes[workpieceNodeIndex(
+          sourceAxialIndex,
+          widthIndex,
+          heightIndex,
+          workpiece.grid,
+        )];
+        if (!source) throw new Error("Missing node while slicing workpiece.");
+        nodes.push({
+          ...source,
+          axialIndex,
+          axialPosition: source.axialPosition - baseNode.axialPosition,
+        });
+      }
+    }
+  }
+  const sections = localizeSections(
+    workpiece.sections.slice(startSection, endSection),
+    nodes,
+    workpiece.grid,
+    0,
+  );
+  return { ...workpiece, id, nodes, sections };
+}
+
+function mergeWorkpieceGeometry(
+  first: WorkpieceState,
+  second: WorkpieceState,
+): { readonly nodes: readonly WorkpieceNode[]; readonly sections: readonly BladeSection[] } {
+  if (first.grid.widthBlocks !== second.grid.widthBlocks
+    || first.grid.heightBlocks !== second.grid.heightBlocks) {
+    throw new Error("Welded workpieces must use compatible simulation grids.");
+  }
+  const grid = first.grid;
+  const firstSectionCount = first.sections.length;
+  const secondSectionCount = second.sections.length;
+  const firstStart = first.nodes[workpieceNodeIndex(0, 0, 0, grid)];
+  const firstEnd = first.nodes[workpieceNodeIndex(firstSectionCount, 0, 0, grid)];
+  const secondStart = second.nodes[workpieceNodeIndex(0, 0, 0, grid)];
+  if (!firstStart || !firstEnd || !secondStart) throw new Error("Missing weld boundary node.");
+  const secondAxialOffset = firstEnd.axialPosition - secondStart.axialPosition;
+  const nodes: WorkpieceNode[] = [];
+  const planeSize = (grid.widthBlocks + 1) * (grid.heightBlocks + 1);
+  for (let axialIndex = 0; axialIndex <= firstSectionCount + secondSectionCount; axialIndex += 1) {
+    const sourceNodes = axialIndex <= firstSectionCount ? first.nodes : second.nodes;
+    const sourceAxialIndex = axialIndex <= firstSectionCount
+      ? axialIndex
+      : axialIndex - firstSectionCount;
+    const sourceOffset = sourceAxialIndex * planeSize;
+    for (let local = 0; local < planeSize; local += 1) {
+      const source = sourceNodes[sourceOffset + local];
+      if (!source) throw new Error("Missing node while welding workpieces.");
+      nodes.push({
+        ...source,
+        axialIndex,
+        axialPosition: source.axialPosition + (sourceNodes === second.nodes ? secondAxialOffset : 0),
+      });
+    }
+  }
+  const sections = [
+    ...localizeSections(first.sections, nodes, grid, 0),
+    ...localizeSections(second.sections, nodes, grid, firstSectionCount, secondAxialOffset),
+  ];
+  return { nodes, sections };
+}
+
+function localizeSections(
+  sourceSections: readonly BladeSection[],
+  nodes: readonly WorkpieceNode[],
+  grid: WorkpieceGrid,
+  sectionIndexOffset: number,
+  positionOffset = 0,
+): readonly BladeSection[] {
+  return sourceSections.map((section, localIndex) => {
+    const sectionIndex = localIndex + sectionIndexOffset;
+    const blocks = section.blocks.map((block) => deriveBlockGeometry(
+      block,
+      sectionIndex,
+      nodes,
+      grid,
+    ));
+    return summarizeSection({
+      ...section,
+      position: section.position + positionOffset,
+      blocks,
+    }, sectionIndex, nodes, grid);
+  });
+}
+
+function mixMaterials(
+  first: ForgeMaterial,
+  second: ForgeMaterial,
+  averageByVolume: (firstValue: number, secondValue: number) => number,
+): ForgeMaterial {
+  return {
+    ...first,
+    id: first.id === second.id ? first.id : "mixed-steel",
+    carbon: averageByVolume(first.carbon, second.carbon),
+    hotWorkability: averageByVolume(first.hotWorkability, second.hotWorkability),
+    hardenability: averageByVolume(first.hardenability, second.hardenability),
+    damageResistance: averageByVolume(first.damageResistance, second.damageResistance),
+    plasticityStartC: averageByVolume(first.plasticityStartC, second.plasticityStartC),
+    plasticityPeakC: averageByVolume(first.plasticityPeakC, second.plasticityPeakC),
+    overheatTemperatureC: averageByVolume(first.overheatTemperatureC, second.overheatTemperatureC),
+    stressRecoveryAtPeak: averageByVolume(first.stressRecoveryAtPeak, second.stressRecoveryAtPeak),
+    densityKgPerM3: averageByVolume(first.densityKgPerM3, second.densityKgPerM3),
+    molarMassKgPerMol: averageByVolume(first.molarMassKgPerMol, second.molarMassKgPerMol),
+    yieldStrengthAmbientMPa: averageByVolume(first.yieldStrengthAmbientMPa, second.yieldStrengthAmbientMPa),
+    yieldStrengthHotMPa: averageByVolume(first.yieldStrengthHotMPa, second.yieldStrengthHotMPa),
+    workHardeningExponent: averageByVolume(first.workHardeningExponent, second.workHardeningExponent),
+    cleanEmissivity: averageByVolume(first.cleanEmissivity, second.cleanEmissivity),
+    oxidizedEmissivity: averageByVolume(first.oxidizedEmissivity, second.oxidizedEmissivity),
+    oxidationActivationEnergyJPerMol: averageByVolume(
+      first.oxidationActivationEnergyJPerMol,
+      second.oxidationActivationEnergyJPerMol,
+    ),
+  };
+}
+
+function averageWorkpieceTemperatureOf(workpiece: WorkpieceState): number {
+  const volume = totalVolumeOf(workpiece);
+  return workpiece.sections.reduce(
+    (sum, section) => sum + section.blocks.reduce(
+      (sectionSum, block) => sectionSum + block.temperatureC * block.volume,
+      0,
+    ),
+    0,
+  ) / Math.max(volume, Number.EPSILON);
 }
 
 function evolveThermalState(

@@ -346,6 +346,17 @@ export interface ForgeSnapshotBlock {
   readonly overheated: boolean;
 }
 
+export interface ForgeSnapshotWorkpiece {
+  readonly workpieceId: string;
+  readonly materialId: string;
+  readonly averageTemperatureC: number;
+  readonly grid: WorkpieceGrid;
+  readonly nodes: readonly WorkpieceNode[];
+  readonly sections: readonly ForgeSnapshotSection[];
+  readonly layerCount: number;
+  readonly carbon: number;
+}
+
 export interface ForgeSnapshot {
   readonly parameterVersion: string;
   readonly workpieceId: string;
@@ -371,6 +382,7 @@ export interface ForgeSnapshot {
   readonly carbon: number;
   readonly temperTemperatureC: number | null;
   readonly benchCount: number;
+  readonly bench: readonly ForgeSnapshotWorkpiece[];
 }
 
 export interface HammerInfluenceSample {
