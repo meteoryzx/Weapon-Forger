@@ -7,13 +7,14 @@
     "node": ">=24 <25"
   },
   "scripts": {
+    "check:governance": "node scripts/check-governance.mjs",
     "dev": "vite --config vite.web.config.ts",
     "build:web": "vite build --config vite.web.config.ts",
     "build:wechat": "vite build --config vite.wechat.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test",
-    "check": "npm run typecheck && npm run test && npm run build:web && npm run build:wechat && npm run test:e2e"
+    "check": "npm run check:governance && npm run typecheck && npm run test && npm run build:web && npm run build:wechat && npm run test:e2e"
   },
   "dependencies": {
     "three": "0.185.1"

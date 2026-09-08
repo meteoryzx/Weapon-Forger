@@ -2,6 +2,7 @@
 
 - Issue：
 - `PROJECT_PLAN.md` 检查点：
+- [ ] 当前分支已同步最新 `origin/main:AGENTS.md`，或这是已批准的独立治理 PR
 
 ## 玩家可见结果
 

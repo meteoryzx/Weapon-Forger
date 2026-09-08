@@ -1,0 +1,6 @@
+# Collaboration governance has one human owner.
+/AGENTS.md @meteoryzx
+/PROJECT_PLAN.md @meteoryzx
+/.github/CODEOWNERS @meteoryzx
+/.github/workflows/ci.yml @meteoryzx
+/scripts/check-governance.mjs @meteoryzx
