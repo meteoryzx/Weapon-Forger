@@ -4,7 +4,8 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await page.goto("/");
   await expect(page.locator("body")).toHaveAttribute("data-stage", "forge-mvp");
   await expect(page.locator("#hud-title")).toHaveText("铁匠铺 · 总览");
-  await expect(page.locator("button")).toHaveCount(0);
+  await expect(page.locator("#acceptance-console")).toBeVisible();
+  await expect(page.locator("[data-acceptance-target]")).toHaveCount(8);
 
   await page.locator("#game").click({ position: { x: 640, y: 330 } });
   await expect(page.locator("body")).toHaveAttribute("data-active-station", "anvil");
@@ -40,13 +41,15 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await page.locator("#game").click({ position: { x: 1000, y: 425 } });
   await expect(page.locator("#hud-title")).toHaveText("焊合台 · 焊合");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.mouse.move(120, 470);
+  await page.mouse.move(979, 446);
   await page.mouse.down();
-  await page.mouse.move(1040, 370, { steps: 5 });
+  await page.mouse.move(393, 267, { steps: 5 });
   await page.mouse.up();
   await expect(page.locator("#hud-state")).toContainText("焊合 1");
   await expect(page.locator("body")).toHaveAttribute("data-carbon", "0.900000");
   await expect(page.locator("body")).toHaveAttribute("data-layer-count", "2");
+  await expect(page.locator("body")).toHaveAttribute("data-material-region-count", "2");
+  await expect(page.locator("body")).toHaveAttribute("data-joint-count", "1");
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
@@ -64,9 +67,9 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await page.locator("#game").click({ position: { x: 870, y: 350 } });
   await expect(page.locator("#hud-title")).toHaveText("水槽 · 淬火");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.mouse.move(150, 410);
+  await page.mouse.move(413, 236);
   await page.mouse.down();
-  await page.mouse.move(620, 330, { steps: 4 });
+  await page.mouse.move(640, 317, { steps: 4 });
   await page.mouse.up();
   await expect(page.locator("#hud-state")).toContainText("淬火 water");
 

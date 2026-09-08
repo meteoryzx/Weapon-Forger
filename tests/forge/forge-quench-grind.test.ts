@@ -15,7 +15,13 @@ describe("quench and grind", () => {
     state = applyForgeOperation(state, { kind: "heat", temperatureC: 900 });
     const quenched = applyForgeOperation(state, { kind: "quench", medium: "water" });
 
-    expect(quenched.workpiece.quench).toEqual({ medium: "water", startTemperatureC: 900 });
+    expect(quenched.workpiece.heatTreatments.at(-1)).toEqual({
+      kind: "quench",
+      operationIndex: 1,
+      medium: "water",
+      startTemperatureC: 900,
+      endTemperatureC: 20,
+    });
     expect(createForgeSnapshot(quenched).averageTemperatureC).toBeLessThan(40);
     expect(createForgeSnapshot(quenched).quenched).toBe(true);
     expect(createForgeSnapshot(quenched).quenchMedium).toBe("water");
@@ -23,6 +29,10 @@ describe("quench and grind", () => {
 
   it("grinds a stroke along the edge, emphasizing the clicked section", () => {
     let state = createForgeState({ sectionCount: 8 });
+    const beforeVolume = state.workpiece.sections.reduce(
+      (sum, section) => sum + section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0),
+      0,
+    );
     state = applyForgeOperation(state, { kind: "grind", sectionIndex: 3, amount: 0.5 });
     state = applyForgeOperation(state, { kind: "grind", sectionIndex: 3, amount: 0.5 });
     const snapshot = createForgeSnapshot(state);
@@ -32,6 +42,24 @@ describe("quench and grind", () => {
     expect(snapshot.sections[3]?.groundAmount).toBeGreaterThan(snapshot.sections[0]?.groundAmount ?? 0);
     expect(snapshot.edgeCoverage).toBeGreaterThan(0);
     expect(snapshot.edgeEvenness).toBeLessThan(1);
+    expect(snapshot.removedVolume).toBeGreaterThan(0);
+    expect(snapshot.removedVolume + state.workpiece.sections.reduce(
+      (sum, section) => sum + section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0),
+      0,
+    )).toBeCloseTo(beforeVolume, 8);
+  });
+
+  it("retains repeated quench and temper events in order", () => {
+    let state = createForgeState({ sectionCount: 8 });
+    state = applyForgeOperation(state, { kind: "heat", temperatureC: 900 });
+    state = applyForgeOperation(state, { kind: "quench", medium: "oil" });
+    state = applyForgeOperation(state, { kind: "temper", temperatureC: 180 });
+    state = applyForgeOperation(state, { kind: "heat", temperatureC: 860 });
+    state = applyForgeOperation(state, { kind: "quench", medium: "water" });
+
+    expect(state.workpiece.heatTreatments.map((event) => event.kind)).toEqual(["quench", "temper", "quench"]);
+    expect(createForgeSnapshot(state).heatTreatmentCount).toBe(3);
+    expect(createForgeSnapshot(state).quenchMedium).toBe("water");
   });
 
   it("rejects invalid quench and grind inputs before changing state", () => {

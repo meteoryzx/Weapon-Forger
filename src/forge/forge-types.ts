@@ -12,7 +12,7 @@ export interface HeatCapacitySegment {
 
 export interface ForgeMaterial {
   readonly id: string;
-  // 含碳量 0–1，是「成分」这个根基量的主数字；焊合时按体积加权平均。
+  // 含碳量 0-1。工件级材料是降阶计算摘要；空间来源保存在每个 block 上。
   readonly carbon: number;
   readonly hotWorkability: number;
   readonly hardenability: number;
@@ -57,6 +57,8 @@ export interface BladeSection {
   readonly overheated: boolean;
   // 0..1 grind progress on this section's edge, accumulated by grinding along the edge.
   readonly groundAmount: number;
+  // Material volume removed by grinding in the simulation's cubic-millimetre unit.
+  readonly removedVolume: number;
   readonly blocks: readonly BladeBlock[];
 }
 
@@ -70,6 +72,10 @@ export interface WorkpieceNode {
 }
 
 export interface BladeBlock {
+  readonly materialId: string;
+  // Identifies a spatial material region. Cutting creates new region identities;
+  // welding keeps them separate instead of pretending the result is homogeneous.
+  readonly materialRegionId: string;
   readonly widthIndex: number;
   readonly heightIndex: number;
   readonly length: number;
@@ -100,28 +106,33 @@ export interface JointState {
   readonly id: string;
   readonly workpieceIds: readonly string[];
   readonly contactArea: number;
+  readonly weldTemperatureC: number;
   readonly integrity: number;
 }
 
 export type QuenchMedium = "water" | "oil";
 
-export interface QuenchState {
-  // null until the player quenches; medium and the temperature it started from
-  // are the only real facts the hardness/brittleness derivation needs.
-  readonly medium: QuenchMedium | null;
-  readonly startTemperatureC: number | null;
+export interface QuenchEvent {
+  readonly kind: "quench";
+  readonly operationIndex: number;
+  readonly medium: QuenchMedium;
+  readonly startTemperatureC: number;
+  readonly endTemperatureC: number;
 }
 
-export interface TemperState {
-  // 回火温度；null 表示未回火。温度越高越韧越软。
-  readonly temperatureC: number | null;
+export interface TemperEvent {
+  readonly kind: "temper";
+  readonly operationIndex: number;
+  readonly temperatureC: number;
 }
+
+export type HeatTreatmentEvent = QuenchEvent | TemperEvent;
 
 export interface WorkpieceState {
   readonly id: string;
-  // 每个工件自带材料：焊合会按体积混合 carbon，故材料必须随工件走。
+  // 工件级材料供现有降阶公式读取，不代表焊合后的工件已物理均质化。
   readonly material: ForgeMaterial;
-  // 焊合层数；初始 1。大马士革 = 反复切割+焊合 → 层数翻倍。
+  // 操作历史中的累计层数摘要；不等同于空间层状几何或完整大马士革实现。
   readonly layerCount: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
@@ -130,8 +141,7 @@ export interface WorkpieceState {
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
   readonly thermal: WorkpieceThermalState;
-  readonly quench: QuenchState;
-  readonly temper: TemperState;
+  readonly heatTreatments: readonly HeatTreatmentEvent[];
 }
 
 export interface WorkpieceThermalState {
@@ -198,13 +208,13 @@ export interface CutOperation {
   readonly sectionIndex: number;
 }
 
-// 焊合：把当前工件与 bench[benchIndex] 加热后锻成一块；层数相加、carbon 按体积平均。
+// 焊合：把当前工件与指定 bench 工件合并；保留来源区域，工件级材料按体积汇总。
 export interface WeldOperation {
   readonly kind: "weld";
   readonly benchIndex: number;
 }
 
-// 回火：设定回火温度，调「硬↔韧」。
+// 回火：记录回火温度事件；物性解释属于后续材料模型或下游规则。
 export interface TemperOperation {
   readonly kind: "temper";
   readonly temperatureC: number;
@@ -297,6 +307,7 @@ export type ForgeIntent =
   | TemperIntent;
 
 export interface ForgeState {
+  readonly stateVersion: string;
   readonly parameterVersion: string;
   // 当前正在加工的工件；其余切割下来的工件放在 bench，供焊合取用。
   readonly workpiece: WorkpieceState;
@@ -322,6 +333,7 @@ export interface ForgeSnapshotSection {
   readonly cracked: boolean;
   readonly overheated: boolean;
   readonly groundAmount: number;
+  readonly removedVolume: number;
   readonly blocks: readonly ForgeSnapshotBlock[];
 }
 
@@ -355,9 +367,11 @@ export interface ForgeSnapshotWorkpiece {
   readonly sections: readonly ForgeSnapshotSection[];
   readonly layerCount: number;
   readonly carbon: number;
+  readonly materialRegionCount: number;
 }
 
 export interface ForgeSnapshot {
+  readonly stateVersion: string;
   readonly parameterVersion: string;
   readonly workpieceId: string;
   readonly materialId: string;
@@ -375,12 +389,16 @@ export interface ForgeSnapshot {
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;
   readonly quenchMedium: QuenchMedium | null;
+  readonly quenchStartTemperatureC: number | null;
   readonly quenched: boolean;
   readonly edgeCoverage: number;
   readonly edgeEvenness: number;
   readonly layerCount: number;
   readonly carbon: number;
   readonly temperTemperatureC: number | null;
+  readonly heatTreatmentCount: number;
+  readonly materialRegionCount: number;
+  readonly removedVolume: number;
   readonly benchCount: number;
   readonly bench: readonly ForgeSnapshotWorkpiece[];
 }

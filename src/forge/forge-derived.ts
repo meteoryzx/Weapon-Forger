@@ -3,11 +3,18 @@ import { createForgeSnapshot, totalVolume } from "./forge-simulation.ts";
 import type { ForgeSnapshot, ForgeState } from "./forge-types.ts";
 
 export interface ForgeFacts {
+  readonly stateVersion: string;
+  readonly parameterVersion: string;
   readonly carbon: number;
   readonly densityKgPerM3: number;
   readonly hardenability: number;
   readonly materialDamageResistance: number;
   readonly layerCount: number;
+  readonly materialRegions: readonly {
+    readonly regionId: string;
+    readonly materialId: string;
+    readonly volume: number;
+  }[];
   readonly totalVolume: number;
   readonly totalLength: number;
   readonly centerOfMass: number;
@@ -27,6 +34,8 @@ export interface ForgeFacts {
   readonly edgeCoverage: number;
   readonly edgeEvenness: number;
   readonly jointIntegrity: number;
+  readonly heatTreatmentCount: number;
+  readonly removedVolume: number;
 }
 
 export interface ForgeDerivedAttribute {
@@ -143,11 +152,14 @@ export function createForgeFacts(state: ForgeState, snapshot = createForgeSnapsh
   const jointIntegrity = average(state.workpiece.joints.map((joint) => joint.integrity), 1);
 
   return {
+    stateVersion: state.stateVersion,
+    parameterVersion: state.parameterVersion,
     carbon: state.workpiece.material.carbon,
     densityKgPerM3: state.workpiece.material.densityKgPerM3,
     hardenability: state.workpiece.material.hardenability,
     materialDamageResistance: state.workpiece.material.damageResistance,
     layerCount: state.workpiece.layerCount,
+    materialRegions: materialRegionsOf(state),
     totalVolume: totalSectionVolume,
     totalLength,
     centerOfMass,
@@ -161,13 +173,29 @@ export function createForgeFacts(state: ForgeState, snapshot = createForgeSnapsh
     mechanicalWorkJ,
     damage: clamp(Math.max(damage, snapshot.hasCracks ? 1 : 0)),
     cracked: snapshot.hasCracks,
-    quenchMedium: state.workpiece.quench.medium,
-    quenchStartTemperatureC: state.workpiece.quench.startTemperatureC,
-    temperTemperatureC: state.workpiece.temper.temperatureC,
+    quenchMedium: snapshot.quenchMedium,
+    quenchStartTemperatureC: snapshot.quenchStartTemperatureC,
+    temperTemperatureC: snapshot.temperTemperatureC,
     edgeCoverage: snapshot.edgeCoverage,
     edgeEvenness: snapshot.edgeEvenness,
     jointIntegrity,
+    heatTreatmentCount: snapshot.heatTreatmentCount,
+    removedVolume: snapshot.removedVolume,
   };
+}
+
+function materialRegionsOf(state: ForgeState): ForgeFacts["materialRegions"] {
+  const regions = new Map<string, { materialId: string; volume: number }>();
+  for (const section of state.workpiece.sections) {
+    for (const block of section.blocks) {
+      const current = regions.get(block.materialRegionId);
+      regions.set(block.materialRegionId, {
+        materialId: block.materialId,
+        volume: (current?.volume ?? 0) + block.volume,
+      });
+    }
+  }
+  return [...regions.entries()].map(([regionId, region]) => ({ regionId, ...region }));
 }
 
 export function deriveForgeData(

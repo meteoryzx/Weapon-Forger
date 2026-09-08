@@ -1,6 +1,7 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
 export const FORGE_PARAMETER_VERSION = "physics-2";
+export const FORGE_STATE_VERSION = "forge-state-2";
 
 const WORKPIECE_LENGTH = 336;
 const WORKPIECE_WIDTH = 48;
@@ -146,6 +147,7 @@ export const FORGE_RULES = {
   lateralBendAtFullEnergy: 0.8,
   feedStepLength: 14,
   overheatDamagePerHeat: 0.22,
+  grindRemovalDepthAtFullAmount: 0.35,
 
   // Quench only records facts and cools the billet; hardness/brittleness are
   // interpreted by evaluate from the quench start temperature and medium.

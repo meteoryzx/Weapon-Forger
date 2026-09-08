@@ -1,7 +1,9 @@
 import {
+  HIGH_CARBON_STEEL,
   SPRING_STEEL,
   createHammerInfluencePreview,
   type ForgeSnapshot,
+  type ForgeState,
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
 import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
@@ -17,9 +19,55 @@ const canvas = document.querySelector<HTMLCanvasElement>("#game")!;
 const hudTitle = document.querySelector<HTMLElement>("#hud-title")!;
 const hudHint = document.querySelector<HTMLElement>("#hud-hint")!;
 const hudState = document.querySelector<HTMLElement>("#hud-state")!;
+const acceptanceConsole = document.querySelector<HTMLElement>("#acceptance-console")!;
+const acceptanceButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-acceptance-target]")];
+const acceptanceQuenchMedium = document.querySelector<HTMLSelectElement>("#acceptance-quench-medium")!;
+const acceptanceReset = document.querySelector<HTMLButtonElement>("#acceptance-reset")!;
 
 // The browser entry translates continuous pointer input into the public forge intents.
-const application = new GameApplication(SPRING_STEEL);
+const ACCEPTANCE_VERBS = ["materials", "cut", "weld", "heat", "hammer", "quench", "temper", "grind"] as const;
+type AcceptanceVerb = typeof ACCEPTANCE_VERBS[number];
+const searchParams = new URLSearchParams(window.location.search);
+const requestedAcceptanceVerb = searchParams.get("accept");
+const acceptanceVerb: AcceptanceVerb | null = ACCEPTANCE_VERBS.find(
+  (verb) => verb === requestedAcceptanceVerb,
+) ?? null;
+const acceptanceMedium = searchParams.get("medium") === "oil" ? "oil" : "water";
+const acceptanceStation: ForgeStation | null = acceptanceVerb === "materials" ? "materials"
+  : acceptanceVerb === "cut" ? "cut"
+  : acceptanceVerb === "weld" ? "weld"
+  : acceptanceVerb === "heat" ? "furnace"
+  : acceptanceVerb === "hammer" ? "anvil"
+  : acceptanceVerb === "quench" ? `quench-${acceptanceMedium}` as ForgeStation
+  : acceptanceVerb === "temper" ? "temper"
+  : acceptanceVerb === "grind" ? "grind"
+  : null;
+
+function prepareHotWorkpiece(target: GameApplication): void {
+  target.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+  target.getSnapshot(20_000);
+  target.commitPreview();
+  target.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
+}
+
+function createApplication(): GameApplication {
+  const next = new GameApplication(SPRING_STEEL);
+  if (acceptanceVerb === "weld") {
+    next.applyIntent({ kind: "select-material", materialId: HIGH_CARBON_STEEL.id });
+    prepareHotWorkpiece(next);
+    next.applyIntent({ kind: "select-workpiece", benchIndex: 0 });
+    prepareHotWorkpiece(next);
+  } else if (acceptanceVerb === "hammer" || acceptanceVerb === "quench") {
+    prepareHotWorkpiece(next);
+  } else if (acceptanceVerb === "temper") {
+    prepareHotWorkpiece(next);
+    next.applyIntent({ kind: "quench", medium: "water" });
+  }
+  return next;
+}
+
+const application = createApplication();
+const acceptanceSetupOperationCount = acceptanceStation ? application.getState().operations.length : 0;
 
 let view: ForgeBilletView | null = null;
 let latestSnapshot: ForgeSnapshot = application.getSnapshot();
@@ -33,6 +81,7 @@ let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null
 let gesture: {
   readonly kind: "cut" | "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
+  readonly weldBenchIndex: number | null;
   readonly startedAtMs: number;
   readonly startX: number;
   readonly startY: number;
@@ -57,8 +106,100 @@ const materialLabels: Record<string, string> = {
   "spring-steel": "弹簧钢",
 };
 
+function openAcceptanceSlice(verb: AcceptanceVerb, medium = acceptanceMedium): void {
+  const parameters = new URLSearchParams({ accept: verb });
+  if (verb === "quench") parameters.set("medium", medium);
+  window.location.search = parameters.toString();
+}
+
+document.body.classList.add("acceptance-mode");
+acceptanceConsole.hidden = false;
+acceptanceButtons.forEach((button) => {
+  const target = button.dataset.acceptanceTarget as AcceptanceVerb | undefined;
+  if (!target) return;
+  if (target === acceptanceVerb) button.setAttribute("aria-current", "step");
+  button.addEventListener("click", () => openAcceptanceSlice(target));
+});
+acceptanceQuenchMedium.value = acceptanceMedium;
+acceptanceQuenchMedium.disabled = acceptanceVerb !== "quench";
+acceptanceQuenchMedium.addEventListener("change", () => {
+  openAcceptanceSlice("quench", acceptanceQuenchMedium.value === "oil" ? "oil" : "water");
+});
+acceptanceReset.disabled = acceptanceStation === null;
+acceptanceReset.addEventListener("click", () => window.location.reload());
+
 function viewport() {
   return { width: window.innerWidth, height: window.innerHeight, pixelRatio: window.devicePixelRatio };
+}
+
+function average(values: readonly number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length);
+}
+
+function acceptanceOperationCount(state: ForgeState): number {
+  if (!acceptanceVerb) return state.operations.length;
+  return state.operations.filter((operation) => (
+    acceptanceVerb === "materials" ? operation.kind === "select-material"
+    : acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.elapsedMs > 0
+    : operation.kind === acceptanceVerb
+  )).length;
+}
+
+function acceptanceState(state: ForgeState): readonly string[] {
+  const sections = state.workpiece.sections;
+  const joint = state.workpiece.joints[state.workpiece.joints.length - 1];
+  const displayedTemper = temperPreviewC ?? latestSnapshot.temperTemperatureC;
+  const shared = `本次操作 ${acceptanceOperationCount(state)} · 按 R 重置`;
+  switch (acceptanceVerb) {
+    case "materials":
+      return [
+        `${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · 碳 ${latestSnapshot.carbon.toFixed(2)}`,
+        `当前工件 ${latestSnapshot.workpieceId} · 工作台 ${latestSnapshot.benchCount} 块`,
+        shared,
+      ];
+    case "cut":
+      return [
+        `当前截面 ${latestSnapshot.sections.length} · 当前节点 ${latestSnapshot.nodes.length}`,
+        `工作台 ${latestSnapshot.benchCount} 块 · 工件 ${latestSnapshot.workpieceId}`,
+        shared,
+      ];
+    case "weld":
+      return [
+        `待焊工件 ${latestSnapshot.benchCount} 块 · 材料 ${state.bench.map((piece) => materialLabels[piece.material.id] ?? piece.material.id).join("、") || "无"}`,
+        `层数 ${latestSnapshot.layerCount} · 碳 ${latestSnapshot.carbon.toFixed(2)} · 接头 ${state.workpiece.joints.length}`,
+        `最近接头完整性 ${joint ? `${Math.round(joint.integrity * 100)}%` : "未焊合"} · ${shared}`,
+      ];
+    case "heat":
+      return [
+        `当前温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 峰值 ${latestSnapshot.peakTemperatureC.toFixed(0)}℃`,
+        `高温暴露 ${latestSnapshot.hotExposureSeconds.toFixed(1)}s · 氧化剂量 ${latestSnapshot.oxidationDose.toFixed(2)}`,
+        `热损伤 ${Math.round(average(sections.map((section) => section.thermalDamage)) * 100)}% · ${shared}`,
+      ];
+    case "hammer":
+      return [
+        `转面 ${latestSnapshot.orientationQuarterTurns}/4 · 送料 ${latestSnapshot.feedOffset.toFixed(0)}`,
+        `塑性应变 ${average(sections.map((section) => section.plasticStrain)).toFixed(3)} · 应力 ${average(sections.map((section) => section.stress)).toFixed(3)}`,
+        `损伤 ${Math.round(average(sections.map((section) => section.damage)) * 100)}% · ${shared}`,
+      ];
+    case "quench":
+      return [
+        `样本介质 ${acceptanceMedium === "water" ? "水" : "油"} · 当前温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃`,
+        `淬火记录 ${latestSnapshot.quenchMedium ?? "未淬火"} · 起始温度 ${latestSnapshot.quenchStartTemperatureC?.toFixed(0) ?? "未记录"}℃`,
+        shared,
+      ];
+    case "temper":
+      return [
+        `当前调节 ${displayedTemper ?? "未设定"}℃ · 已记录 ${latestSnapshot.temperTemperatureC ?? "未回火"}℃`,
+        shared,
+      ];
+    case "grind":
+      return [
+        `刃口覆盖 ${Math.round(latestSnapshot.edgeCoverage * 100)}% · 均匀度 ${Math.round(latestSnapshot.edgeEvenness * 100)}%`,
+        `平均研磨 ${Math.round(average(sections.map((section) => section.groundAmount)) * 100)}% · ${shared}`,
+      ];
+    default:
+      return [];
+  }
 }
 
 function renderState(): void {
@@ -82,18 +223,28 @@ function renderState(): void {
   const displayedTemper = temperPreviewC ?? latestSnapshot.temperTemperatureC;
   const copy = stationCopy[activeStation];
 
-  hudTitle.textContent = copy.title;
-  hudHint.textContent = copy.hint;
-  hudState.textContent = [
+  hudTitle.textContent = acceptanceStation
+    ? `R1 单项验收 · ${copy.title}`
+    : copy.title;
+  hudHint.textContent = acceptanceStation
+    ? `${copy.hint} 按 R 重置当前固定样本。`
+    : copy.hint;
+  const overviewState = [
     `${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · 当前工件 ${latestSnapshot.workpieceId}`,
     `温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃`,
     `层数 ${latestSnapshot.layerCount} · 碳 ${latestSnapshot.carbon.toFixed(2)}`,
-    `工作台 ${latestSnapshot.benchCount} 块 · 操作 ${state.operations.length}`,
+    acceptanceStation
+      ? `工作台 ${latestSnapshot.benchCount} 块 · 本次操作 ${state.operations.length - acceptanceSetupOperationCount}`
+      : `工作台 ${latestSnapshot.benchCount} 块 · 操作 ${state.operations.length}`,
     `锤击 ${operationCounts.hammer ?? 0} · 切割 ${operationCounts.cut ?? 0} · 焊合 ${operationCounts.weld ?? 0}`,
     `淬火 ${latestSnapshot.quenchMedium ?? "未做"} · 回火 ${displayedTemper ?? "未做"} · 研磨 ${Math.round(latestSnapshot.edgeCoverage * 100)}%`,
     `损伤 ${Math.round(damage * 100)}% · 规则 ${latestSnapshot.parameterVersion}`,
-  ].join(" · ");
-  document.body.dataset.stage = "forge-mvp";
+  ];
+  hudState.textContent = (acceptanceStation ? acceptanceState(state) : overviewState).join(" · ");
+  document.body.dataset.stage = acceptanceStation ? "forge-acceptance" : "forge-mvp";
+  document.body.dataset.acceptanceVerb = acceptanceVerb ?? "none";
+  document.body.dataset.acceptanceSetupOperations = String(acceptanceSetupOperationCount);
+  document.body.dataset.acceptanceOperationCount = String(acceptanceOperationCount(state));
   document.body.dataset.activeStation = activeStation;
   document.body.dataset.operationCount = String(state.operations.length);
   document.body.dataset.completedVerbs = completedVerbs.join(",");
@@ -104,7 +255,11 @@ function renderState(): void {
   document.body.dataset.benchWorkpieceIds = state.bench.map((piece) => piece.id).join(",");
   document.body.dataset.workpieceId = latestSnapshot.workpieceId;
   document.body.dataset.layerCount = String(latestSnapshot.layerCount);
+  document.body.dataset.materialRegionCount = String(latestSnapshot.materialRegionCount);
+  document.body.dataset.jointCount = String(state.workpiece.joints.length);
+  document.body.dataset.removedVolume = latestSnapshot.removedVolume.toFixed(6);
   document.body.dataset.carbon = latestSnapshot.carbon.toFixed(6);
+  document.body.dataset.quenchMedium = latestSnapshot.quenchMedium ?? "none";
   document.body.dataset.cameraState = view?.isCameraTransitioning() ? "moving" : "settled";
 }
 
@@ -115,6 +270,7 @@ function updateView(hammerPreview = null): void {
 }
 
 function setStation(station: ForgeStation): void {
+  if (acceptanceStation && station !== acceptanceStation) return;
   activeStation = station;
   view?.setStation(station);
   updateView();
@@ -186,7 +342,9 @@ function finishGesture(endX: number, endY: number): void {
     });
   } else if (gesture.kind === "weld" && latestSnapshot.benchCount > 0) {
     const pickedBenchIndex = view?.pickWeldBench(endX, endY) ?? null;
-    const benchIndex = pickedBenchIndex ?? (latestSnapshot.benchCount === 1 && distance > 110 ? 0 : null);
+    const benchIndex = gesture.weldBenchIndex
+      ?? pickedBenchIndex
+      ?? (latestSnapshot.benchCount === 1 && distance > 110 ? 0 : null);
     if (benchIndex !== null) application.applyIntent({ kind: "weld", benchIndex });
   } else if (gesture.kind === "quench") {
     const station = activeStation as QuenchStation;
@@ -214,7 +372,8 @@ function finishTemper(): void {
 }
 
 view = new ForgeBilletView(canvas, viewport());
-view.setStation("overview");
+view.setStation(acceptanceStation ?? "overview");
+activeStation = acceptanceStation ?? "overview";
 updateView();
 
 canvas.addEventListener("pointerdown", (event) => {
@@ -262,15 +421,38 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
   if ((activeStation === "cut" || activeStation === "grind") && target) {
-    gesture = { kind: activeStation, target, startedAtMs: performance.now(), startX: x, startY: y };
+    gesture = {
+      kind: activeStation,
+      target,
+      weldBenchIndex: null,
+      startedAtMs: performance.now(),
+      startX: x,
+      startY: y,
+    };
     return;
   }
-  if (activeStation === "weld" && target) {
-    gesture = { kind: "weld", target, startedAtMs: performance.now(), startX: x, startY: y };
+  if (activeStation === "weld") {
+    const weldBenchIndex = view.pickWeldBench(x, y);
+    if (!target && weldBenchIndex === null) return;
+    gesture = {
+      kind: "weld",
+      target: target ?? { sectionIndex: 0, faceBias: 0.5 },
+      weldBenchIndex,
+      startedAtMs: performance.now(),
+      startX: x,
+      startY: y,
+    };
     return;
   }
   if ((activeStation === "quench-water" || activeStation === "quench-oil") && target) {
-    gesture = { kind: "quench", target, startedAtMs: performance.now(), startX: x, startY: y };
+    gesture = {
+      kind: "quench",
+      target,
+      weldBenchIndex: null,
+      startedAtMs: performance.now(),
+      startX: x,
+      startY: y,
+    };
     return;
   }
   if (activeStation === "temper" && view.pickTemperControl(x, y)) {
@@ -309,7 +491,13 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() === "r" && acceptanceStation) {
+    event.preventDefault();
+    window.location.reload();
+    return;
+  }
   if (event.key === "Escape" && activeStation !== "overview") {
+    if (acceptanceStation) return;
     event.preventDefault();
     setStation("overview");
     return;

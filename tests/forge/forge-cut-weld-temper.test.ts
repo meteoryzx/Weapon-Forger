@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   applyForgeOperation,
+  createForgeFacts,
   createForgeSnapshot,
   createForgeState,
   replayForgeState,
@@ -51,12 +52,16 @@ describe("cut, weld, temper", () => {
 
   it("temper records a temperature and rejects an invalid one", () => {
     const tempered = applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "temper", temperatureC: 200 });
-    expect(tempered.workpiece.temper.temperatureC).toBe(200);
+    expect(tempered.workpiece.heatTreatments.at(-1)).toEqual({
+      kind: "temper",
+      operationIndex: 0,
+      temperatureC: 200,
+    });
     expect(createForgeSnapshot(tempered).temperTemperatureC).toBe(200);
     expect(() => applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "temper", temperatureC: 600 })).toThrow();
   });
 
-  it("weld mixes carbon by volume and doubles layer count (damascus)", () => {
+  it("weld keeps source material regions while exposing an aggregate carbon value", () => {
     let state = createForgeState({ sectionCount: 8 });
     const onePieceVolume = totalVolume(state);
     state = applyForgeOperation(state, { kind: "select-material", materialId: "high-carbon-steel" });
@@ -65,8 +70,15 @@ describe("cut, weld, temper", () => {
     // 低碳 0.2 与高碳 0.9 等体积混合 → 0.55；层数 1+1=2。
     expect(createForgeSnapshot(welded).carbon).toBeCloseTo(0.55, 8);
     expect(createForgeSnapshot(welded).layerCount).toBe(2);
+    expect(createForgeSnapshot(welded).materialRegionCount).toBe(2);
+    expect(createForgeFacts(welded).materialRegions.map((region) => region.materialId).sort()).toEqual([
+      "high-carbon-steel",
+      "mild-steel",
+    ]);
     expect(welded.workpiece.joints[0]?.integrity).toBeGreaterThanOrEqual(0);
     expect(welded.workpiece.joints[0]?.integrity).toBeLessThanOrEqual(1);
+    expect(welded.workpiece.joints[0]?.contactArea).toBeCloseTo(48 * 8, 8);
+    expect(welded.workpiece.joints[0]?.weldTemperatureC).toBe(20);
     expect(welded.bench).toHaveLength(0);
     expect(welded.workpiece.sections).toHaveLength(16);
     expect(totalVolume(welded)).toBeCloseTo(onePieceVolume * 2, 8);
@@ -94,6 +106,20 @@ describe("cut, weld, temper", () => {
       "workpiece-1-back",
     ]);
     expect(welded.bench.map((piece) => piece.material.id)).toEqual(["spring-steel"]);
+  });
+
+  it("keeps both workpieces' heat-treatment events in operation order", () => {
+    let state = createForgeState({ sectionCount: 8 });
+    state = applyForgeOperation(state, { kind: "quench", medium: "water" });
+    state = applyForgeOperation(state, { kind: "select-material", materialId: "high-carbon-steel" });
+    state = applyForgeOperation(state, { kind: "select-workpiece", benchIndex: 0 });
+    state = applyForgeOperation(state, { kind: "temper", temperatureC: 200 });
+    const welded = applyForgeOperation(state, { kind: "weld", benchIndex: 0 });
+
+    expect(welded.workpiece.heatTreatments.map((event) => [event.kind, event.operationIndex])).toEqual([
+      ["quench", 0],
+      ["temper", 3],
+    ]);
   });
 
   it("replays a free-combination chain deterministically", () => {

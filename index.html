@@ -11,10 +11,46 @@
       #hud-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
       #hud-hint { font-size: 13px; color: #a9b0b5; margin-top: 8px; max-width: 640px; line-height: 1.5; }
       #hud-state { font-size: 12px; color: #d4b77a; margin-top: 8px; max-width: 760px; line-height: 1.5; }
+      #acceptance-console { position: fixed; left: 12px; top: 12px; bottom: 12px; width: 176px; padding: 12px; box-sizing: border-box; overflow-y: auto; color: #e8e6df; background: rgba(20, 23, 22, 0.94); border: 1px solid #59605d; border-radius: 6px; font-family: system-ui, sans-serif; z-index: 20; }
+      #acceptance-console[hidden] { display: none; }
+      #acceptance-console h2 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
+      #acceptance-console nav { display: grid; gap: 5px; }
+      #acceptance-console button, #acceptance-console select { width: 100%; min-height: 36px; box-sizing: border-box; border: 1px solid #59605d; border-radius: 4px; color: #d8dcda; background: #252a28; font: inherit; text-align: left; cursor: pointer; }
+      #acceptance-console button { padding: 7px 9px; }
+      #acceptance-console button:hover { border-color: #b7945c; background: #303633; }
+      #acceptance-console button[aria-current="step"] { border-color: #d5aa62; color: #fff4dc; background: #4b4030; }
+      #acceptance-console label { display: block; margin: 12px 0 5px; color: #aeb5b1; font-size: 12px; }
+      #acceptance-console select { padding: 6px 8px; text-align: left; }
+      #acceptance-reset { margin-top: 12px; }
+      body.acceptance-mode #hud { left: 212px; }
+      @media (max-width: 760px) {
+        #acceptance-console { width: 148px; padding: 9px; }
+        body.acceptance-mode #hud { left: 164px; padding-right: 8px; }
+        #hud-state { max-width: none; }
+      }
     </style>
   </head>
   <body>
     <canvas id="game" aria-label="打了个铁开发画布"></canvas>
+    <aside id="acceptance-console" aria-label="R1 操作验收中控台" hidden>
+      <h2>R1 操作验收</h2>
+      <nav aria-label="选择锻造步骤">
+        <button type="button" data-acceptance-target="materials">1. 选料</button>
+        <button type="button" data-acceptance-target="cut">2. 切割</button>
+        <button type="button" data-acceptance-target="weld">3. 焊合</button>
+        <button type="button" data-acceptance-target="heat">4. 加热</button>
+        <button type="button" data-acceptance-target="hammer">5. 锤击</button>
+        <button type="button" data-acceptance-target="quench">6. 淬火</button>
+        <button type="button" data-acceptance-target="temper">7. 回火</button>
+        <button type="button" data-acceptance-target="grind">8. 研磨</button>
+      </nav>
+      <label for="acceptance-quench-medium">淬火介质</label>
+      <select id="acceptance-quench-medium">
+        <option value="water">水</option>
+        <option value="oil">油</option>
+      </select>
+      <button id="acceptance-reset" type="button">重置当前样本</button>
+    </aside>
     <div id="hud">
       <div id="hud-title"></div>
       <div id="hud-hint"></div>

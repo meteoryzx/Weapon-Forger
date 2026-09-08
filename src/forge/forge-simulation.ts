@@ -1,4 +1,10 @@
-import { DEFAULT_FORGE_MATERIAL, FORGE_MATERIALS, FORGE_PARAMETER_VERSION, FORGE_RULES } from "./forge-rules.ts";
+import {
+  DEFAULT_FORGE_MATERIAL,
+  FORGE_MATERIALS,
+  FORGE_PARAMETER_VERSION,
+  FORGE_RULES,
+  FORGE_STATE_VERSION,
+} from "./forge-rules.ts";
 import { integrateMechanicalResponse } from "./forge-physics.ts";
 import type {
   BladeBlock,
@@ -90,6 +96,7 @@ export function createForgeState(options: CreateForgeStateOptions = {}): ForgeSt
   const sectionCount = options.sectionCount ?? FORGE_RULES.defaultSectionCount;
   const material = options.material ?? DEFAULT_FORGE_MATERIAL;
   return {
+    stateVersion: FORGE_STATE_VERSION,
     parameterVersion: FORGE_PARAMETER_VERSION,
     workpiece: createWorkpiece(material, "workpiece-0", sectionCount),
     bench: [],
@@ -104,7 +111,7 @@ function createWorkpiece(material: ForgeMaterial, id: string, sectionCount: numb
   assertMaterial(material);
   const nodes = createWorkpieceNodes(sectionCount, DEFAULT_GRID);
   const sections = Array.from({ length: sectionCount }, (_, sectionIndex) => (
-    createSection(sectionIndex, nodes, DEFAULT_GRID)
+    createSection(sectionIndex, nodes, DEFAULT_GRID, material.id, id)
   ));
   return {
     id,
@@ -123,8 +130,7 @@ function createWorkpiece(material: ForgeMaterial, id: string, sectionCount: numb
       oxidationDose: 0,
       overheatDose: 0,
     },
-    quench: { medium: null, startTemperatureC: null },
-    temper: { temperatureC: null },
+    heatTreatments: [],
   };
 }
 
@@ -207,7 +213,10 @@ export function previewThermalState(state: ForgeState, elapsedMs: number): Forge
 
 export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
   const workpiece = snapshotWorkpiece(state.workpiece);
+  const quench = latestQuenchEvent(state.workpiece);
+  const temper = latestTemperEvent(state.workpiece);
   return {
+    stateVersion: state.stateVersion,
     parameterVersion: state.parameterVersion,
     workpieceId: state.workpiece.id,
     materialId: state.workpiece.material.id,
@@ -223,13 +232,17 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
     nodes: workpiece.nodes,
     hasCracks: state.workpiece.sections.some((section) => section.cracked),
     hasOverheatedSections: state.workpiece.sections.some((section) => section.overheated),
-    quenchMedium: state.workpiece.quench.medium,
-    quenched: state.workpiece.quench.medium !== null,
+    quenchMedium: quench?.medium ?? null,
+    quenchStartTemperatureC: quench?.startTemperatureC ?? null,
+    quenched: quench !== null,
     edgeCoverage: edgeCoverage(state.workpiece.sections),
     edgeEvenness: edgeEvenness(state.workpiece.sections),
     layerCount: workpiece.layerCount,
     carbon: workpiece.carbon,
-    temperTemperatureC: state.workpiece.temper.temperatureC,
+    temperTemperatureC: temper?.temperatureC ?? null,
+    heatTreatmentCount: state.workpiece.heatTreatments.length,
+    materialRegionCount: workpiece.materialRegionCount,
+    removedVolume: state.workpiece.sections.reduce((sum, section) => sum + section.removedVolume, 0),
     benchCount: state.bench.length,
     bench: state.bench.map(snapshotWorkpiece),
     sections: workpiece.sections,
@@ -246,7 +259,26 @@ function snapshotWorkpiece(workpiece: WorkpieceState): ForgeSnapshotWorkpiece {
     sections: workpiece.sections.map(sectionSnapshot),
     layerCount: workpiece.layerCount,
     carbon: workpiece.material.carbon,
+    materialRegionCount: new Set(workpiece.sections.flatMap((section) => (
+      section.blocks.map((block) => block.materialRegionId)
+    ))).size,
   };
+}
+
+function latestQuenchEvent(workpiece: WorkpieceState) {
+  for (let index = workpiece.heatTreatments.length - 1; index >= 0; index -= 1) {
+    const event = workpiece.heatTreatments[index];
+    if (event?.kind === "quench") return event;
+  }
+  return null;
+}
+
+function latestTemperEvent(workpiece: WorkpieceState) {
+  for (let index = workpiece.heatTreatments.length - 1; index >= 0; index -= 1) {
+    const event = workpiece.heatTreatments[index];
+    if (event?.kind === "temper") return event;
+  }
+  return null;
 }
 
 export function totalVolume(state: ForgeState): number {
@@ -288,9 +320,8 @@ function applyMoveBillet(state: ForgeState, operation: MoveBilletOperation): For
   }, operation);
 }
 
-// Quench only records the two real facts (medium, temperature it started from)
-// and drops the billet back to ambient. Hardness gain and brittleness risk are
-// interpreted later by evaluate, so forge stays a pure state transition.
+// The reduced model records the cooling boundary as a process event. Detailed
+// phase transformation is deferred, but repeated cycles are no longer lost.
 function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState {
   assertQuenchMedium(operation.medium);
   const startTemperatureC = roundThermal(averageWorkpieceTemperature(state));
@@ -307,7 +338,13 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
     workpiece: {
       ...state.workpiece,
       sections,
-      quench: { medium: operation.medium, startTemperatureC },
+      heatTreatments: [...state.workpiece.heatTreatments, {
+        kind: "quench",
+        operationIndex: state.operations.length,
+        medium: operation.medium,
+        startTemperatureC,
+        endTemperatureC: FORGE_RULES.ambientTemperatureC,
+      }],
     },
   }, operation);
 }
@@ -323,7 +360,24 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
     const distance = Math.abs(index - operation.sectionIndex) / Math.max(1, sectionCount - 1);
     const falloff = 1 - 0.8 * distance;
     const amount = clamp(operation.amount * falloff, 0, 1);
-    return { ...section, groundAmount: clamp(section.groundAmount + amount, 0, 1) };
+    const groundAmount = clamp(section.groundAmount + amount, 0, 1);
+    const progress = groundAmount - section.groundAmount;
+    let removedVolume = 0;
+    const blocks = section.blocks.map((block) => {
+      if (block.widthIndex !== state.workpiece.grid.widthBlocks - 1 || progress <= 0) return block;
+      const removal = Math.min(
+        block.volume * 0.25,
+        section.length * block.thickness * FORGE_RULES.grindRemovalDepthAtFullAmount * progress,
+      );
+      removedVolume += removal;
+      return { ...block, volume: block.volume - removal };
+    });
+    return summarizeSection({
+      ...section,
+      groundAmount,
+      removedVolume: section.removedVolume + removedVolume,
+      blocks,
+    }, index, state.workpiece.nodes, state.workpiece.grid);
   });
   return appendOperation({
     ...state,
@@ -331,8 +385,7 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
   }, operation);
 }
 
-// 选料：往 bench 增加一块指定材料的新钢坯。这样大马士革/夹钢能在两块不同
-// carbon 的钢坯之间通过「切割 + 焊合」涌现成分混合。
+// 选料：往 bench 增加一块指定材料的新钢坯，保留独立材料来源供后续组合。
 function applySelectMaterial(state: ForgeState, operation: SelectMaterialOperation): ForgeState {
   const material = FORGE_MATERIALS.find((candidate) => candidate.id === operation.materialId);
   if (!material) throw new Error(`Unknown material: ${operation.materialId}.`);
@@ -358,8 +411,8 @@ function applyCut(state: ForgeState, operation: CutOperation): ForgeState {
   }, operation);
 }
 
-// 焊合：把当前工件与 bench[benchIndex] 沿轴向拼成一个连续点阵。层数相加，材料
-// 按体积混合；没有「大马士革按钮」，大马士革只由切割、焊合和后续塑形涌现。
+// 焊合：把当前工件与 bench[benchIndex] 沿轴向拼成连续点阵。工件级材料按体积
+// 汇总供降阶公式读取，block 仍保留空间材料来源，不能据此宣称完整层状复合已实现。
 function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
   const other = state.bench[operation.benchIndex];
   if (!other) throw new Error("Weld bench index must reference an existing piece.");
@@ -371,6 +424,7 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
   const averageByVolume = (x: number, y: number) => (x * aVolume + y * bVolume) / Math.max(total, Number.EPSILON);
   const material = mixMaterials(a.material, b.material, averageByVolume);
   const mergedGeometry = mergeWorkpieceGeometry(a, b);
+  const weldTemperatureC = averageWeldTemperature(a, b);
   const welded: WorkpieceState = {
     ...a,
     material,
@@ -384,14 +438,17 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
       oxidationDose: a.thermal.oxidationDose + b.thermal.oxidationDose,
       overheatDose: a.thermal.overheatDose + b.thermal.overheatDose,
     },
+    heatTreatments: [...a.heatTreatments, ...b.heatTreatments]
+      .sort((first, second) => first.operationIndex - second.operationIndex),
     joints: [
       ...a.joints,
       ...b.joints,
       {
         id: `${a.id}-weld-${b.id}`,
         workpieceIds: [a.id, b.id],
-        contactArea: Math.min(aVolume, bVolume),
-        integrity: weldIntegrity(a, b, material),
+        contactArea: weldContactArea(a, b),
+        weldTemperatureC,
+        integrity: weldIntegrity(weldTemperatureC, material),
       },
     ],
   };
@@ -403,24 +460,40 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
 }
 
 // 焊合质量 = 当前温度进入可锻窗口的程度；冷焊 → 完整性低 → 后续出「未焊合」缺陷。
-function weldIntegrity(a: WorkpieceState, b: WorkpieceState, material: ForgeMaterial): number {
+function averageWeldTemperature(a: WorkpieceState, b: WorkpieceState): number {
   const aVolume = totalVolumeOf(a);
   const bVolume = totalVolumeOf(b);
   const temperature = (
     averageWorkpieceTemperatureOf(a) * aVolume
     + averageWorkpieceTemperatureOf(b) * bVolume
   ) / Math.max(aVolume + bVolume, Number.EPSILON);
-  return calculatePlasticity(temperature, material);
+  return temperature;
 }
 
-// 回火：只记录回火温度；硬度↔韧性的解释在 evaluate 里做，forge 保持纯状态转移。
+function weldContactArea(a: WorkpieceState, b: WorkpieceState): number {
+  const aEnd = a.sections.at(-1);
+  const bStart = b.sections[0];
+  if (!aEnd || !bStart) return 0;
+  return Math.min(aEnd.width * aEnd.thickness, bStart.width * bStart.thickness);
+}
+
+function weldIntegrity(temperatureC: number, material: ForgeMaterial): number {
+  return calculatePlasticity(temperatureC, material);
+}
+
+// Tempering is retained as a process event. A later material model may consume
+// time and phase state without changing the public operation history shape.
 function applyTemper(state: ForgeState, operation: TemperOperation): ForgeState {
   assertTemperOperation(operation);
   return appendOperation({
     ...state,
     workpiece: {
       ...state.workpiece,
-      temper: { temperatureC: operation.temperatureC },
+      heatTreatments: [...state.workpiece.heatTreatments, {
+        kind: "temper",
+        operationIndex: state.operations.length,
+        temperatureC: operation.temperatureC,
+      }],
     },
   }, operation);
 }
@@ -462,7 +535,13 @@ function sliceWorkpiece(
     }
   }
   const sections = localizeSections(
-    workpiece.sections.slice(startSection, endSection),
+    workpiece.sections.slice(startSection, endSection).map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) => ({
+        ...block,
+        materialRegionId: `${id}/${block.materialRegionId}`,
+      })),
+    })),
     nodes,
     workpiece.grid,
     0,
@@ -1257,11 +1336,15 @@ function createSection(
   sectionIndex: number,
   nodes: readonly WorkpieceNode[],
   grid: WorkpieceGrid,
+  materialId: string,
+  materialRegionId: string,
 ): BladeSection {
   const blocks = Array.from({ length: grid.widthBlocks * grid.heightBlocks }, (_, blockIndex): BladeBlock => {
     const widthIndex = blockIndex % grid.widthBlocks;
     const heightIndex = Math.floor(blockIndex / grid.widthBlocks);
     const initial: BladeBlock = {
+      materialId,
+      materialRegionId,
       widthIndex,
       heightIndex,
       length: FORGE_RULES.initialSectionLength,
@@ -1303,6 +1386,7 @@ function createSection(
     cracked: false,
     overheated: false,
     groundAmount: 0,
+    removedVolume: 0,
     blocks,
   }, sectionIndex, nodes, grid);
 }
@@ -1473,6 +1557,7 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
     cracked: section.cracked,
     overheated: section.overheated,
     groundAmount: section.groundAmount,
+    removedVolume: section.removedVolume,
     blocks: section.blocks.map((block): ForgeSnapshotBlock => ({
       widthIndex: block.widthIndex,
       heightIndex: block.heightIndex,
@@ -1512,8 +1597,7 @@ function cloneStateWithoutOperations(state: ForgeState): ForgeState {
     })),
     joints: workpiece.joints.map((joint) => ({ ...joint, workpieceIds: [...joint.workpieceIds] })),
     thermal: { ...workpiece.thermal },
-    quench: { ...workpiece.quench },
-    temper: { ...workpiece.temper },
+    heatTreatments: workpiece.heatTreatments.map((event) => ({ ...event })),
   });
   return {
     ...state,

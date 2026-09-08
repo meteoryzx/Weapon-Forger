@@ -16,8 +16,9 @@
 - 基于 `physics-2` 的降阶材料响应：几何节点、热状态、塑性、应力、机械功、损伤和裂纹。
 - 八个浏览器锻造工位：选料、切割、焊合、加热、锤击、淬火、回火、研磨。
 - 总览到工位近景的相机切换，以及连续点击、按住、拖动和调整输入。
-- 可扩展的 `ForgeFacts` / `ForgeDerivationProfile` 派生接口和一组基础现实锻造 profile 公式。
-- 42 个逻辑测试、浏览器端到端测试、浏览器构建和微信构建。
+- 带 `stateVersion` / `parameterVersion` 的状态序列化、确定性回放、材料区域与工艺历史来源记录。
+- 可扩展的 `ForgeFacts` / `ForgeDerivationProfile` 派生接口；仓库内 profile 目前只是接口参考，不是已验收的武器属性模型。
+- 逻辑测试、浏览器端到端测试、浏览器构建和微信构建。
 
 ### 已实现但仍待作者体验验收
 
@@ -31,7 +32,7 @@
 - `src/evaluate` 六维评估模块、`src/story` 冒险故事模块和动作游戏/魔法游戏的具体消费 profile。
 - 订单、仓库行走、完整工坊流程、存档、分享和商业化功能。
 
-当前版本不是完整商业游戏，也不宣称是工业级材料仿真；它是一个可运行的锻造核心与浏览器 MVP。
+当前版本不是完整商业游戏、工业级材料仿真或已发布 SDK；它是一个源码层可迁移的锻造核心与浏览器 MVP，仍等待作者逐项验收。
 
 ## 快速开始
 
@@ -45,6 +46,8 @@ npm run dev -- --host 127.0.0.1 --port 4177
 ```
 
 浏览器入口：[http://127.0.0.1:4177/](http://127.0.0.1:4177/)
+
+R1 八项操作验收入口就是浏览器根入口。画面左侧中控台可切换八个固定样本；八项全部由作者确认后才算 R1 基础操作验收通过。
 
 常用命令：
 
@@ -84,7 +87,7 @@ npm run check         # 以上检查的完整组合
 - [`PROJECT_PLAN.md`](PROJECT_PLAN.md)：当前状态、阶段计划、范围边界和作者验收清单。
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)：模块职责、数据流和仓库边界。
 - [`docs/FORGE_CORE_API.md`](docs/FORGE_CORE_API.md)：可迁移核心的公共契约与版本规则。
-- [`docs/FORGE_SYSTEM_SPEC.md`](docs/FORGE_SYSTEM_SPEC.md)：八个动词与状态的产品规格草案，包含尚未实现的 R2/R3 设计。
+- [`docs/FORGE_SYSTEM_SPEC.md`](docs/FORGE_SYSTEM_SPEC.md)：R1 八类能力、原始状态和覆盖边界的权威产品规格。
 - [`docs/FORGE_UNIFIED_PHYSICS.md`](docs/FORGE_UNIFIED_PHYSICS.md)：统一物理模型研究基线，部分内容仍是后续目标。
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)：开发、PR 和作者体验验收提交要求。
 

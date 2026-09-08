@@ -2,28 +2,58 @@
 
 ## Boundary
 
-`src/forge/index.ts` is the public entry for the reusable forging core. The forge core may depend on its own types, rules, simulation, and derivation modules only. It must not import `app`, `render`, `entry`, `platform`, Three.js, browser APIs, WeChat APIs, story content, or a specific downstream game's vocabulary.
+`src/forge/index.ts` is the source-level public entry for the reusable forging core. It may depend on forge types, rules, simulation, physics, serialization, and fact derivation only. It must not import `app`, `render`, `entry`, `platform`, Three.js, browser or WeChat APIs, story content, or a consuming game's attribute vocabulary.
 
-The core produces three reusable layers:
+This boundary is designed for future reuse, but the repository does not yet publish a standalone package or promise a stable commercial SDK.
 
-- `ForgeState`: the complete serializable raw state.
-- `ForgeSnapshot`: a read-only projection for a renderer.
-- `ForgeFacts` and `ForgeDerivedData`: stable inputs and outputs for a downstream ruleset.
+## Public layers
 
-`applyForgeIntent(state, intent)` is the normal input boundary. `replayForgeState(initialState, operations)` is the deterministic replay boundary. A host may use `createForgeState`, apply intents, serialize the state, and replay the same operations without importing the game application or renderer. The current core parameter version is `physics-2`; it records equivalent plastic strain, recoverable elastic strain, residual stress, damage, and absorbed mechanical work per block.
+- `ForgeState`: complete serializable raw state and operation history.
+- `ForgeSnapshot`: read-only projection for rendering and acceptance HUDs.
+- `ForgeFacts`: read-only physical/process facts for a host-owned downstream profile.
+- `ForgeDerivedData`: output of the current reference profile mechanism; it is not the R1 deliverable or a locked product attribute set.
+
+Normal use:
+
+```ts
+const initial = createForgeState();
+const next = applyForgeIntent(initial, intent);
+const saved = serializeForgeState(next.state);
+const restored = deserializeForgeState(saved);
+const snapshot = createForgeSnapshot(restored);
+const facts = createForgeFacts(restored);
+```
+
+`replayForgeState(initialState, operations)` is the deterministic replay boundary. A host can create state, apply intents, save it, restore it, and replay operations without importing the game application or renderer.
+
+## State semantics
+
+`stateVersion` identifies the serialized state schema and field meanings. `parameterVersion` identifies the numerical forge rules used to produce results. They change independently:
+
+- A state shape or semantic change requires a `stateVersion` decision and migration coverage.
+- A rule-table value or mechanical formula change requires a `parameterVersion` decision and updated fixed samples.
+- A downstream profile formula change updates only that profile's version unless the forge facts contract also changes.
+
+The current deserializer accepts only the current `stateVersion`. No historical migration function exists yet; unsupported versions are rejected explicitly rather than guessed.
+
+## Material and process provenance
+
+`WorkpieceState.material` is a volume-weighted aggregate used by the current reduced-order formulas. It does not mean a welded workpiece is spatially homogeneous.
+
+Each block retains `materialId` and `materialRegionId`. Cutting gives the resulting pieces independent region identities, while welding keeps both sources. Welds also create `JointState` records with contact area, weld temperature, and integrity. `heatTreatments` is an ordered event list so repeated quench and temper operations are not overwritten.
+
+`ForgeFacts.materialRegions`, `jointIntegrity`, `heatTreatmentCount`, and `removedVolume` expose those raw facts to future consumers without assigning game-specific meaning.
 
 ## Downstream profiles
 
-`deriveForgeData(state, profile)` accepts a `ForgeDerivationProfile`. A profile defines its own attribute IDs and formulas over `ForgeFacts`. The built-in `REALISTIC_FORGE_PROFILE` demonstrates general forging attributes such as hardness, toughness, sharpness, weight, balance, and appearance.
+`deriveForgeData(state, profile)` accepts a `ForgeDerivationProfile`. Profiles own their attribute IDs, formulas, classifications, ID, and version. An action game may define attack or armor break; a fantasy game may define arcane affinity; an adventure game may define six dimensions. None of those names belong in `ForgeState`.
 
-An action game can define attributes such as `attack`, `defense`, or `armor-break`. A fantasy game can define `arcane-affinity`, `rune-capacity`, or other fictional properties. These attributes belong to the consuming game and must not be added to `ForgeState` merely because one host uses them.
+`REALISTIC_FORGE_PROFILE` is a reference implementation used to exercise the extension boundary. Its values and classifications are not an accepted weapon-balance model and do not make R1 dependent on six dimensions.
 
-Every derived attribute declares its source fact IDs. Profiles also have an explicit `id` and `version`; downstream save data and replays must record both the forge parameter version and the profile version.
+## Invariants
 
-## Versioning rules
-
-- Changing the shape or meaning of `ForgeState`, `ForgeIntent`, `ForgeOperation`, or `ForgeSnapshot` requires a public contract/version decision and migration coverage.
-- Mechanical response is shared: tools provide a load and contact footprint, while material response derives stress, strain, damage, integrity, and mechanical work from the same state. A new operation must not write a fixed damage increment directly.
-- Changing a rule value requires updating the parameter version and fixed samples when the result changes.
-- Changing a downstream formula requires changing only that profile's version unless the raw forge contract changes.
-- The core does not own downstream balancing, combat terms, story text, or monetization terms.
+- Hosts submit `ForgeIntent`; only forge simulation produces `ForgeOperation` and new state.
+- New operations use shared material/physics rules and must not add fixed damage or score increments.
+- Rendering reads snapshots and never mutates simulation state.
+- Invalid or unknown serialized input is rejected at the boundary.
+- Every public-state change requires deterministic unit samples; player-facing changes also require browser-path regression evidence and author acceptance.
