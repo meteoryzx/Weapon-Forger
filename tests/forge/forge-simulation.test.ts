@@ -7,6 +7,8 @@ import {
   createForgeSnapshot,
   createForgeState,
   createHammerInfluencePreview,
+  heatCapacityJPerKgK,
+  previewThermalState,
   replayForgeState,
   totalVolume,
   type BladeBlock,
@@ -45,6 +47,47 @@ function block(state: ForgeState, widthIndex = CENTER_LEFT, heightIndex = TOP, s
 }
 
 describe("forge simulation", () => {
+  it("uses temperature-dependent solid iron heat capacity", () => {
+    expect(heatCapacityJPerKgK(20)).toBeGreaterThan(430);
+    expect(heatCapacityJPerKgK(20)).toBeLessThan(470);
+    expect(heatCapacityJPerKgK(750)).toBeGreaterThan(1_100);
+    expect(heatCapacityJPerKgK(900)).toBeLessThan(800);
+  });
+
+  it("heats by furnace exposure and cools by air exposure without resetting history", () => {
+    let state = createForgeState();
+    state = applyForgeOperation(state, { kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+    const afterFifteenSeconds = previewThermalState(state, 15_000);
+    const afterThirtySeconds = previewThermalState(state, 30_000);
+    expect(createForgeSnapshot(afterFifteenSeconds).averageTemperatureC).toBeGreaterThan(650);
+    expect(createForgeSnapshot(afterThirtySeconds).averageTemperatureC).toBeGreaterThan(
+      createForgeSnapshot(afterFifteenSeconds).averageTemperatureC,
+    );
+
+    state = applyForgeOperation(state, { kind: "move-billet", destination: "inspection", elapsedMs: 25_000 });
+    const hotSnapshot = createForgeSnapshot(state);
+    const cooling = previewThermalState(state, 10_000);
+    expect(createForgeSnapshot(cooling).averageTemperatureC).toBeLessThan(hotSnapshot.averageTemperatureC);
+    expect(createForgeSnapshot(cooling).peakTemperatureC).toBe(hotSnapshot.peakTemperatureC);
+    expect(createForgeSnapshot(cooling).oxidationDose).toBeGreaterThan(hotSnapshot.oxidationDose);
+  });
+
+  it("replays furnace and inspection durations deterministically", () => {
+    const initial = createForgeState();
+    const operations: ForgeOperation[] = [
+      { kind: "move-billet", destination: "furnace", elapsedMs: 0 },
+      { kind: "move-billet", destination: "inspection", elapsedMs: 18_000 },
+      { kind: "move-billet", destination: "furnace", elapsedMs: 4_000 },
+      { kind: "move-billet", destination: "inspection", elapsedMs: 8_000 },
+    ];
+    const direct = replayForgeState(initial, operations);
+    const replayed = replayForgeState(JSON.parse(JSON.stringify(initial)), JSON.parse(JSON.stringify(operations)));
+
+    expect(replayed).toEqual(direct);
+    expect(createForgeSnapshot(direct).averageTemperatureC).toBeGreaterThan(700);
+    expect(createForgeSnapshot(direct).hotExposureSeconds).toBeGreaterThan(0);
+  });
+
   it("uses one physical unit system and a shared three-dimensional node lattice", () => {
     const state = createForgeState();
     const first = block(state, 0, 0, 0);
@@ -65,9 +108,9 @@ describe("forge simulation", () => {
     const operations: ForgeOperation[] = [
       { kind: "heat", temperatureC: 950 },
       { kind: "feed", step: -1 },
-      { kind: "hammer", sectionIndex: CENTER, energy: 0.7, lateralBias: 0, faceBias: 0.25 },
+      { kind: "hammer", sectionIndex: CENTER, energy: 0.7, faceBias: 0.25 },
       { kind: "rotate", quarterTurns: 1 },
-      { kind: "hammer", sectionIndex: CENTER, energy: 0.45, lateralBias: 0, faceBias: 0.75 },
+      { kind: "hammer", sectionIndex: CENTER, energy: 0.45, faceBias: 0.75 },
     ];
 
     const direct = replayForgeState(initial, operations);
@@ -89,7 +132,7 @@ describe("forge simulation", () => {
   });
 
   it("moves a hot hammer plane farther and accumulates more cold stress", () => {
-    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0, faceBias: 0.5 };
+    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1, faceBias: 0.5 };
     const initial = createForgeState({ sectionCount: TEST_SECTION_COUNT });
     const hot = forgeAt(950, [hammer]);
     const cold = forgeAt(500, [hammer]);
@@ -139,7 +182,7 @@ describe("forge simulation", () => {
   it("anchors the supported anvil side while the crowned hammer compresses the struck side", () => {
     const initial = forgeAt(950);
     const result = applyForgeOperation(initial, {
-      kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1, lateralBias: 0,
+      kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1,
     });
     const bottomBefore = latticeNode(initial, CENTER, CENTER_LEFT, 0).verticalOffset;
     const bottomAfter = latticeNode(result, CENTER, CENTER_LEFT, 0).verticalOffset;
@@ -160,7 +203,7 @@ describe("forge simulation", () => {
     }
     const center = Math.floor(supported.workpiece.sections.length / 2);
     const hammer: ForgeOperation = {
-      kind: "hammer", sectionIndex: center, faceBias: 0.5, energy: 1, lateralBias: 0,
+        kind: "hammer", sectionIndex: center, faceBias: 0.5, energy: 1,
     };
     const supportedAfter = applyForgeOperation(supported, hammer);
     const overhangingAfter = applyForgeOperation(overhanging, hammer);
@@ -183,7 +226,7 @@ describe("forge simulation", () => {
     const rough = withRoughTop(initial);
     const before = topSurfaceRange(rough);
     const result = applyForgeOperation(rough, {
-      kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1, lateralBias: 0,
+      kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1,
     });
     const after = topSurfaceRange(result);
 
@@ -194,7 +237,7 @@ describe("forge simulation", () => {
   it("covers the narrow side without stamping a rectangular shoulder", () => {
     const initial = forgeAt(950, [{ kind: "rotate", quarterTurns: 1 }]);
     const result = applyForgeOperation(initial, {
-      kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1, lateralBias: 0,
+      kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1,
     });
     const before = Array.from({ length: FORGE_RULES.crossSectionHeightBlocks + 1 }, (_, height) => (
       latticeNode(initial, CENTER, 0, height).lateralOffset
@@ -215,7 +258,7 @@ describe("forge simulation", () => {
     const initialThickness = localThickness(state, CENTER, FORGE_RULES.crossSectionWidthBlocks / 2);
     for (let hit = 0; hit < 8; hit += 1) {
       state = applyForgeOperation(state, {
-        kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1, lateralBias: 0,
+        kind: "hammer", sectionIndex: CENTER, faceBias: 0.5, energy: 1,
       });
     }
 
@@ -237,20 +280,20 @@ describe("forge simulation", () => {
 
     for (let hit = 0; hit < 4; hit += 1) {
       state = applyForgeOperation(state, {
-        kind: "hammer", sectionIndex: bodyIndex, faceBias: 0.5, energy: 1, lateralBias: 0,
+        kind: "hammer", sectionIndex: bodyIndex, faceBias: 0.5, energy: 1,
       });
     }
     state = applyForgeOperation(state, { kind: "rotate", quarterTurns: 1 });
     for (let hit = 0; hit < 5; hit += 1) {
       state = applyForgeOperation(state, {
-        kind: "hammer", sectionIndex: tipIndex, faceBias: 0.5, energy: 1, lateralBias: 0,
+        kind: "hammer", sectionIndex: tipIndex, faceBias: 0.5, energy: 1,
       });
     }
     state = applyForgeOperation(state, { kind: "rotate", quarterTurns: 1 });
     state = applyForgeOperation(state, { kind: "rotate", quarterTurns: 1 });
     for (let hit = 0; hit < 5; hit += 1) {
       state = applyForgeOperation(state, {
-        kind: "hammer", sectionIndex: tipIndex, faceBias: 0.5, energy: 1, lateralBias: 0,
+        kind: "hammer", sectionIndex: tipIndex, faceBias: 0.5, energy: 1,
       });
     }
 
@@ -273,7 +316,6 @@ describe("forge simulation", () => {
         sectionIndex: CENTER + (hit % 3) - 1,
         faceBias: (hit % 4) / 3,
         energy: 0.8,
-        lateralBias: 0,
       });
       state = applyForgeOperation(state, { kind: "rotate", quarterTurns: 1 });
     }
@@ -287,13 +329,13 @@ describe("forge simulation", () => {
     let state = forgeAt(950);
     for (let hit = 0; hit < 4; hit += 1) {
       state = applyForgeOperation(state, {
-        kind: "hammer", sectionIndex: CENTER, faceBias: 0.05, energy: 1, lateralBias: 0,
+        kind: "hammer", sectionIndex: CENTER, faceBias: 0.05, energy: 1,
       });
     }
     const cornerAfterTop = latticeNode(state, CENTER, 0, FORGE_RULES.crossSectionHeightBlocks);
     state = applyForgeOperation(state, { kind: "rotate", quarterTurns: 1 });
     state = applyForgeOperation(state, {
-      kind: "hammer", sectionIndex: CENTER, faceBias: 0.95, energy: 1, lateralBias: 0,
+      kind: "hammer", sectionIndex: CENTER, faceBias: 0.95, energy: 1,
     });
     const cornerAfterSide = latticeNode(state, CENTER, 0, FORGE_RULES.crossSectionHeightBlocks);
 
@@ -304,7 +346,7 @@ describe("forge simulation", () => {
   });
 
   it("relieves stress when reheated without repairing damage", () => {
-    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 };
+    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1 };
     const coldWorked = forgeAt(450, [hammer, hammer]);
     const reheated = applyForgeOperation(coldWorked, { kind: "heat", temperatureC: 950 });
 
@@ -323,11 +365,21 @@ describe("forge simulation", () => {
   });
 
   it("creates local cracks from repeated cold heavy impacts but not hot work", () => {
-    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0 };
+    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1 };
     const cold = forgeAt(450, [hammer, hammer, hammer, hammer, hammer, hammer]);
     const hot = forgeAt(950, [hammer, hammer, hammer, hammer, hammer, hammer]);
 
     expect(createForgeSnapshot(cold).hasCracks).toBe(true);
+    expect(createForgeSnapshot(hot).hasCracks).toBe(false);
+  });
+
+  it("allows repeated hot shaping without treating hit count as damage", () => {
+    const hammer: ForgeOperation = { kind: "hammer", sectionIndex: CENTER, energy: 1 };
+    const hot = forgeAt(950, Array.from({ length: 12 }, () => hammer));
+    const center = block(hot);
+
+    expect(center.plasticStrain).toBeGreaterThan(0);
+    expect(center.damage).toBeLessThan(0.05);
     expect(createForgeSnapshot(hot).hasCracks).toBe(false);
   });
 
@@ -336,8 +388,10 @@ describe("forge simulation", () => {
     expect(() => applyForgeOperation(initial, { kind: "heat", temperatureC: 1401 })).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "rotate", quarterTurns: 2 } as unknown as ForgeOperation)).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "feed", step: 0 } as unknown as ForgeOperation)).toThrow();
-    expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 3 } as unknown as ForgeOperation)).toThrow();
-    expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, lateralBias: 0, faceBias: 1.1 })).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1.1 } as unknown as ForgeOperation)).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, faceBias: 1.1 })).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "inspection", elapsedMs: 1_000 })).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "furnace", elapsedMs: 120_001 })).toThrow();
     expect(initial.operations).toHaveLength(0);
   });
 });

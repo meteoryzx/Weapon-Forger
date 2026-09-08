@@ -9,38 +9,42 @@ import {
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
-  OrthographicCamera,
+  PerspectiveCamera,
   Raycaster,
   Scene,
   ShapeGeometry,
   Vector2,
   WebGLRenderer,
   BoxGeometry,
-  ConeGeometry,
   CylinderGeometry,
   DoubleSide,
   ExtrudeGeometry,
   Shape,
   Vector3,
+  TorusGeometry,
 } from "three";
 
 import {
   FORGE_RULES,
   type ForgeSnapshot,
   type ForgeSnapshotSection,
+  type ForgeSnapshotWorkpiece,
   type HammerInfluencePreview,
   type WorkpieceGrid,
   type WorkpieceNode,
 } from "../forge/index.ts";
+import { thermalSteelAppearance } from "./thermal-color.ts";
 
-const DESIGN_HALF_HEIGHT = 117;
-const ROTATE_CONTROL_SIZE = 72;
 const BILLET_AXIAL_SCALE = 0.58;
+const ROTATE_CONTROL_SIZE = 32;
+const WORKSTATION_YAW = Math.PI / 24;
+const BILLET_YAW = Math.PI / 4;
+const BILLET_CENTER_OFFSET = FORGE_RULES.workpieceLength * BILLET_AXIAL_SCALE / 2;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
   roughness: 0.34,
-  emissive: "#351008",
-  emissiveIntensity: 0.55,
+  emissive: "#000000",
+  emissiveIntensity: 0,
   vertexColors: true,
   side: DoubleSide,
 });
@@ -62,16 +66,98 @@ export interface HammerPickTarget {
   readonly faceBias: number;
 }
 
+export type ForgeStation =
+  | "overview"
+  | "materials"
+  | "furnace"
+  | "anvil"
+  | "cut"
+  | "weld"
+  | "quench-water"
+  | "quench-oil"
+  | "temper"
+  | "grind";
+
+export type ForgeMaterialPick = "mild-steel" | "high-carbon-steel" | "spring-steel";
+
+export type QuenchStation = "quench-water" | "quench-oil";
+
+const STATION_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number, number, number]> = {
+  materials: [-420, 44, -132],
+  furnace: [-260, 56, -20],
+  anvil: [0, 0, 0],
+  cut: [-340, 42, 150],
+  weld: [330, 42, 150],
+  "quench-water": [250, 48, -4],
+  "quench-oil": [250, 48, -96],
+  temper: [180, 56, -190],
+  grind: [-150, 56, 260],
+};
+
+const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number, number, number]> = {
+  materials: [-420, 44, -132],
+  furnace: [-260, 92, -20],
+  anvil: [0, 0, 0],
+  cut: [-340, 42, 150],
+  weld: [280, 66, 122],
+  "quench-water": [190, 76, -4],
+  "quench-oil": [190, 76, -96],
+  temper: [180, 82, -190],
+  grind: [-150, 96, 245],
+};
+
+const CAMERA_FRAMES: Record<ForgeStation, { readonly position: readonly [number, number, number]; readonly target: readonly [number, number, number] }> = {
+  overview: { position: [0, 430, 700], target: [0, 0, 30] },
+  anvil: { position: [0, 250, 330], target: [0, 0, 0] },
+  materials: { position: [-420, 190, 180], target: [-420, 25, -70] },
+  furnace: { position: [-260, 190, 170], target: [-260, 42, -20] },
+  cut: { position: [-340, 190, 195], target: [-340, 35, 150] },
+  weld: { position: [330, 180, 225], target: [330, 35, 120] },
+  "quench-water": { position: [250, 190, 160], target: [250, 35, -4] },
+  "quench-oil": { position: [250, 190, 160], target: [250, 35, -96] },
+  temper: { position: [180, 180, 170], target: [180, 38, -190] },
+  grind: { position: [-150, 260, 480], target: [-150, 72, 250] },
+};
+
 export class ForgeBilletView {
   private readonly renderer: WebGLRenderer;
   private readonly scene = new Scene();
-  private readonly camera = new OrthographicCamera(-320, 320, 180, -180, 0.1, 2000);
+  private readonly camera = new PerspectiveCamera(52, 1, 0.1, 2000);
   private readonly raycaster = new Raycaster();
   private readonly pointer = new Vector2();
-  // The rig establishes the fixed presentation angle; the billet spins inside it on its own long axis.
+  // The camera is the worker's eye line; the billet spins inside the fixed anvil station.
   private readonly billetRig = new Group();
   private readonly billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
+  private readonly weldBenchRigs: Group[] = [];
+  private readonly weldBenchBillets: Mesh[] = [];
+  private readonly weldBenchItemTargets: Mesh[] = [];
+  private readonly billetHitTarget = new Mesh(
+    new BoxGeometry(FORGE_RULES.workpieceLength, 24, FORGE_RULES.initialSectionWidth),
+    new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  );
+  private readonly anvilModel: Group;
+  private readonly stationMeshes = new Map<ForgeStation, Mesh>();
+  private readonly materialMeshes = new Map<ForgeMaterialPick, Mesh>();
+  private readonly stationProps = new Map<ForgeStation, Object3D[]>();
+  private readonly weldBenchTarget = new Mesh(
+    new BoxGeometry(118, 10, 38),
+    new MeshStandardMaterial({ color: "#876d53", metalness: 0.65, roughness: 0.38 }),
+  );
+  private readonly quenchTargets = new Map<QuenchStation, Mesh>();
   private readonly rotateControls: { readonly direction: -1 | 1; readonly group: Group }[] = [];
+  private readonly temperControl = new Mesh(
+    new BoxGeometry(32, 12, 32),
+    new MeshStandardMaterial({ color: "#d69b52", metalness: 0.35, roughness: 0.5 }),
+  );
+  private readonly cameraFromPosition = new Vector3();
+  private readonly cameraFromTarget = new Vector3();
+  private readonly cameraToPosition = new Vector3();
+  private readonly cameraToTarget = new Vector3();
+  private readonly cameraTarget = new Vector3();
+  private station: ForgeStation = "overview";
+  private transitionStartedAtMs = 0;
+  private isTransitioning = false;
+  private temperPreviewC: number | null = null;
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -96,32 +182,96 @@ export class ForgeBilletView {
     rimLight.position.set(280, 180, 220);
     this.scene.add(rimLight);
     this.scene.add(this.camera);
+    this.createStationModels();
 
     const anvil = this.createAnvilModel();
+    this.anvilModel = anvil;
     anvil.scale.set(BILLET_AXIAL_SCALE, 0.92, 1);
-    anvil.rotation.y = -0.24;
+    // User-space x+ is right, y+ is inward, z+ is up. In Three.js this is a
+    // positive yaw around world Y, so the top view reads counter-clockwise.
+    anvil.rotation.y = WORKSTATION_YAW;
     this.scene.add(anvil);
-    this.scene.add(this.createHammerModel());
-    const rotateLeftControl = { direction: -1 as const, group: this.createRotateControl(-1) };
-    const rotateRightControl = { direction: 1 as const, group: this.createRotateControl(1) };
-    this.rotateControls.push(rotateLeftControl, rotateRightControl);
-    this.camera.add(rotateLeftControl.group, rotateRightControl.group);
     this.billet.scale.x = BILLET_AXIAL_SCALE;
-    this.billetRig.position.set(-96, 18, 0);
-    this.billetRig.rotation.y = 0.3;
+    // The local billet geometry starts at x=0, so rotate around its midpoint
+    // while keeping that midpoint at the anvil center in the top view.
+    this.billetRig.position.set(
+      -BILLET_CENTER_OFFSET * Math.cos(BILLET_YAW),
+      0,
+      BILLET_CENTER_OFFSET * Math.sin(BILLET_YAW),
+    );
+    this.billetRig.rotation.y = BILLET_YAW;
     this.billetRig.add(this.billet);
+    this.billetRig.add(this.billetHitTarget);
     this.scene.add(this.billetRig);
     this.resize(viewport);
+    this.applyCameraFrame("overview");
   }
 
-  update(snapshot: ForgeSnapshot, hammerPreview: HammerInfluencePreview | null = null): void {
+  update(
+    snapshot: ForgeSnapshot,
+    hammerPreview: HammerInfluencePreview | null = null,
+    activeStation: ForgeStation = "overview",
+    temperPreviewC: number | null = null,
+  ): void {
+    if (activeStation !== this.station) this.setStation(activeStation);
     this.snapshot = snapshot;
+    this.temperPreviewC = temperPreviewC;
+    const appearance = thermalSteelAppearance(snapshot.averageTemperatureC);
+    BILLET_MATERIAL.emissive.copy(appearance.emissive);
+    BILLET_MATERIAL.emissiveIntensity = appearance.emissiveIntensity;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset * BILLET_AXIAL_SCALE;
-    this.billet.position.y = snapshot.orientationQuarterTurns % 2 === 0 ? -6 : 0;
+    const halfHeight = snapshot.orientationQuarterTurns % 2 === 0
+      ? FORGE_RULES.initialSectionThickness / 2
+      : FORGE_RULES.initialSectionWidth / 2;
+    // The anvil face is at world Y=0. Place the lowest billet surface exactly
+    // on that plane; do not hide an intersection by changing camera angle.
+    this.billet.position.y = halfHeight;
+    this.billetHitTarget.position.x = this.billet.position.x + FORGE_RULES.workpieceLength / 2;
+    this.billetHitTarget.position.y = this.billet.position.y;
+    this.billetHitTarget.rotation.x = this.billet.rotation.x;
+    const anchor = activeStation === "overview"
+      ? BILLET_ANCHORS.anvil
+      : BILLET_ANCHORS[activeStation];
+    this.billetRig.position.set(
+      anchor[0] - BILLET_CENTER_OFFSET * Math.cos(BILLET_YAW),
+      anchor[1],
+      anchor[2] + BILLET_CENTER_OFFSET * Math.sin(BILLET_YAW),
+    );
+    this.temperControl.rotation.y = ((this.temperPreviewC ?? 220) - 220) / 160;
     const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
+    this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
+    this.updateStationEmphasis(activeStation);
+    this.render();
+  }
+
+  setStation(station: ForgeStation, nowMs = performance.now()): void {
+    if (station === this.station && !this.isTransitioning) return;
+    this.station = station;
+    this.cameraFromPosition.copy(this.camera.position);
+    this.cameraFromTarget.copy(this.cameraTarget);
+    const frame = CAMERA_FRAMES[station];
+    this.cameraToPosition.fromArray(frame.position);
+    this.cameraToTarget.fromArray(frame.target);
+    this.transitionStartedAtMs = nowMs;
+    this.isTransitioning = true;
+  }
+
+  isCameraTransitioning(): boolean {
+    return this.isTransitioning;
+  }
+
+  tick(nowMs: number): void {
+    if (!this.isTransitioning) return;
+    const amount = clamp((nowMs - this.transitionStartedAtMs) / 420, 0, 1);
+    const eased = amount * amount * (3 - 2 * amount);
+    this.camera.position.lerpVectors(this.cameraFromPosition, this.cameraToPosition, eased);
+    this.cameraTarget.lerpVectors(this.cameraFromTarget, this.cameraToTarget, eased);
+    this.camera.lookAt(this.cameraTarget);
+    this.camera.updateProjectionMatrix();
+    if (amount >= 1) this.isTransitioning = false;
     this.render();
   }
 
@@ -129,16 +279,19 @@ export class ForgeBilletView {
     this.viewport = viewport;
     this.renderer.setPixelRatio(Math.min(viewport.pixelRatio, 2));
     this.renderer.setSize(viewport.width, viewport.height, false);
-    const aspect = viewport.width / viewport.height;
-    const halfHeight = DESIGN_HALF_HEIGHT * Math.max(1, (16 / 9) / aspect);
-    const halfWidth = halfHeight * aspect;
-    this.camera.left = -halfWidth;
-    this.camera.right = halfWidth;
-    this.camera.top = halfHeight;
-    this.camera.bottom = -halfHeight;
-    this.camera.position.set(-260, 300, 600);
-    this.camera.lookAt(0, -28, 0);
+    this.camera.aspect = viewport.width / viewport.height;
+    if (!this.isTransitioning) this.applyCameraFrame(this.station);
     this.camera.updateProjectionMatrix();
+    this.positionRotateControls();
+    this.render();
+  }
+
+  enableRotateControls(): void {
+    if (this.rotateControls.length > 0) return;
+    const left = { direction: -1 as const, group: this.createRotateControl(-1) };
+    const right = { direction: 1 as const, group: this.createRotateControl(1) };
+    this.rotateControls.push(left, right);
+    this.camera.add(left.group, right.group);
     this.positionRotateControls();
     this.render();
   }
@@ -147,11 +300,42 @@ export class ForgeBilletView {
     return this.pickHammerTarget(viewportX, viewportY)?.sectionIndex ?? null;
   }
 
+  pickStation(viewportX: number, viewportY: number): ForgeStation | null {
+    const hit = this.pickObject(viewportX, viewportY, [...this.stationMeshes.values()], false);
+    return (hit?.object.userData.station as ForgeStation | undefined) ?? null;
+  }
+
+  pickMaterial(viewportX: number, viewportY: number): ForgeMaterialPick | null {
+    const hit = this.pickObject(viewportX, viewportY, [...this.materialMeshes.values()], false);
+    return (hit?.object.userData.materialId as ForgeMaterialPick | undefined) ?? null;
+  }
+
+  pickRotateControl(viewportX: number, viewportY: number): -1 | 1 | null {
+    for (const control of this.rotateControls) {
+      if (this.pickObject(viewportX, viewportY, [control.group], true)) return control.direction;
+    }
+    return null;
+  }
+
+  pickWeldBench(viewportX: number, viewportY: number): number | null {
+    const hit = this.pickObject(viewportX, viewportY, this.weldBenchItemTargets, false);
+    return (hit?.object.userData.weldBenchIndex as number | undefined) ?? null;
+  }
+
+  pickQuenchBasin(viewportX: number, viewportY: number, station: QuenchStation): boolean {
+    const basin = this.quenchTargets.get(station);
+    return basin ? this.pickObject(viewportX, viewportY, [basin], false) !== null : false;
+  }
+
+  pickTemperControl(viewportX: number, viewportY: number): boolean {
+    return this.pickObject(viewportX, viewportY, [this.temperControl], false) !== null;
+  }
+
   pickHammerTarget(viewportX: number, viewportY: number): HammerPickTarget | null {
     if (!this.snapshot) {
       return null;
     }
-    const hit = this.pickObject(viewportX, viewportY, [this.billet], false);
+    const hit = this.pickObject(viewportX, viewportY, [this.billet, this.billetHitTarget], false);
     if (!hit) {
       return null;
     }
@@ -180,13 +364,10 @@ export class ForgeBilletView {
     return { sectionIndex, faceBias: clamp(faceBias, 0, 1) };
   }
 
-  pickRotateControl(viewportX: number, viewportY: number): -1 | 1 | null {
-    for (const control of this.rotateControls) {
-      if (this.pickObject(viewportX, viewportY, [control.group], true)) {
-        return control.direction;
-      }
-    }
-    return null;
+  setTemperPreview(temperatureC: number): void {
+    this.temperPreviewC = clamp(temperatureC, 80, 450);
+    this.temperControl.rotation.y = (this.temperPreviewC - 220) / 160;
+    this.render();
   }
 
   private pickObject(viewportX: number, viewportY: number, objects: Object3D[], recursive: boolean) {
@@ -200,7 +381,18 @@ export class ForgeBilletView {
 
   dispose(): void {
     this.billet.geometry.dispose();
-    BILLET_MATERIAL.dispose();
+    this.weldBenchBillets.forEach((billet) => billet.geometry.dispose());
+    this.weldBenchItemTargets.forEach((target) => {
+      target.geometry.dispose();
+      (target.material as MeshBasicMaterial).dispose();
+    });
+    this.billetHitTarget.geometry.dispose();
+    (this.billetHitTarget.material as MeshBasicMaterial).dispose();
+    for (const mesh of [...this.stationMeshes.values(), ...this.materialMeshes.values()]) {
+      mesh.geometry.dispose();
+      (mesh.material as MeshStandardMaterial).dispose();
+    }
+    // BILLET_MATERIAL is shared across view instances; do not dispose it here.
     this.renderer.dispose();
   }
 
@@ -214,23 +406,79 @@ export class ForgeBilletView {
       new BoxGeometry(ROTATE_CONTROL_SIZE, ROTATE_CONTROL_SIZE, 1),
       new MeshBasicMaterial({ color: "#29323a" }),
     );
-    const arrow = new Mesh(createArrowGeometry(direction), new MeshBasicMaterial({ color: "#f3c36d" }));
-    panel.position.z = -72;
-    arrow.position.z = -71;
+    const arrow = new Mesh(
+      createArrowGeometry(direction),
+      new MeshBasicMaterial({ color: "#f3c36d" }),
+    );
+    arrow.position.z = 0.6;
     group.add(panel, arrow);
     return group;
   }
 
   private positionRotateControls(): void {
-    const y = this.camera.bottom + ROTATE_CONTROL_SIZE * 0.72;
-    const xInset = ROTATE_CONTROL_SIZE * 0.72;
+    if (this.rotateControls.length === 0) return;
+    const distance = 120;
+    const halfHeight = Math.tan((this.camera.fov * Math.PI) / 360) * distance;
+    const halfWidth = halfHeight * this.camera.aspect;
     for (const control of this.rotateControls) {
       control.group.position.set(
-        control.direction < 0 ? this.camera.left + xInset : this.camera.right - xInset,
-        y,
-        -120,
+        control.direction < 0 ? -halfWidth + ROTATE_CONTROL_SIZE * 0.75 : halfWidth - ROTATE_CONTROL_SIZE * 0.75,
+        -halfHeight + ROTATE_CONTROL_SIZE * 0.75,
+        -distance,
       );
-      control.group.rotation.set(0, 0, 0);
+    }
+  }
+
+  private updateWeldBenchItems(
+    bench: readonly ForgeSnapshotWorkpiece[],
+    visible: boolean,
+  ): void {
+    while (this.weldBenchRigs.length < bench.length) {
+      const rig = new Group();
+      rig.rotation.y = BILLET_YAW;
+      const billet = new Mesh(new BufferGeometry(), BILLET_MATERIAL);
+      const target = new Mesh(
+        new BoxGeometry(1, 1, 1),
+        new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+      );
+      rig.add(billet, target);
+      this.weldBenchRigs.push(rig);
+      this.weldBenchBillets.push(billet);
+      this.weldBenchItemTargets.push(target);
+      this.scene.add(rig);
+    }
+    const rawLengths = bench.map((workpiece) => Math.max(
+      workpiece.sections.reduce((sum, section) => sum + section.length, 0),
+      24,
+    ));
+    const displayScale = BILLET_AXIAL_SCALE * 0.24;
+    const displayLength = rawLengths.map((length) => length * displayScale);
+    const slotPositions = [-70, 70] as const;
+    bench.forEach((workpiece, index) => {
+      const rig = this.weldBenchRigs[index];
+      const billet = this.weldBenchBillets[index];
+      const target = this.weldBenchItemTargets[index];
+      if (!rig || !billet || !target) return;
+      const rawLength = rawLengths[index] ?? 24;
+      const length = displayLength[index] ?? 24;
+      billet.geometry.dispose();
+      billet.geometry = createBilletGeometry(workpiece, null);
+      billet.scale.set(displayScale, 1, 1);
+      billet.position.set(-rawLength / 2, FORGE_RULES.initialSectionThickness / 2, 0);
+      target.geometry.dispose();
+      target.geometry = new BoxGeometry(length, 24, FORGE_RULES.initialSectionWidth * 0.72);
+      target.position.set(0, FORGE_RULES.initialSectionThickness / 2, 0);
+      target.userData.weldBenchIndex = index;
+      rig.position.set(
+        STATION_ANCHORS.weld[0] + (slotPositions[index] ?? 0),
+        STATION_ANCHORS.weld[1],
+        STATION_ANCHORS.weld[2],
+      );
+      rig.visible = visible;
+    });
+    for (let index = bench.length; index < this.weldBenchRigs.length; index += 1) {
+      const rig = this.weldBenchRigs[index];
+      if (rig) rig.visible = false;
     }
   }
 
@@ -247,46 +495,155 @@ export class ForgeBilletView {
     );
     const foot = new Mesh(new BoxGeometry(160, 20, 98), edge);
     foot.position.set(0, -151, 0);
-    const horn = new Mesh(new ConeGeometry(40, 100, 4), steel);
-    horn.position.set(162, -8, 0);
-    horn.rotation.z = -Math.PI / 2;
-    anvil.add(face, body, foot, horn);
+    anvil.add(face, body, foot);
     return anvil;
   }
 
-  private createHammerModel(): Group {
-    const hammer = new Group();
-    const steel = new MeshStandardMaterial({ color: "#4d5662", metalness: 0.54, roughness: 0.3 });
-    const wood = new MeshStandardMaterial({ color: "#844a29", metalness: 0.06, roughness: 0.48 });
-    const headPosition = new Vector3(105, 112, 34);
-    const head = new Mesh(new BoxGeometry(56, 76, FORGE_RULES.hammerFaceWidth), steel);
-    head.position.copy(headPosition);
-    head.rotation.z = -0.16;
-    const handle = this.createRoundToolBar(
-      headPosition.clone().add(new Vector3(18, -30, -8)),
-      new Vector3(330, -12, 180),
-      18,
-      wood,
+  private createStationModels(): void {
+    const definitions: readonly [Exclude<ForgeStation, "overview">, [number, number, number], [number, number, number], string][] = [
+      ["materials", [-420, 14, -132], [112, 28, 60], "#4f5961"],
+      ["furnace", [-260, 28, -20], [100, 56, 92], "#8b3f28"],
+      ["cut", [-340, 14, 150], [104, 28, 66], "#7a7f86"],
+      ["weld", [330, 14, 150], [104, 28, 66], "#536c74"],
+      ["quench-water", [250, 16, -4], [84, 32, 62], "#315d72"],
+      ["quench-oil", [250, 16, -96], [84, 32, 62], "#5a4a2f"],
+      ["temper", [180, 22, -190], [112, 44, 70], "#774a38"],
+      ["grind", [-150, 24, 260], [104, 48, 74], "#646d77"],
+    ];
+    for (const [station, position, size, color] of definitions) {
+      const mesh = new Mesh(
+        new BoxGeometry(...size),
+        new MeshStandardMaterial({ color, metalness: 0.25, roughness: 0.7, emissive: "#000000" }),
+      );
+      mesh.position.set(...position);
+      mesh.userData.station = station;
+      this.stationMeshes.set(station, mesh);
+      this.addStationObject(station, mesh);
+    }
+
+    this.weldBenchTarget.position.set(400, 62, 122);
+    this.weldBenchTarget.userData.station = "weld";
+    this.addStationObject("weld", this.weldBenchTarget);
+
+    const furnaceOpening = new Mesh(
+      new BoxGeometry(62, 8, 58),
+      new MeshStandardMaterial({ color: "#17191b", metalness: 0.1, roughness: 0.92 }),
     );
+    furnaceOpening.position.set(-260, 76, -20);
+    this.addStationObject("furnace", furnaceOpening);
+    const furnaceEmber = new Mesh(
+      new BoxGeometry(42, 3, 38),
+      new MeshStandardMaterial({ color: "#d34d25", emissive: "#e23d16", emissiveIntensity: 1.2 }),
+    );
+    furnaceEmber.position.set(-260, 82, -20);
+    this.addStationObject("furnace", furnaceEmber);
 
-    hammer.add(head, handle);
-    return hammer;
+    const cutBlade = new Mesh(
+      new BoxGeometry(6, 54, 44),
+      new MeshStandardMaterial({ color: "#c6d0d4", metalness: 0.82, roughness: 0.28 }),
+    );
+    cutBlade.position.set(-340, 80, 150);
+    this.addStationObject("cut", cutBlade);
+    const cutHandle = new Mesh(
+      new BoxGeometry(18, 64, 18),
+      new MeshStandardMaterial({ color: "#6b432e", metalness: 0.05, roughness: 0.85 }),
+    );
+    cutHandle.position.set(-340, 112, 150);
+    this.addStationObject("cut", cutHandle);
+
+    const weldClamp = new Mesh(
+      new TorusGeometry(26, 5, 8, 20),
+      new MeshStandardMaterial({ color: "#9babb1", metalness: 0.7, roughness: 0.32 }),
+    );
+    weldClamp.rotation.x = Math.PI / 2;
+    weldClamp.position.set(330, 72, 122);
+    this.addStationObject("weld", weldClamp);
+
+    const grindWheel = new Mesh(
+      new CylinderGeometry(44, 44, 14, 24),
+      new MeshStandardMaterial({ color: "#68727a", metalness: 0.38, roughness: 0.74 }),
+    );
+    grindWheel.rotation.x = Math.PI / 2;
+    grindWheel.position.set(-150, 84, 260);
+    this.addStationObject("grind", grindWheel);
+    const grindHub = new Mesh(
+      new CylinderGeometry(10, 10, 18, 16),
+      new MeshStandardMaterial({ color: "#bd8b4d", metalness: 0.7, roughness: 0.3 }),
+    );
+    grindHub.rotation.x = Math.PI / 2;
+    grindHub.position.set(-150, 84, 260);
+    this.addStationObject("grind", grindHub);
+
+    for (const [station, color] of [["quench-water", "#6da9c3"], ["quench-oil", "#b28a4d"]] as const) {
+      const basin = new Mesh(
+        new BoxGeometry(70, 8, 34),
+        new MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.9 }),
+      );
+      const anchor = STATION_ANCHORS[station];
+      basin.position.set(anchor[0], anchor[1], anchor[2]);
+      this.quenchTargets.set(station, basin);
+      this.addStationObject(station, basin);
+    }
+
+    this.temperControl.position.set(180, 70, -190);
+    this.addStationObject("temper", this.temperControl);
+
+    const materials: readonly [ForgeMaterialPick, string][] = [
+      ["mild-steel", "#78838c"],
+      ["spring-steel", "#9e8d72"],
+      ["high-carbon-steel", "#b86f45"],
+    ];
+    materials.forEach(([materialId, color], index) => {
+      const mesh = new Mesh(
+        new CylinderGeometry(18, 21, 8, 12),
+        new MeshStandardMaterial({ color, metalness: 0.75, roughness: 0.32 }),
+      );
+      mesh.rotation.z = Math.PI / 2;
+      mesh.position.set(-445 + index * 35, 42, -42);
+      mesh.userData.materialId = materialId;
+      this.materialMeshes.set(materialId, mesh);
+      this.addStationObject("materials", mesh);
+    });
   }
 
-  private createToolBar(start: Vector3, end: Vector3, width: number, material: MeshStandardMaterial): Mesh {
-    const direction = end.clone().sub(start);
-    const bar = new Mesh(new BoxGeometry(direction.length(), width, width), material);
-    bar.position.copy(start).add(end).multiplyScalar(0.5);
-    bar.quaternion.setFromUnitVectors(new Vector3(1, 0, 0), direction.normalize());
-    return bar;
+  private updateStationEmphasis(activeStation: ForgeStation): void {
+    this.anvilModel.visible = activeStation === "overview" || activeStation === "anvil";
+    for (const [station, objects] of this.stationProps) {
+      const visible = activeStation === "overview" || activeStation === station;
+      objects.forEach((object) => { object.visible = visible; });
+    }
+    for (const mesh of this.materialMeshes.values()) {
+      mesh.visible = activeStation === "overview" || activeStation === "materials";
+    }
+    for (const [station, mesh] of this.stationMeshes) {
+      const material = mesh.material as MeshStandardMaterial;
+      material.emissive.set(station === activeStation ? "#d8a36b" : "#000000");
+      material.emissiveIntensity = station === activeStation ? 0.45 : 0;
+    }
+    const activeTool = activeStation === "weld"
+      ? this.weldBenchTarget
+      : activeStation === "temper"
+        ? this.temperControl
+        : this.quenchTargets.get(activeStation as QuenchStation);
+    if (activeTool) {
+      const material = activeTool.material as MeshStandardMaterial;
+      material.emissive.set("#f2b866");
+      material.emissiveIntensity = 0.35;
+    }
   }
 
-  private createRoundToolBar(start: Vector3, end: Vector3, diameter: number, material: MeshStandardMaterial): Mesh {
-    const direction = end.clone().sub(start);
-    const bar = new Mesh(new CylinderGeometry(diameter / 2, diameter / 2, direction.length(), 12), material);
-    bar.position.copy(start).add(end).multiplyScalar(0.5);
-    bar.quaternion.setFromUnitVectors(new Vector3(0, 1, 0), direction.normalize());
-    return bar;
+  private applyCameraFrame(station: ForgeStation): void {
+    const frame = CAMERA_FRAMES[station];
+    this.camera.position.fromArray(frame.position);
+    this.cameraTarget.fromArray(frame.target);
+    this.camera.lookAt(this.cameraTarget);
+  }
+
+  private addStationObject(station: Exclude<ForgeStation, "overview">, object: Object3D): void {
+    const objects = this.stationProps.get(station) ?? [];
+    objects.push(object);
+    this.stationProps.set(station, objects);
+    this.scene.add(object);
   }
 
   private createProfile(points: readonly [number, number][], depth: number, material: MeshStandardMaterial): Mesh {
@@ -311,7 +668,7 @@ export class ForgeBilletView {
 }
 
 function createBilletGeometry(
-  snapshot: ForgeSnapshot,
+  snapshot: ForgeSnapshotWorkpiece,
   hammerPreview: HammerInfluencePreview | null,
 ): BufferGeometry {
   const perimeterVertexCount = (snapshot.grid.widthBlocks + snapshot.grid.heightBlocks) * 2;
@@ -325,8 +682,12 @@ function createBilletGeometry(
     profile.points.forEach((point, pointIndex) => {
       positions.push(point.axialPosition, point.verticalOffset, point.lateralOffset);
       const preview = previewIntensityAtRingPoint(ringIndex, pointIndex, hammerPreview, snapshot.grid);
-      const color = temperatureColor(temperatureAtPlane(snapshot.sections, ringIndex), preview);
-      const tint = perimeterTint(pointIndex, snapshot.grid);
+      const sectionIndex = Math.min(ringIndex, snapshot.sections.length - 1);
+      const section = snapshot.sections[sectionIndex];
+      const color = temperatureColor(temperatureAtPlane(snapshot.sections, ringIndex), preview)
+        .lerp(materialColor(snapshot.carbon), 0.12)
+        .lerp(new Color("#c9b58d"), Math.min(0.16, Math.max(0, snapshot.layerCount - 1) * 0.03));
+      const tint = perimeterTint(pointIndex, snapshot.grid) * (1 - (section?.groundAmount ?? 0) * 0.12);
       colors.push(color.r * tint, color.g * tint, color.b * tint);
     });
   }
@@ -352,28 +713,41 @@ function createBilletGeometry(
   return geometry;
 }
 
-function workpiecePerimeter(snapshot: ForgeSnapshot, axialIndex: number): { readonly points: readonly WorkpieceNode[] } {
+function workpiecePerimeter(snapshot: ForgeSnapshotWorkpiece, axialIndex: number): { readonly points: readonly WorkpieceNode[] } {
   const points: WorkpieceNode[] = [];
   const grid = snapshot.grid;
 
   for (let boundary = 0; boundary < grid.widthBlocks; boundary += 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, boundary, grid.heightBlocks));
+    points.push(groundedNode(snapshot, axialIndex, boundary, grid.heightBlocks));
   }
   for (let boundary = grid.heightBlocks; boundary > 0; boundary -= 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, grid.widthBlocks, boundary));
+    points.push(groundedNode(snapshot, axialIndex, grid.widthBlocks, boundary));
   }
   for (let boundary = grid.widthBlocks; boundary > 0; boundary -= 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, boundary, 0));
+    points.push(groundedNode(snapshot, axialIndex, boundary, 0));
   }
   for (let boundary = 0; boundary < grid.heightBlocks; boundary += 1) {
-    points.push(workpieceNodeAt(snapshot, axialIndex, 0, boundary));
+    points.push(groundedNode(snapshot, axialIndex, 0, boundary));
   }
 
   return { points };
 }
 
+function groundedNode(
+  snapshot: ForgeSnapshotWorkpiece,
+  axialIndex: number,
+  widthIndex: number,
+  heightIndex: number,
+): WorkpieceNode {
+  const node = workpieceNodeAt(snapshot, axialIndex, widthIndex, heightIndex);
+  if (heightIndex !== snapshot.grid.heightBlocks) return node;
+  const sectionIndex = Math.min(axialIndex, snapshot.sections.length - 1);
+  const groundAmount = snapshot.sections[sectionIndex]?.groundAmount ?? 0;
+  return { ...node, verticalOffset: node.verticalOffset - groundAmount * 1.6 };
+}
+
 function workpieceNodeAt(
-  snapshot: ForgeSnapshot,
+  snapshot: ForgeSnapshotWorkpiece,
   axialIndex: number,
   widthIndex: number,
   heightIndex: number,
@@ -486,20 +860,20 @@ function average(values: readonly number[]): number {
 }
 
 function temperatureColor(temperatureC: number, impact: number): Color {
-  const heat = Math.min(1, Math.max(0, (temperatureC - 450) / 550));
-  const color = new Color("#5a2419").lerp(new Color("#ffad45"), heat);
-  return color.lerp(new Color("#fff2ae"), impact * 0.75);
+  return thermalSteelAppearance(temperatureC).surface.lerp(new Color("#fff2ae"), impact * 0.75);
+}
+
+function materialColor(carbon: number): Color {
+  return new Color().setHSL(0.08, 0.2, lerp(0.58, 0.34, clamp(carbon, 0, 1)));
 }
 
 function createArrowGeometry(direction: -1 | 1): ShapeGeometry {
   const shape = new Shape();
-  const points: [number, number][] = direction < 0
-    ? [[-28, 0], [-1, -22], [-1, -8], [12, -8], [12, 8], [-1, 8], [-1, 22]]
-    : [[28, 0], [1, -22], [1, -8], [-12, -8], [-12, 8], [1, 8], [1, 22]];
+  const points: readonly [number, number][] = direction < 0
+    ? [[-12, 0], [-1, -9], [-1, -4], [7, -4], [7, 4], [-1, 4], [-1, 9]]
+    : [[12, 0], [1, -9], [1, -4], [-7, -4], [-7, 4], [1, 4], [1, 9]];
   const [first, ...rest] = points;
-  if (!first) {
-    throw new Error("A rotate arrow needs at least one point.");
-  }
+  if (!first) throw new Error("A rotate arrow needs at least one point.");
   shape.moveTo(first[0], first[1]);
   rest.forEach((point) => shape.lineTo(point[0], point[1]));
   shape.closePath();
@@ -515,6 +889,10 @@ function sectionIndexAt(position: number, sections: readonly ForgeSnapshotSectio
 
 function inverseLerp(start: number, end: number, value: number): number {
   return end === start ? 0.5 : (value - start) / (end - start);
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
