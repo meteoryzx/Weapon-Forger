@@ -18,6 +18,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify single governance source
+        run: node scripts/check-governance.mjs
+        env:
+          GOVERNANCE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 24

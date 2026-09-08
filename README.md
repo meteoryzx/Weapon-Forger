@@ -8,7 +8,7 @@
 - 当前切片：`R1i-a` 火炉送入、取出、升温、降温与热历史。
 - 下一验收：在 Windows 浏览器中试玩火炉循环；通过前不继续淬火或研磨。
 
-项目决策与实时交接以 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 为准；AI 和工程协作规则以 [`AGENTS.md`](AGENTS.md) 为准。
+项目状态与计划以 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 为准；AI 协作、批准、验收和 Git 规则只以 GitHub `main` 的 [`AGENTS.md`](AGENTS.md) 为准。
 
 ## 本地运行
 
