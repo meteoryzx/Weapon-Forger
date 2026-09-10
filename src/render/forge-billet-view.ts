@@ -313,28 +313,29 @@ export class ForgeBilletView {
   }
 
   pickMaterial(viewportX: number, viewportY: number): ForgeMaterialPick | null {
-    if (this.station === "materials" && this.materialsFocus === "rack") return null;
     const meshes = this.station === "materials" ? this.materialsView?.candidates ?? [] : [...this.materialMeshes.values()];
     const hit = this.pickObject(viewportX, viewportY, meshes, false);
     return (hit?.object.userData.materialId as ForgeMaterialPick | undefined) ?? null;
   }
 
-  updateMaterials(candidateId: string | null, pieces: readonly ForgeSnapshotWorkpiece[]): void {
+  updateMaterials(
+    candidateId: string | null,
+    pieces: readonly ForgeSnapshotWorkpiece[],
+    activeWorkpieceId: string | null = null,
+    tableWorkpieceIds: readonly string[] = [],
+  ): void {
     if (!this.materialsView) {
       this.materialsView = new MaterialsStationView((piece) => createBilletGeometry(piece, null));
       this.scene.add(this.materialsView.group);
     }
-    this.materialsView.update(candidateId, pieces);
+    this.materialsView.update(candidateId, pieces, activeWorkpieceId, tableWorkpieceIds);
     this.materialsView.group.visible = this.station === "materials";
     this.render();
   }
 
   setMaterialsFocus(focus: "table" | "rack"): void {
-    if (focus === this.materialsFocus) return;
     this.materialsFocus = focus;
     this.materialsView?.setFocus(focus);
-    this.isTransitioning = true;
-    this.setStation("materials");
   }
 
   pickMaterialsRack(x: number, y: number): boolean {
@@ -342,8 +343,12 @@ export class ForgeBilletView {
   }
 
   pickRackWorkpiece(x: number, y: number): string | null {
-    if (this.materialsFocus !== "rack") return null;
     const hit = this.pickObject(x, y, this.materialsView?.rackItems ?? [], false);
+    return (hit?.object.userData.workpieceId as string | undefined) ?? null;
+  }
+
+  pickMaterialsTableWorkpiece(x: number, y: number): string | null {
+    const hit = this.pickObject(x, y, this.materialsView?.tableItems ?? [], false);
     return (hit?.object.userData.workpieceId as string | undefined) ?? null;
   }
 

@@ -7,6 +7,7 @@ export const MATERIAL_RACK_PAGE_SIZE = 4;
 export class MaterialSelection {
   private candidate: ForgeMaterial | null = null;
   private acquiredCount = 0;
+  private readonly rackWorkpieceIds = new Set<string>();
 
   constructor(private application: GameApplication | null = null) {}
 
@@ -16,6 +17,17 @@ export class MaterialSelection {
 
   getAcquiredCount(): number {
     return this.acquiredCount;
+  }
+
+  getTableWorkpieceIds(): readonly string[] {
+    return this.getPieces()
+      .map((piece) => piece.workpieceId)
+      .filter((workpieceId) => !this.rackWorkpieceIds.has(workpieceId));
+  }
+
+  isOnTable(workpieceId: string): boolean {
+    return this.getPieces().some((piece) => piece.workpieceId === workpieceId)
+      && !this.rackWorkpieceIds.has(workpieceId);
   }
 
   inspect(materialId: string): void {
@@ -49,10 +61,22 @@ export class MaterialSelection {
   take(workpieceId: string): boolean {
     if (!this.application) return false;
     const state = this.application.getState();
-    if (state.workpiece.id === workpieceId) return true;
+    if (state.workpiece.id === workpieceId) {
+      this.rackWorkpieceIds.delete(workpieceId);
+      return true;
+    }
     const benchIndex = state.bench.findIndex((piece) => piece.id === workpieceId);
     if (benchIndex < 0) return false;
     this.application.applyIntent({ kind: "select-workpiece", benchIndex });
+    this.rackWorkpieceIds.delete(workpieceId);
+    return true;
+  }
+
+  returnCurrentToRack(): boolean {
+    if (!this.application) return false;
+    const workpieceId = this.application.getState().workpiece.id;
+    if (this.rackWorkpieceIds.has(workpieceId)) return false;
+    this.rackWorkpieceIds.add(workpieceId);
     return true;
   }
 }

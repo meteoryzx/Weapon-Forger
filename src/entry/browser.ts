@@ -71,13 +71,13 @@ function createApplication(): GameApplication {
 let application = createApplication();
 const materialSelection = new MaterialSelection(acceptanceVerb === "materials" ? null : application);
 let rackPage = 0;
-let materialsFocus: "table" | "rack" = "table";
 let rackNotice = "";
 const materialSession = acceptanceVerb === "materials";
 const materialControls = document.querySelector<HTMLElement>("#materials-controls")!;
 const materialName = document.querySelector<HTMLElement>("#material-name")!;
 const materialDetails = document.querySelector<HTMLElement>("#material-details")!;
 const materialActions = document.querySelector<HTMLElement>("#material-actions")!;
+const materialReturn = document.querySelector<HTMLButtonElement>("#material-return")!;
 const rackNavigation = document.querySelector<HTMLElement>("#rack-navigation")!;
 const rackPageLabel = document.querySelector<HTMLElement>("#rack-page")!;
 const previousRackPage = document.querySelector<HTMLButtonElement>("#rack-previous")!;
@@ -298,6 +298,13 @@ function updateView(hammerPreview = null): void {
 function setStation(station: ForgeStation): void {
   if (acceptanceStation && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
+  if (activeStation === "materials" && station !== "materials"
+    && materialSelection.getPieces().length > 0
+    && !materialSelection.isOnTable(latestSnapshot.workpieceId)) {
+    rackNotice = "当前工件仍在料架，请先点击取回到桌面";
+    updateView();
+    return;
+  }
   if (heatingStartedAtMs !== null) stopHeating();
   pressStartedAtMs = null;
   pressTarget = null;
@@ -311,7 +318,7 @@ function setStation(station: ForgeStation): void {
 }
 
 function materialToStation(materialId: ForgeMaterialPick): void {
-  focusMaterials("table");
+  focusMaterials();
   materialSelection.inspect(materialId);
   rackNotice = "";
   updateView();
@@ -325,36 +332,42 @@ function updateMaterialsInterface(): void {
   rackPage = Math.min(rackPage, pages - 1);
   if (activeStation === "materials") {
     view?.updateMaterials(materialSelection.getCandidate()?.id ?? null,
-      pieces.slice(rackPage * MATERIAL_RACK_PAGE_SIZE, (rackPage + 1) * MATERIAL_RACK_PAGE_SIZE));
+      pieces.slice(rackPage * MATERIAL_RACK_PAGE_SIZE, (rackPage + 1) * MATERIAL_RACK_PAGE_SIZE),
+      latestSnapshot.workpieceId, materialSelection.getTableWorkpieceIds());
   }
   const candidate = materialSelection.getCandidate();
-  const atTable = activeStation === "materials" && materialsFocus === "table";
-  materialName.textContent = atTable ? (candidate ? materialLabels[candidate.id]! : "材料来源") : "待加工工件";
+  const tableWorkpieceIds = materialSelection.getTableWorkpieceIds();
+  const tableWorkpieceCount = tableWorkpieceIds.length;
+  const currentOnTable = materialSelection.isOnTable(latestSnapshot.workpieceId);
+  const atMaterials = activeStation === "materials";
+  materialName.textContent = candidate ? materialLabels[candidate.id]! : "材料与暂存桌";
   const mass = candidate ? FORGE_RULES.workpieceLength * FORGE_RULES.initialSectionWidth
     * FORGE_RULES.initialSectionThickness * 1e-9 * candidate.densityKgPerM3 : 0;
   materialDetails.textContent = candidate
     ? `碳含量 ${candidate.carbon.toFixed(2)}% · ${FORGE_RULES.workpieceLength} × ${FORGE_RULES.initialSectionWidth} × ${FORGE_RULES.initialSectionThickness} mm · ${mass.toFixed(2)} kg`
-    : rackNotice || (pieces.length ? `料架共 ${pieces.length} 件` : "料架为空");
-  materialActions.hidden = !atTable || candidate === null;
-  rackNavigation.hidden = activeStation !== "materials" || materialsFocus !== "rack";
-  rackPageLabel.textContent = `${rackPage + 1} / ${pages}`;
+    : rackNotice || (pieces.length
+      ? `暂存桌 ${tableWorkpieceCount} 件 · 已放回料架 ${pieces.length - tableWorkpieceCount} 件`
+      : "尚未领取材料");
+  materialActions.hidden = !atMaterials || candidate === null;
+  materialReturn.hidden = !atMaterials || candidate !== null || !materialSelection.isOnTable(latestSnapshot.workpieceId);
+  rackNavigation.hidden = activeStation !== "materials" || pages === 1;
+  rackPageLabel.textContent = `桌面 ${rackPage + 1} / ${pages}`;
   previousRackPage.disabled = rackPage === 0;
   nextRackPage.disabled = rackPage === pages - 1;
   workpieceLabel.textContent = pieces.length
-    ? `当前：${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · ${latestSnapshot.workpieceId}`
+    ? `当前：${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · ${latestSnapshot.workpieceId} · ${currentOnTable ? "桌面" : "料架"}`
     : "当前：未领取";
-  workpieceTravel.disabled = pieces.length === 0;
-  workpieceStation.disabled = pieces.length === 0;
+  workpieceTravel.disabled = pieces.length === 0 || !currentOnTable;
+  workpieceStation.disabled = pieces.length === 0 || !currentOnTable;
   document.body.dataset.materialCandidate = candidate?.id ?? "none";
-  document.body.dataset.materialsFocus = materialsFocus;
+  document.body.dataset.materialsFocus = "fixed";
   document.body.dataset.ownedWorkpieceCount = String(pieces.length);
+  document.body.dataset.currentWorkpieceLocation = pieces.length === 0 ? "none" : currentOnTable ? "table" : "rack";
   document.body.dataset.rackPage = String(rackPage);
 }
 
-function focusMaterials(focus: "table" | "rack"): void {
+function focusMaterials(): void {
   setStation("materials");
-  materialsFocus = focus;
-  view?.setMaterialsFocus(focus);
   rackNotice = "";
   updateView();
 }
@@ -365,16 +378,19 @@ document.querySelector("#material-confirm")!.addEventListener("click", () => {
   application = next;
   const pieces = materialSelection.getPieces();
   rackPage = Math.floor((pieces.length - 1) / MATERIAL_RACK_PAGE_SIZE);
-  focusMaterials("table");
-  rackNotice = "已领取，放入料架";
+  focusMaterials();
+  rackNotice = "已领取，放到暂存桌";
   updateView();
 });
 document.querySelector("#material-cancel")!.addEventListener("click", () => {
   materialSelection.cancel();
   updateView();
 });
-document.querySelector("#materials-rack")!.addEventListener("click", () => focusMaterials("rack"));
-document.querySelector("#materials-table")!.addEventListener("click", () => focusMaterials("table"));
+materialReturn.addEventListener("click", () => {
+  if (!materialSelection.returnCurrentToRack()) return;
+  rackNotice = `已放回 ${latestSnapshot.workpieceId}`;
+  updateView();
+});
 previousRackPage.addEventListener("click", () => { rackPage = Math.max(0, rackPage - 1); updateView(); });
 nextRackPage.addEventListener("click", () => { rackPage += 1; updateView(); });
 workpieceTravel.addEventListener("click", () => setStation(workpieceStation.value as ForgeStation));
@@ -482,17 +498,18 @@ canvas.addEventListener("pointerdown", (event) => {
   const y = event.clientY - bounds.top;
 
   if (activeStation === "materials") {
-    if (materialsFocus === "rack") {
-      const workpieceId = view.pickRackWorkpiece(x, y);
-      if (workpieceId && materialSelection.take(workpieceId)) {
-        rackNotice = `已取用 ${workpieceId}`;
-        updateView();
-      }
-      return;
-    }
     const material = view.pickMaterial(x, y);
     if (material) materialToStation(material);
-    else if (view.pickMaterialsRack(x, y)) focusMaterials("rack");
+    else {
+      const tableWorkpieceId = view.pickMaterialsTableWorkpiece(x, y);
+      const rackWorkpieceId = view.pickRackWorkpiece(x, y);
+      const workpieceId = tableWorkpieceId ?? rackWorkpieceId;
+      if (workpieceId && materialSelection.take(workpieceId)) {
+        materialSelection.cancel();
+        rackNotice = rackWorkpieceId ? `已取回 ${workpieceId}` : `当前工件 ${workpieceId}`;
+        updateView();
+      }
+    }
     return;
   }
 
@@ -602,8 +619,7 @@ window.addEventListener("keydown", (event) => {
     if (materialSelection.getCandidate()) {
       materialSelection.cancel();
       updateView();
-    } else if (materialsFocus === "rack") focusMaterials("table");
-    else if (!acceptanceStation) setStation("overview");
+    } else if (!acceptanceStation) setStation("overview");
     return;
   }
   if (event.key.toLowerCase() === "r" && acceptanceStation) {

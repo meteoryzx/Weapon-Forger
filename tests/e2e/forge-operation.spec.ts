@@ -35,16 +35,19 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   if (await page.locator("#material-cancel").isVisible()) await page.locator("#material-cancel").click();
   await page.waitForTimeout(650);
-  await page.locator("#game").click({ position: materialPoint("table", [3, 71.36, -37]) });
+  await page.locator("#game").click({ position: materialPoint("table", [0, 202, -112]) });
   await expect(page.locator("body")).toHaveAttribute("data-material-candidate", "high-carbon-steel");
   await page.locator("#material-confirm").click();
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.locator("#game").click({ position: materialPoint("rack", [140, 63, -169]) });
+  await page.locator("#material-return").click();
+  await expect(page.locator("body")).toHaveAttribute("data-current-workpiece-location", "rack");
+  await expect(page.locator("#workpiece-travel")).toBeDisabled();
+  await page.locator("#game").click({ position: materialPoint("rack", [-174, 288, -112]) });
+  await expect(page.locator("body")).toHaveAttribute("data-current-workpiece-location", "table");
+  await expect(page.locator("#workpiece-travel")).toBeEnabled();
   await expect(page.locator("body")).toHaveAttribute("data-carbon", "0.900000");
   await expect(page.locator("#hud-state")).toContainText("工作台 1 块");
 
-  await page.locator("#materials-table").click();
-  await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await page.locator("#game").focus();
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");

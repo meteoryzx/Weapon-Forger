@@ -20,6 +20,7 @@ describe("material inspection and ownership", () => {
     expect(app.getState().bench).toEqual([]);
     expect(selection.getPieces()).toHaveLength(1);
     expect(selection.getAcquiredCount()).toBe(1);
+    expect(selection.getTableWorkpieceIds()).toEqual([app.getState().workpiece.id]);
     expect(selection.confirm()).toBeNull();
     expect(selection.getPieces()).toHaveLength(1);
   });
@@ -73,6 +74,7 @@ describe("material inspection and ownership", () => {
     expect(new Set(pieces.map((piece) => piece.workpieceId)).size).toBe(6);
     const pages = [pieces.slice(0, 4), pieces.slice(4, 8)];
     expect(pages.map((page) => page.length)).toEqual([4, 2]);
+    expect(selection.getTableWorkpieceIds()).toHaveLength(6);
     for (const piece of pieces) expect(selection.take(piece.workpieceId)).toBe(true);
     expect(selection.getPieces()).toHaveLength(6);
   });
@@ -89,5 +91,21 @@ describe("material inspection and ownership", () => {
     expect(newStock.sections.reduce((sum, section) => sum + section.length, 0)).toBeCloseTo(FORGE_RULES.workpieceLength, 8);
     expect(newStock.averageTemperatureC).toBe(20);
     expect(app.getState().workpiece.sections).toHaveLength(1);
+  });
+
+  it("returns the same active workpiece to the rack without changing its history", () => {
+    const selection = new MaterialSelection();
+    selection.inspect("spring-steel");
+    const app = selection.confirm()!;
+    app.applyIntent({ kind: "cut", sectionIndex: 12 });
+    const before = structuredClone(app.getState().workpiece);
+    expect(selection.isOnTable(before.id)).toBe(true);
+    expect(selection.returnCurrentToRack()).toBe(true);
+    expect(selection.isOnTable(before.id)).toBe(false);
+    expect(app.getState().workpiece).toEqual(before);
+    expect(selection.returnCurrentToRack()).toBe(false);
+    expect(selection.take(before.id)).toBe(true);
+    expect(selection.isOnTable(before.id)).toBe(true);
+    expect(app.getState().workpiece).toEqual(before);
   });
 });
