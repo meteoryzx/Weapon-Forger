@@ -34,6 +34,7 @@ import {
   type WorkpieceNode,
 } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
+import { MaterialsStationView, materialsCameraFrame } from "./materials-station-view.ts";
 
 const BILLET_AXIAL_SCALE = 0.58;
 const ROTATE_CONTROL_SIZE = 32;
@@ -155,6 +156,8 @@ export class ForgeBilletView {
   private readonly cameraToTarget = new Vector3();
   private readonly cameraTarget = new Vector3();
   private station: ForgeStation = "overview";
+  private materialsView: MaterialsStationView | null = null;
+  private materialsFocus: "table" | "rack" = "table";
   private transitionStartedAtMs = 0;
   private isTransitioning = false;
   private temperPreviewC: number | null = null;
@@ -252,7 +255,7 @@ export class ForgeBilletView {
     this.station = station;
     this.cameraFromPosition.copy(this.camera.position);
     this.cameraFromTarget.copy(this.cameraTarget);
-    const frame = CAMERA_FRAMES[station];
+    const frame = this.cameraFrame(station);
     this.cameraToPosition.fromArray(frame.position);
     this.cameraToTarget.fromArray(frame.target);
     this.transitionStartedAtMs = nowMs;
@@ -264,7 +267,11 @@ export class ForgeBilletView {
   }
 
   tick(nowMs: number): void {
-    if (!this.isTransitioning) return;
+    const materialMoved = this.materialsView?.tick(nowMs) ?? false;
+    if (!this.isTransitioning) {
+      if (materialMoved) this.render();
+      return;
+    }
     const amount = clamp((nowMs - this.transitionStartedAtMs) / 420, 0, 1);
     const eased = amount * amount * (3 - 2 * amount);
     this.camera.position.lerpVectors(this.cameraFromPosition, this.cameraToPosition, eased);
@@ -306,8 +313,43 @@ export class ForgeBilletView {
   }
 
   pickMaterial(viewportX: number, viewportY: number): ForgeMaterialPick | null {
-    const hit = this.pickObject(viewportX, viewportY, [...this.materialMeshes.values()], false);
+    const meshes = this.station === "materials" ? this.materialsView?.candidates ?? [] : [...this.materialMeshes.values()];
+    const hit = this.pickObject(viewportX, viewportY, meshes, false);
     return (hit?.object.userData.materialId as ForgeMaterialPick | undefined) ?? null;
+  }
+
+  updateMaterials(
+    candidateId: string | null,
+    pieces: readonly ForgeSnapshotWorkpiece[],
+    activeWorkpieceId: string | null = null,
+    tableWorkpieceIds: readonly string[] = [],
+  ): void {
+    if (!this.materialsView) {
+      this.materialsView = new MaterialsStationView((piece) => createBilletGeometry(piece, null));
+      this.scene.add(this.materialsView.group);
+    }
+    this.materialsView.update(candidateId, pieces, activeWorkpieceId, tableWorkpieceIds);
+    this.materialsView.group.visible = this.station === "materials";
+    this.render();
+  }
+
+  setMaterialsFocus(focus: "table" | "rack"): void {
+    this.materialsFocus = focus;
+    this.materialsView?.setFocus(focus);
+  }
+
+  pickMaterialsRack(x: number, y: number): boolean {
+    return this.materialsView !== null && this.pickObject(x, y, [this.materialsView.rack], true) !== null;
+  }
+
+  pickRackWorkpiece(x: number, y: number): string | null {
+    const hit = this.pickObject(x, y, this.materialsView?.rackItems ?? [], false);
+    return (hit?.object.userData.workpieceId as string | undefined) ?? null;
+  }
+
+  pickMaterialsTableWorkpiece(x: number, y: number): string | null {
+    const hit = this.pickObject(x, y, this.materialsView?.tableItems ?? [], false);
+    return (hit?.object.userData.workpieceId as string | undefined) ?? null;
   }
 
   pickRotateControl(viewportX: number, viewportY: number): -1 | 1 | null {
@@ -380,6 +422,7 @@ export class ForgeBilletView {
   }
 
   dispose(): void {
+    this.materialsView?.dispose();
     this.billet.geometry.dispose();
     this.weldBenchBillets.forEach((billet) => billet.geometry.dispose());
     this.weldBenchItemTargets.forEach((target) => {
@@ -607,13 +650,15 @@ export class ForgeBilletView {
   }
 
   private updateStationEmphasis(activeStation: ForgeStation): void {
+    this.billetRig.visible = activeStation !== "materials";
+    if (this.materialsView) this.materialsView.group.visible = activeStation === "materials";
     this.anvilModel.visible = activeStation === "overview" || activeStation === "anvil";
     for (const [station, objects] of this.stationProps) {
-      const visible = activeStation === "overview" || activeStation === station;
+      const visible = activeStation === "overview" || (activeStation === station && station !== "materials");
       objects.forEach((object) => { object.visible = visible; });
     }
     for (const mesh of this.materialMeshes.values()) {
-      mesh.visible = activeStation === "overview" || activeStation === "materials";
+      mesh.visible = activeStation === "overview";
     }
     for (const [station, mesh] of this.stationMeshes) {
       const material = mesh.material as MeshStandardMaterial;
@@ -633,10 +678,15 @@ export class ForgeBilletView {
   }
 
   private applyCameraFrame(station: ForgeStation): void {
-    const frame = CAMERA_FRAMES[station];
+    const frame = this.cameraFrame(station);
     this.camera.position.fromArray(frame.position);
     this.cameraTarget.fromArray(frame.target);
     this.camera.lookAt(this.cameraTarget);
+  }
+
+  private cameraFrame(station: ForgeStation) {
+    if (station !== "materials") return CAMERA_FRAMES[station];
+    return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
   }
 
   private addStationObject(station: Exclude<ForgeStation, "overview">, object: Object3D): void {
