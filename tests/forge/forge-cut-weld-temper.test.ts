@@ -62,7 +62,8 @@ describe("cut, weld, temper", () => {
   });
 
   it("weld keeps source material regions while exposing an aggregate carbon value", () => {
-    let state = createForgeState({ sectionCount: 8 });
+    let state = createForgeState();
+    const sectionCount = state.workpiece.sections.length;
     const onePieceVolume = totalVolume(state);
     state = applyForgeOperation(state, { kind: "select-material", materialId: "high-carbon-steel" });
     const welded = applyForgeOperation(state, { kind: "weld", benchIndex: 0 });
@@ -80,10 +81,11 @@ describe("cut, weld, temper", () => {
     expect(welded.workpiece.joints[0]?.contactArea).toBeCloseTo(48 * 8, 8);
     expect(welded.workpiece.joints[0]?.weldTemperatureC).toBe(20);
     expect(welded.bench).toHaveLength(0);
-    expect(welded.workpiece.sections).toHaveLength(16);
+    expect(welded.workpiece.sections).toHaveLength(sectionCount * 2);
     expect(totalVolume(welded)).toBeCloseTo(onePieceVolume * 2, 8);
-    expect(welded.workpiece.sections[8]?.position).toBeCloseTo(
-      (welded.workpiece.sections[7]?.position ?? 0) + (welded.workpiece.sections[7]?.length ?? 0),
+    expect(welded.workpiece.sections[sectionCount]?.position).toBeCloseTo(
+      (welded.workpiece.sections[sectionCount - 1]?.position ?? 0)
+        + (welded.workpiece.sections[sectionCount - 1]?.length ?? 0),
       8,
     );
   });

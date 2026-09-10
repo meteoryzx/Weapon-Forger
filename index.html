@@ -23,15 +23,36 @@
       #acceptance-console select { padding: 6px 8px; text-align: left; }
       #acceptance-reset { margin-top: 12px; }
       body.acceptance-mode #hud { left: 212px; }
+      [hidden] { display: none !important; }
+      #materials-controls { position: fixed; bottom: 0; left: 212px; right: 0; z-index: 15; box-sizing: border-box; height: 164px; padding: 12px 16px; background: #202624; color: #e5e9e7; font: 14px system-ui, sans-serif; overflow-y: auto; border-top: 1px solid #59605d; }
+      #materials-controls button, #materials-controls select { min-height: 34px; border: 1px solid #727c77; border-radius: 4px; color: #e5e9e7; background: #333d38; padding: 6px 10px; font: inherit; cursor: pointer; }
+      #materials-controls button:disabled, #materials-controls select:disabled { opacity: 0.45; cursor: default; }
+      #materials-controls button:focus-visible, #materials-controls select:focus-visible { outline: 2px solid #bdd8de; outline-offset: 2px; }
+      #material-details { margin: 5px 0 9px; font-size: 13px; }
+      #material-actions, #rack-navigation, #workpiece-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      #workpiece-actions { border-top: 1px solid #46514b; margin-top: 10px; padding-top: 10px; }
+      #workpiece-label { margin-right: auto; font-size: 12px; }
+      body.material-session #game { position: fixed; left: 212px; top: 104px; width: calc(100% - 212px); height: calc(100% - 268px); }
+      body.material-session #hud { height: 104px; box-sizing: border-box; overflow-y: auto; }
+      body.material-session #hud-hint { display: none; }
+      body.material-session #hud-state { color: #c6d2cc; }
       @media (max-width: 760px) {
         #acceptance-console { width: 148px; padding: 9px; }
         body.acceptance-mode #hud { left: 164px; padding-right: 8px; }
         #hud-state { max-width: none; }
+        body.material-session #acceptance-console { width: 96px; left: 4px; padding: 5px; }
+        body.material-session #acceptance-console h2 { font-size: 12px; }
+        body.material-session #acceptance-console button { font-size: 12px; padding: 5px 2px; }
+        body.material-session #hud { left: 104px; }
+        body.material-session #hud-title { font-size: 15px; }
+        body.material-session #game { left: 104px; width: calc(100% - 104px); height: calc(100% - 324px); }
+        #materials-controls { left: 104px; height: 220px; padding: 8px; }
+        #materials-controls select { max-width: 130px; }
       }
     </style>
   </head>
   <body>
-    <canvas id="game" aria-label="打了个铁开发画布"></canvas>
+    <canvas id="game" aria-label="打了个铁开发画布" tabindex="0"></canvas>
     <aside id="acceptance-console" aria-label="R1 操作验收中控台" hidden>
       <h2>R1 操作验收</h2>
       <nav aria-label="选择锻造步骤">
@@ -56,6 +77,32 @@
       <div id="hud-hint"></div>
       <div id="hud-state" aria-live="polite"></div>
     </div>
+    <section id="materials-controls" aria-label="选料与当前工件" hidden>
+      <strong id="material-name">材料来源</strong>
+      <div id="material-details" aria-live="polite"></div>
+      <div id="material-actions" hidden>
+        <button id="material-confirm" type="button">确认领取</button>
+        <button id="material-cancel" type="button">放回</button>
+      </div>
+      <div id="rack-navigation" hidden>
+        <button id="rack-previous" type="button" aria-label="上一页工件" title="上一页工件">←</button>
+        <span id="rack-page"></span>
+        <button id="rack-next" type="button" aria-label="下一页工件" title="下一页工件">→</button>
+        <button id="materials-table" type="button">返回选料桌</button>
+      </div>
+      <div id="workpiece-actions">
+        <span id="workpiece-label"></span>
+        <button id="materials-rack" type="button">查看料架</button>
+        <label for="workpiece-station">工位</label>
+        <select id="workpiece-station">
+          <option value="furnace">加热</option><option value="anvil">锤击</option>
+          <option value="cut">切割</option><option value="weld">焊合</option>
+          <option value="quench-water">水淬</option><option value="quench-oil">油淬</option>
+          <option value="temper">回火</option><option value="grind">研磨</option>
+        </select>
+        <button id="workpiece-travel" type="button">携带工件前往</button>
+      </div>
+    </section>
     <script type="module" src="/src/entry/browser.ts"></script>
   </body>
 </html>

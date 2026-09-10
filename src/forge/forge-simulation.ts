@@ -392,7 +392,7 @@ function applySelectMaterial(state: ForgeState, operation: SelectMaterialOperati
   const id = `workpiece-${state.operations.length + state.bench.length + 1}`;
   return appendOperation({
     ...state,
-    bench: [...state.bench, createWorkpiece(material, id, state.workpiece.sections.length)],
+    bench: [...state.bench, createWorkpiece(material, id, FORGE_RULES.defaultSectionCount)],
   }, operation);
 }
 

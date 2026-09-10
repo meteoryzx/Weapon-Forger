@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 const acceptanceSlices = [
-  ["materials", "materials", "材料架 · 选料"],
+  ["materials", "materials", "选料桌 · 选料"],
   ["cut", "cut", "切割台 · 切割"],
   ["weld", "weld", "焊合台 · 焊合"],
   ["heat", "furnace", "火炉 · 加热"],

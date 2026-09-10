@@ -1,11 +1,13 @@
 import {
   HIGH_CARBON_STEEL,
   SPRING_STEEL,
+  FORGE_RULES,
   createHammerInfluencePreview,
   type ForgeSnapshot,
   type ForgeState,
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
+import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
 import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
 import {
   ForgeBilletView,
@@ -66,7 +68,24 @@ function createApplication(): GameApplication {
   return next;
 }
 
-const application = createApplication();
+let application = createApplication();
+const materialSelection = new MaterialSelection(acceptanceVerb === "materials" ? null : application);
+let rackPage = 0;
+let materialsFocus: "table" | "rack" = "table";
+let rackNotice = "";
+const materialSession = acceptanceVerb === "materials";
+const materialControls = document.querySelector<HTMLElement>("#materials-controls")!;
+const materialName = document.querySelector<HTMLElement>("#material-name")!;
+const materialDetails = document.querySelector<HTMLElement>("#material-details")!;
+const materialActions = document.querySelector<HTMLElement>("#material-actions")!;
+const rackNavigation = document.querySelector<HTMLElement>("#rack-navigation")!;
+const rackPageLabel = document.querySelector<HTMLElement>("#rack-page")!;
+const previousRackPage = document.querySelector<HTMLButtonElement>("#rack-previous")!;
+const nextRackPage = document.querySelector<HTMLButtonElement>("#rack-next")!;
+const workpieceLabel = document.querySelector<HTMLElement>("#workpiece-label")!;
+const workpieceStation = document.querySelector<HTMLSelectElement>("#workpiece-station")!;
+const workpieceTravel = document.querySelector<HTMLButtonElement>("#workpiece-travel")!;
+if (materialSession) document.body.classList.add("material-session");
 const acceptanceSetupOperationCount = acceptanceStation ? application.getState().operations.length : 0;
 
 let view: ForgeBilletView | null = null;
@@ -89,7 +108,7 @@ let gesture: {
 
 const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint: string }> = {
   overview: { title: "铁匠铺 · 总览", hint: "点击材料、工位或铁砧进入第一人称近景；Esc 返回总览。" },
-  materials: { title: "材料架 · 选料", hint: "在材料堆中点击一块原料，带回当前工位。" },
+  materials: { title: "选料桌 · 选料", hint: "" },
   furnace: { title: "火炉 · 加热", hint: "按住炉口中的钢坯，观察热色和温度；松开取出。" },
   anvil: { title: "铁砧 · 锤击", hint: "按住钢坯落锤；A/D 转面，W/S 送料。" },
   cut: { title: "切割台 · 切割", hint: "从钢坯表面拖过切口，松开完成一次切割。" },
@@ -129,7 +148,7 @@ acceptanceReset.disabled = acceptanceStation === null;
 acceptanceReset.addEventListener("click", () => window.location.reload());
 
 function viewport() {
-  return { width: window.innerWidth, height: window.innerHeight, pixelRatio: window.devicePixelRatio };
+  return { width: canvas.clientWidth, height: canvas.clientHeight, pixelRatio: window.devicePixelRatio };
 }
 
 function average(values: readonly number[]): number {
@@ -137,10 +156,10 @@ function average(values: readonly number[]): number {
 }
 
 function acceptanceOperationCount(state: ForgeState): number {
+  if (acceptanceVerb === "materials") return materialSelection.getAcquiredCount();
   if (!acceptanceVerb) return state.operations.length;
   return state.operations.filter((operation) => (
-    acceptanceVerb === "materials" ? operation.kind === "select-material"
-    : acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.elapsedMs > 0
+    acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.elapsedMs > 0
     : operation.kind === acceptanceVerb
   )).length;
 }
@@ -152,10 +171,10 @@ function acceptanceState(state: ForgeState): readonly string[] {
   const shared = `本次操作 ${acceptanceOperationCount(state)} · 按 R 重置`;
   switch (acceptanceVerb) {
     case "materials":
+      if (materialSelection.getAcquiredCount() === 0) return ["当前无工件 · 料架为空"];
       return [
-        `${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · 碳 ${latestSnapshot.carbon.toFixed(2)}`,
-        `当前工件 ${latestSnapshot.workpieceId} · 工作台 ${latestSnapshot.benchCount} 块`,
-        shared,
+        `${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · 碳 ${latestSnapshot.carbon.toFixed(2)}% · ${latestSnapshot.averageTemperatureC.toFixed(0)}℃`,
+        `当前 ${latestSnapshot.workpieceId} · 已有 ${latestSnapshot.benchCount + 1} 件 · 领取 ${materialSelection.getAcquiredCount()} 次`,
       ];
     case "cut":
       return [
@@ -211,7 +230,7 @@ function renderState(): void {
   const damage = state.workpiece.sections.reduce((sum, section) => sum + section.damage, 0)
     / Math.max(1, state.workpiece.sections.length);
   const completedVerbs = [
-    state.operations.some((operation) => operation.kind === "select-material") ? "materials" : null,
+    materialSelection.getAcquiredCount() > 0 || state.operations.some((operation) => operation.kind === "select-material") ? "materials" : null,
     state.operations.some((operation) => operation.kind === "cut") ? "cut" : null,
     state.operations.some((operation) => operation.kind === "weld") ? "weld" : null,
     state.operations.some((operation) => operation.kind === "move-billet" && operation.elapsedMs > 0) ? "heat" : null,
@@ -261,26 +280,104 @@ function renderState(): void {
   document.body.dataset.carbon = latestSnapshot.carbon.toFixed(6);
   document.body.dataset.quenchMedium = latestSnapshot.quenchMedium ?? "none";
   document.body.dataset.cameraState = view?.isCameraTransitioning() ? "moving" : "settled";
+  if (materialSession && materialSelection.getAcquiredCount() === 0) {
+    document.body.dataset.workpieceId = "none";
+    document.body.dataset.temperatureC = "none";
+    document.body.dataset.carbon = "none";
+    document.body.dataset.layerCount = "0";
+  }
 }
 
 function updateView(hammerPreview = null): void {
   latestSnapshot = application.getSnapshot();
   view?.update(latestSnapshot, hammerPreview, activeStation, temperPreviewC);
+  updateMaterialsInterface();
   renderState();
 }
 
 function setStation(station: ForgeStation): void {
-  if (acceptanceStation && station !== acceptanceStation) return;
+  if (acceptanceStation && !materialSession && station !== acceptanceStation) return;
+  if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
+  if (heatingStartedAtMs !== null) stopHeating();
+  pressStartedAtMs = null;
+  pressTarget = null;
+  gesture = null;
+  temperDrag = null;
+  temperPreviewC = null;
+  materialSelection.cancel();
   activeStation = station;
   view?.setStation(station);
   updateView();
 }
 
 function materialToStation(materialId: ForgeMaterialPick): void {
-  application.applyIntent({ kind: "select-material", materialId });
-  application.applyIntent({ kind: "select-workpiece", benchIndex: application.getState().bench.length - 1 });
-  setStation("materials");
+  focusMaterials("table");
+  materialSelection.inspect(materialId);
+  rackNotice = "";
+  updateView();
 }
+
+function updateMaterialsInterface(): void {
+  materialControls.hidden = !(materialSession || activeStation === "materials");
+  if (materialControls.hidden) return;
+  const pieces = materialSelection.getPieces();
+  const pages = Math.max(1, Math.ceil(pieces.length / MATERIAL_RACK_PAGE_SIZE));
+  rackPage = Math.min(rackPage, pages - 1);
+  if (activeStation === "materials") {
+    view?.updateMaterials(materialSelection.getCandidate()?.id ?? null,
+      pieces.slice(rackPage * MATERIAL_RACK_PAGE_SIZE, (rackPage + 1) * MATERIAL_RACK_PAGE_SIZE));
+  }
+  const candidate = materialSelection.getCandidate();
+  const atTable = activeStation === "materials" && materialsFocus === "table";
+  materialName.textContent = atTable ? (candidate ? materialLabels[candidate.id]! : "材料来源") : "待加工工件";
+  const mass = candidate ? FORGE_RULES.workpieceLength * FORGE_RULES.initialSectionWidth
+    * FORGE_RULES.initialSectionThickness * 1e-9 * candidate.densityKgPerM3 : 0;
+  materialDetails.textContent = candidate
+    ? `碳含量 ${candidate.carbon.toFixed(2)}% · ${FORGE_RULES.workpieceLength} × ${FORGE_RULES.initialSectionWidth} × ${FORGE_RULES.initialSectionThickness} mm · ${mass.toFixed(2)} kg`
+    : rackNotice || (pieces.length ? `料架共 ${pieces.length} 件` : "料架为空");
+  materialActions.hidden = !atTable || candidate === null;
+  rackNavigation.hidden = activeStation !== "materials" || materialsFocus !== "rack";
+  rackPageLabel.textContent = `${rackPage + 1} / ${pages}`;
+  previousRackPage.disabled = rackPage === 0;
+  nextRackPage.disabled = rackPage === pages - 1;
+  workpieceLabel.textContent = pieces.length
+    ? `当前：${materialLabels[latestSnapshot.materialId] ?? latestSnapshot.materialId} · ${latestSnapshot.workpieceId}`
+    : "当前：未领取";
+  workpieceTravel.disabled = pieces.length === 0;
+  workpieceStation.disabled = pieces.length === 0;
+  document.body.dataset.materialCandidate = candidate?.id ?? "none";
+  document.body.dataset.materialsFocus = materialsFocus;
+  document.body.dataset.ownedWorkpieceCount = String(pieces.length);
+  document.body.dataset.rackPage = String(rackPage);
+}
+
+function focusMaterials(focus: "table" | "rack"): void {
+  setStation("materials");
+  materialsFocus = focus;
+  view?.setMaterialsFocus(focus);
+  rackNotice = "";
+  updateView();
+}
+
+document.querySelector("#material-confirm")!.addEventListener("click", () => {
+  const next = materialSelection.confirm();
+  if (!next) return;
+  application = next;
+  const pieces = materialSelection.getPieces();
+  rackPage = Math.floor((pieces.length - 1) / MATERIAL_RACK_PAGE_SIZE);
+  focusMaterials("table");
+  rackNotice = "已领取，放入料架";
+  updateView();
+});
+document.querySelector("#material-cancel")!.addEventListener("click", () => {
+  materialSelection.cancel();
+  updateView();
+});
+document.querySelector("#materials-rack")!.addEventListener("click", () => focusMaterials("rack"));
+document.querySelector("#materials-table")!.addEventListener("click", () => focusMaterials("table"));
+previousRackPage.addEventListener("click", () => { rackPage = Math.max(0, rackPage - 1); updateView(); });
+nextRackPage.addEventListener("click", () => { rackPage += 1; updateView(); });
+workpieceTravel.addEventListener("click", () => setStation(workpieceStation.value as ForgeStation));
 
 function startHeating(): void {
   if (heatingStartedAtMs !== null) return;
@@ -385,8 +482,17 @@ canvas.addEventListener("pointerdown", (event) => {
   const y = event.clientY - bounds.top;
 
   if (activeStation === "materials") {
+    if (materialsFocus === "rack") {
+      const workpieceId = view.pickRackWorkpiece(x, y);
+      if (workpieceId && materialSelection.take(workpieceId)) {
+        rackNotice = `已取用 ${workpieceId}`;
+        updateView();
+      }
+      return;
+    }
     const material = view.pickMaterial(x, y);
     if (material) materialToStation(material);
+    else if (view.pickMaterialsRack(x, y)) focusMaterials("rack");
     return;
   }
 
@@ -491,6 +597,15 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement) return;
+  if (event.key === "Escape" && activeStation === "materials") {
+    if (materialSelection.getCandidate()) {
+      materialSelection.cancel();
+      updateView();
+    } else if (materialsFocus === "rack") focusMaterials("table");
+    else if (!acceptanceStation) setStation("overview");
+    return;
+  }
   if (event.key.toLowerCase() === "r" && acceptanceStation) {
     event.preventDefault();
     window.location.reload();
