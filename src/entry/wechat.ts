@@ -21,7 +21,18 @@ const viewport = {
 const application = new GameApplication();
 const view = new ForgeBilletView(canvas, viewport);
 
-view.update(application.getSnapshot());
+application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+application.getSnapshot(20_000);
+application.commitPreview();
+application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
+view.enableRotateControls();
+view.setStation("anvil");
+
+function updateView(): void {
+  view.update(application.getSnapshot(), null, "anvil");
+}
+
+updateView();
 let activePress: { readonly sectionIndex: number; readonly faceBias: number; readonly startedAtMs: number } | null = null;
 
 wxApi.onTouchStart((event) => {
@@ -32,7 +43,8 @@ wxApi.onTouchStart((event) => {
   const quarterTurns = view.pickRotateControl(touch.clientX, touch.clientY);
   if (quarterTurns !== null) {
     activePress = null;
-    view.update(application.applyIntent({ kind: "rotate", quarterTurns }));
+    application.applyIntent({ kind: "rotate", quarterTurns });
+    updateView();
     return;
   }
 
@@ -49,7 +61,8 @@ wxApi.onTouchEnd(() => {
   const { sectionIndex, faceBias, startedAtMs } = activePress;
   activePress = null;
   const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  view.update(application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy, lateralBias: 0 }));
+  application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy });
+  updateView();
 });
 wxApi.onTouchCancel(() => {
   activePress = null;

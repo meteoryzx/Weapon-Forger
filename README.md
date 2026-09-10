@@ -1,14 +1,13 @@
 # Weapon Forger / 打了个铁
 
-一款以自由锻造和可解释故事后果为核心的 2.5D 系统策划作品集。项目使用 TypeScript、Three.js 和 Vite，同一套游戏逻辑与程序化场景同时服务浏览器 H5 和微信小游戏。
+一款以自由锻造为核心的 TypeScript、Three.js 和 Vite 项目。浏览器用于作者体验和展示，微信入口共享锻造核心；核心本身可作为其他游戏的锻造基础。
 
 ## 当前状态
 
-- 正式基线：GitHub `main`；G0 唯一协作标准已通过 PR #12 归档，游戏事实仍待下一检查点重新审计。
-- 待审计现场：`feat/R1i-furnace-heating@7a83f17` 保存了火炉、锤击、八工位、数据架构和验收入口等 WIP；保存不等于验收或准备合并。
-- 当前检查点：G1a 只恢复干净工作区并标明事实边界；下一步是 G1b 代码与计划审计，不是直接继续玩法施工。
-
-项目状态与计划以 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 为准；AI 协作、批准、验收和 Git 规则只以 GitHub `main` 的 [`AGENTS.md`](AGENTS.md) 为准。
+- `main` 是已批准的稳定基线。
+- 当前功能分支 `feat/R1-eight-step-acceptance` 正在恢复并等待作者逐项验收八类操作：选料、切割、焊合、加热、锤击、淬火、回火、研磨。
+- 八类操作已接入共享状态、操作记录、快照、事实出口和对应自动测试；作者体验尚未替代自动证据，也未宣称 R1 通过。
+- 当前计划见 [`PROJECT_PLAN.md`](PROJECT_PLAN.md)；唯一 AI 协作规则见 [`AGENTS.md`](AGENTS.md)。
 
 ## 本地运行
 
@@ -16,28 +15,28 @@
 
 ```powershell
 npm ci
-npx playwright install chromium
-npm run check
+npm run check:governance
+npm run typecheck
+npm run test
+npm run build:web
+npm run build:wechat
 npm run dev -- --host 127.0.0.1 --port 4177
 ```
 
-浏览器入口为 `http://127.0.0.1:4177`。微信产物由 `npm run build:wechat` 生成到 `dist/wxgame`，登录、导入、扫码和真机验收由作者完成。
+当前检查点的自动检查不会打开浏览器或模拟游玩。`npm run test:e2e` 是保留的端到端资产，待作者八项体验完成、另行批准后再运行。
 
 ## 仓库结构
 
 ```text
-src/
-  app/       组装依赖与控制流程
-  entry/     浏览器和微信运行入口
-  platform/  输入与平台能力适配
-  forge/     确定性锻造状态、操作与回放
-  evaluate/  最终状态到隐藏性能、特性和缺陷（R2）
-  story/     武器数据到确定性事件（R3）
-  render/    Three.js 程序化场景与状态可视化
-tests/       按源码边界组织的逻辑、平台和端到端测试
-scripts/     可重复的开发与验证脚本
-wechat/      微信小游戏宿主配置
-.github/     CI、PR 和 Issue 协作模板
+src/app/       应用组装
+src/entry/     浏览器和微信入口
+src/platform/  平台输入适配
+src/forge/     确定性锻造状态、操作、规则、保存和事实
+src/render/    Three.js 程序化场景和状态表现
+tests/         逻辑、平台和端到端测试
+scripts/       可重复的检查与样本脚本
+docs/          技术说明和研究基线
+.github/       CI、PR 和 Issue 模板
 ```
 
-`dist/`、`node_modules/`、`test-results/` 和 Playwright 报告均为本地产物，不进入 Git。旧 Cocos 路线仅保留在 Git 历史中，不是现行工程的一部分。
+`dist/`、`node_modules/`、测试报告和其他本地产物不进入 Git。旧实验分支只用于追溯，不能覆盖当前计划和协作规则。

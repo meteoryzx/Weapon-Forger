@@ -1,4 +1,11 @@
-import { DEFAULT_FORGE_MATERIAL, FORGE_PARAMETER_VERSION, FORGE_RULES } from "./forge-rules.ts";
+import {
+  DEFAULT_FORGE_MATERIAL,
+  FORGE_MATERIALS,
+  FORGE_PARAMETER_VERSION,
+  FORGE_RULES,
+  FORGE_STATE_VERSION,
+} from "./forge-rules.ts";
+import { integrateMechanicalResponse } from "./forge-physics.ts";
 import type {
   BladeBlock,
   BladeSection,
@@ -8,11 +15,21 @@ import type {
   ForgeSnapshot,
   ForgeSnapshotBlock,
   ForgeSnapshotSection,
+  ForgeSnapshotWorkpiece,
   ForgeState,
+  CutOperation,
+  GrindOperation,
   HammerInfluencePreview,
   HammerOperation,
+  MoveBilletOperation,
+  QuenchMedium,
+  QuenchOperation,
+  SelectMaterialOperation,
+  TemperOperation,
+  WeldOperation,
   WorkpieceGrid,
   WorkpieceNode,
+  WorkpieceState,
 } from "./forge-types.ts";
 
 export interface CreateForgeStateOptions {
@@ -77,35 +94,52 @@ const CELL_TETRAHEDRA = [
 
 export function createForgeState(options: CreateForgeStateOptions = {}): ForgeState {
   const sectionCount = options.sectionCount ?? FORGE_RULES.defaultSectionCount;
+  const material = options.material ?? DEFAULT_FORGE_MATERIAL;
+  return {
+    stateVersion: FORGE_STATE_VERSION,
+    parameterVersion: FORGE_PARAMETER_VERSION,
+    workpiece: createWorkpiece(material, "workpiece-0", sectionCount),
+    bench: [],
+    operations: [],
+  };
+}
+
+function createWorkpiece(material: ForgeMaterial, id: string, sectionCount: number): WorkpieceState {
   if (!Number.isInteger(sectionCount) || sectionCount < 3) {
     throw new Error("A forge workpiece needs at least three sections.");
   }
-
-  const material = options.material ?? DEFAULT_FORGE_MATERIAL;
   assertMaterial(material);
   const nodes = createWorkpieceNodes(sectionCount, DEFAULT_GRID);
   const sections = Array.from({ length: sectionCount }, (_, sectionIndex) => (
-    createSection(sectionIndex, nodes, DEFAULT_GRID)
+    createSection(sectionIndex, nodes, DEFAULT_GRID, material.id, id)
   ));
   return {
-    parameterVersion: FORGE_PARAMETER_VERSION,
-    phase: "forging",
+    id,
     material: { ...material },
-    workpiece: {
-      id: "workpiece-0",
-      orientationQuarterTurns: 0,
-      feedOffset: 0,
-      grid: { ...DEFAULT_GRID },
-      nodes,
-      sections,
-      joints: [],
+    layerCount: 1,
+    orientationQuarterTurns: 0,
+    feedOffset: 0,
+    grid: { ...DEFAULT_GRID },
+    nodes,
+    sections,
+    joints: [],
+    thermal: {
+      location: "inspection",
+      peakTemperatureC: FORGE_RULES.ambientTemperatureC,
+      hotExposureSeconds: 0,
+      oxidationDose: 0,
+      overheatDose: 0,
     },
-    operations: [],
+    heatTreatments: [],
   };
 }
 
 export function applyForgeOperation(state: ForgeState, operation: ForgeOperation): ForgeState {
   switch (operation.kind) {
+    case "select-material":
+      return applySelectMaterial(state, operation);
+    case "select-workpiece":
+      return applySelectWorkpiece(state, operation);
     case "heat":
       assertTemperature(operation.temperatureC);
       return appendOperation({
@@ -117,11 +151,17 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
             sectionIndex,
             state.workpiece.nodes,
             operation.temperatureC,
-            state.material,
+            state.workpiece.material,
             state.workpiece.grid,
           )),
+          thermal: {
+            ...state.workpiece.thermal,
+            peakTemperatureC: Math.max(state.workpiece.thermal.peakTemperatureC, operation.temperatureC),
+          },
         },
       }, operation);
+    case "move-billet":
+      return applyMoveBillet(state, operation);
     case "rotate":
       assertQuarterTurns(operation.quarterTurns);
       return appendOperation({
@@ -146,8 +186,15 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
     case "hammer":
       return appendOperation(applyHammer(state, operation), operation);
     case "quench":
+      return applyQuench(state, operation);
     case "grind":
-      throw new Error(`${operation.kind} is reserved for a later forging-chain slice.`);
+      return applyGrind(state, operation);
+    case "cut":
+      return applyCut(state, operation);
+    case "weld":
+      return applyWeld(state, operation);
+    case "temper":
+      return applyTemper(state, operation);
   }
 }
 
@@ -159,17 +206,79 @@ export function replayForgeState(initialState: ForgeState, operations: readonly 
   return operations.reduce(applyForgeOperation, cloneStateWithoutOperations(initialState));
 }
 
+export function previewThermalState(state: ForgeState, elapsedMs: number): ForgeState {
+  assertThermalDuration(elapsedMs);
+  return evolveThermalState(state, state.workpiece.thermal.location, elapsedMs);
+}
+
 export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
+  const workpiece = snapshotWorkpiece(state.workpiece);
+  const quench = latestQuenchEvent(state.workpiece);
+  const temper = latestTemperEvent(state.workpiece);
   return {
+    stateVersion: state.stateVersion,
     parameterVersion: state.parameterVersion,
+    workpieceId: state.workpiece.id,
+    materialId: state.workpiece.material.id,
+    billetLocation: state.workpiece.thermal.location,
+    averageTemperatureC: workpiece.averageTemperatureC,
+    peakTemperatureC: state.workpiece.thermal.peakTemperatureC,
+    hotExposureSeconds: state.workpiece.thermal.hotExposureSeconds,
+    oxidationDose: state.workpiece.thermal.oxidationDose,
+    overheatDose: state.workpiece.thermal.overheatDose,
     orientationQuarterTurns: state.workpiece.orientationQuarterTurns,
     feedOffset: state.workpiece.feedOffset,
-    grid: { ...state.workpiece.grid },
-    nodes: state.workpiece.nodes.map((node) => ({ ...node })),
+    grid: workpiece.grid,
+    nodes: workpiece.nodes,
     hasCracks: state.workpiece.sections.some((section) => section.cracked),
     hasOverheatedSections: state.workpiece.sections.some((section) => section.overheated),
-    sections: state.workpiece.sections.map(sectionSnapshot),
+    quenchMedium: quench?.medium ?? null,
+    quenchStartTemperatureC: quench?.startTemperatureC ?? null,
+    quenched: quench !== null,
+    edgeCoverage: edgeCoverage(state.workpiece.sections),
+    edgeEvenness: edgeEvenness(state.workpiece.sections),
+    layerCount: workpiece.layerCount,
+    carbon: workpiece.carbon,
+    temperTemperatureC: temper?.temperatureC ?? null,
+    heatTreatmentCount: state.workpiece.heatTreatments.length,
+    materialRegionCount: workpiece.materialRegionCount,
+    removedVolume: state.workpiece.sections.reduce((sum, section) => sum + section.removedVolume, 0),
+    benchCount: state.bench.length,
+    bench: state.bench.map(snapshotWorkpiece),
+    sections: workpiece.sections,
   };
+}
+
+function snapshotWorkpiece(workpiece: WorkpieceState): ForgeSnapshotWorkpiece {
+  return {
+    workpieceId: workpiece.id,
+    materialId: workpiece.material.id,
+    averageTemperatureC: averageWorkpieceTemperatureOf(workpiece),
+    grid: { ...workpiece.grid },
+    nodes: workpiece.nodes.map((node) => ({ ...node })),
+    sections: workpiece.sections.map(sectionSnapshot),
+    layerCount: workpiece.layerCount,
+    carbon: workpiece.material.carbon,
+    materialRegionCount: new Set(workpiece.sections.flatMap((section) => (
+      section.blocks.map((block) => block.materialRegionId)
+    ))).size,
+  };
+}
+
+function latestQuenchEvent(workpiece: WorkpieceState) {
+  for (let index = workpiece.heatTreatments.length - 1; index >= 0; index -= 1) {
+    const event = workpiece.heatTreatments[index];
+    if (event?.kind === "quench") return event;
+  }
+  return null;
+}
+
+function latestTemperEvent(workpiece: WorkpieceState) {
+  for (let index = workpiece.heatTreatments.length - 1; index >= 0; index -= 1) {
+    const event = workpiece.heatTreatments[index];
+    if (event?.kind === "temper") return event;
+  }
+  return null;
 }
 
 export function totalVolume(state: ForgeState): number {
@@ -182,6 +291,544 @@ export function totalVolume(state: ForgeState): number {
 export function calculatePlasticity(temperatureC: number, material: ForgeMaterial = DEFAULT_FORGE_MATERIAL): number {
   const range = material.plasticityPeakC - material.plasticityStartC;
   return clamp((temperatureC - material.plasticityStartC) / range, 0, 1) * material.hotWorkability;
+}
+
+export function heatCapacityJPerKgK(temperatureC: number, material: ForgeMaterial = DEFAULT_FORGE_MATERIAL): number {
+  const temperatureK = clamp(temperatureC + 273.15, 298, 1809);
+  const segment = material.heatCapacitySegments.find((candidate, index) => (
+    temperatureK >= candidate.minimumK
+      && (temperatureK < candidate.maximumK || index === material.heatCapacitySegments.length - 1)
+  )) ?? material.heatCapacitySegments.at(-1);
+  if (!segment) throw new Error("Material needs heat-capacity data.");
+  const t = temperatureK / 1000;
+  const molar = segment.a + segment.b * t + segment.c * t ** 2 + segment.d * t ** 3 + segment.e / t ** 2;
+  return molar / material.molarMassKgPerMol;
+}
+
+function applyMoveBillet(state: ForgeState, operation: MoveBilletOperation): ForgeState {
+  assertThermalDuration(operation.elapsedMs);
+  if (operation.destination === state.workpiece.thermal.location) {
+    throw new Error("Billet destination must differ from its current location.");
+  }
+  const evolved = evolveThermalState(state, state.workpiece.thermal.location, operation.elapsedMs);
+  return appendOperation({
+    ...evolved,
+    workpiece: {
+      ...evolved.workpiece,
+      thermal: { ...evolved.workpiece.thermal, location: operation.destination },
+    },
+  }, operation);
+}
+
+// The reduced model records the cooling boundary as a process event. Detailed
+// phase transformation is deferred, but repeated cycles are no longer lost.
+function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState {
+  assertQuenchMedium(operation.medium);
+  const startTemperatureC = roundThermal(averageWorkpieceTemperature(state));
+  const sections = state.workpiece.sections.map((section, sectionIndex) => {
+    const blocks = section.blocks.map((block) => ({
+      ...block,
+      temperatureC: FORGE_RULES.ambientTemperatureC,
+      plasticity: calculatePlasticity(FORGE_RULES.ambientTemperatureC, state.workpiece.material),
+    }));
+    return summarizeSection({ ...section, blocks }, sectionIndex, state.workpiece.nodes, state.workpiece.grid);
+  });
+  return appendOperation({
+    ...state,
+    workpiece: {
+      ...state.workpiece,
+      sections,
+      heatTreatments: [...state.workpiece.heatTreatments, {
+        kind: "quench",
+        operationIndex: state.operations.length,
+        medium: operation.medium,
+        startTemperatureC,
+        endTemperatureC: FORGE_RULES.ambientTemperatureC,
+      }],
+    },
+  }, operation);
+}
+
+// Grinding is one stroke along the edge: the clicked section is ground hardest
+// and the amount falls off toward both ends. Coverage and evenness across the
+// whole blade are derived from the per-section amounts, so concentrating all
+// strokes on one spot leaves an uneven edge while spreading them stays even.
+function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
+  assertGrindOperation(state, operation);
+  const sectionCount = state.workpiece.sections.length;
+  const sections = state.workpiece.sections.map((section, index) => {
+    const distance = Math.abs(index - operation.sectionIndex) / Math.max(1, sectionCount - 1);
+    const falloff = 1 - 0.8 * distance;
+    const amount = clamp(operation.amount * falloff, 0, 1);
+    const groundAmount = clamp(section.groundAmount + amount, 0, 1);
+    const progress = groundAmount - section.groundAmount;
+    let removedVolume = 0;
+    const blocks = section.blocks.map((block) => {
+      if (block.widthIndex !== state.workpiece.grid.widthBlocks - 1 || progress <= 0) return block;
+      const removal = Math.min(
+        block.volume * 0.25,
+        section.length * block.thickness * FORGE_RULES.grindRemovalDepthAtFullAmount * progress,
+      );
+      removedVolume += removal;
+      return { ...block, volume: block.volume - removal };
+    });
+    return summarizeSection({
+      ...section,
+      groundAmount,
+      removedVolume: section.removedVolume + removedVolume,
+      blocks,
+    }, index, state.workpiece.nodes, state.workpiece.grid);
+  });
+  return appendOperation({
+    ...state,
+    workpiece: { ...state.workpiece, sections },
+  }, operation);
+}
+
+// 选料：往 bench 增加一块指定材料的新钢坯，保留独立材料来源供后续组合。
+function applySelectMaterial(state: ForgeState, operation: SelectMaterialOperation): ForgeState {
+  const material = FORGE_MATERIALS.find((candidate) => candidate.id === operation.materialId);
+  if (!material) throw new Error(`Unknown material: ${operation.materialId}.`);
+  const id = `workpiece-${state.operations.length + state.bench.length + 1}`;
+  return appendOperation({
+    ...state,
+    bench: [...state.bench, createWorkpiece(material, id, state.workpiece.sections.length)],
+  }, operation);
+}
+
+// 切割：把当前工件在 sectionIndex 处一分为二。两半都拥有独立、从零开始的
+// 点阵坐标；后半段不能继续引用原工件的节点索引，否则后续锤击会读到错误截面。
+function applyCut(state: ForgeState, operation: CutOperation): ForgeState {
+  assertCutOperation(state, operation);
+  const { workpiece } = state;
+  const cutIndex = operation.sectionIndex;
+  const front = sliceWorkpiece(workpiece, 0, cutIndex, `${workpiece.id}-front`);
+  const back = sliceWorkpiece(workpiece, cutIndex, workpiece.sections.length, `${workpiece.id}-back`);
+  return appendOperation({
+    ...state,
+    workpiece: front,
+    bench: [...state.bench, back],
+  }, operation);
+}
+
+// 焊合：把当前工件与 bench[benchIndex] 沿轴向拼成连续点阵。工件级材料按体积
+// 汇总供降阶公式读取，block 仍保留空间材料来源，不能据此宣称完整层状复合已实现。
+function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
+  const other = state.bench[operation.benchIndex];
+  if (!other) throw new Error("Weld bench index must reference an existing piece.");
+  const a = state.workpiece;
+  const b = other;
+  const aVolume = totalVolumeOf(a);
+  const bVolume = totalVolumeOf(b);
+  const total = aVolume + bVolume;
+  const averageByVolume = (x: number, y: number) => (x * aVolume + y * bVolume) / Math.max(total, Number.EPSILON);
+  const material = mixMaterials(a.material, b.material, averageByVolume);
+  const mergedGeometry = mergeWorkpieceGeometry(a, b);
+  const weldTemperatureC = averageWeldTemperature(a, b);
+  const welded: WorkpieceState = {
+    ...a,
+    material,
+    layerCount: a.layerCount + b.layerCount,
+    nodes: mergedGeometry.nodes,
+    sections: mergedGeometry.sections,
+    thermal: {
+      ...a.thermal,
+      peakTemperatureC: Math.max(a.thermal.peakTemperatureC, b.thermal.peakTemperatureC),
+      hotExposureSeconds: a.thermal.hotExposureSeconds + b.thermal.hotExposureSeconds,
+      oxidationDose: a.thermal.oxidationDose + b.thermal.oxidationDose,
+      overheatDose: a.thermal.overheatDose + b.thermal.overheatDose,
+    },
+    heatTreatments: [...a.heatTreatments, ...b.heatTreatments]
+      .sort((first, second) => first.operationIndex - second.operationIndex),
+    joints: [
+      ...a.joints,
+      ...b.joints,
+      {
+        id: `${a.id}-weld-${b.id}`,
+        workpieceIds: [a.id, b.id],
+        contactArea: weldContactArea(a, b),
+        weldTemperatureC,
+        integrity: weldIntegrity(weldTemperatureC, material),
+      },
+    ],
+  };
+  return appendOperation({
+    ...state,
+    workpiece: welded,
+    bench: state.bench.filter((_, index) => index !== operation.benchIndex),
+  }, operation);
+}
+
+// 焊合质量 = 当前温度进入可锻窗口的程度；冷焊 → 完整性低 → 后续出「未焊合」缺陷。
+function averageWeldTemperature(a: WorkpieceState, b: WorkpieceState): number {
+  const aVolume = totalVolumeOf(a);
+  const bVolume = totalVolumeOf(b);
+  const temperature = (
+    averageWorkpieceTemperatureOf(a) * aVolume
+    + averageWorkpieceTemperatureOf(b) * bVolume
+  ) / Math.max(aVolume + bVolume, Number.EPSILON);
+  return temperature;
+}
+
+function weldContactArea(a: WorkpieceState, b: WorkpieceState): number {
+  const aEnd = a.sections.at(-1);
+  const bStart = b.sections[0];
+  if (!aEnd || !bStart) return 0;
+  return Math.min(aEnd.width * aEnd.thickness, bStart.width * bStart.thickness);
+}
+
+function weldIntegrity(temperatureC: number, material: ForgeMaterial): number {
+  return calculatePlasticity(temperatureC, material);
+}
+
+// Tempering is retained as a process event. A later material model may consume
+// thermal-history detail without changing the public operation history shape.
+function applyTemper(state: ForgeState, operation: TemperOperation): ForgeState {
+  assertTemperOperation(operation);
+  return appendOperation({
+    ...state,
+    workpiece: {
+      ...state.workpiece,
+      heatTreatments: [...state.workpiece.heatTreatments, {
+        kind: "temper",
+        operationIndex: state.operations.length,
+        temperatureC: operation.temperatureC,
+      }],
+    },
+  }, operation);
+}
+
+function totalVolumeOf(workpiece: WorkpieceState): number {
+  return workpiece.sections.reduce(
+    (total, section) => total + section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0),
+    0,
+  );
+}
+
+function sliceWorkpiece(
+  workpiece: WorkpieceState,
+  startSection: number,
+  endSection: number,
+  id: string,
+): WorkpieceState {
+  const sectionCount = endSection - startSection;
+  const baseNode = workpiece.nodes[workpieceNodeIndex(startSection, 0, 0, workpiece.grid)];
+  if (!baseNode) throw new Error("Missing cut boundary node.");
+  const nodes = [] as WorkpieceNode[];
+  for (let axialIndex = 0; axialIndex <= sectionCount; axialIndex += 1) {
+    const sourceAxialIndex = startSection + axialIndex;
+    for (let heightIndex = 0; heightIndex <= workpiece.grid.heightBlocks; heightIndex += 1) {
+      for (let widthIndex = 0; widthIndex <= workpiece.grid.widthBlocks; widthIndex += 1) {
+        const source = workpiece.nodes[workpieceNodeIndex(
+          sourceAxialIndex,
+          widthIndex,
+          heightIndex,
+          workpiece.grid,
+        )];
+        if (!source) throw new Error("Missing node while slicing workpiece.");
+        nodes.push({
+          ...source,
+          axialIndex,
+          axialPosition: source.axialPosition - baseNode.axialPosition,
+        });
+      }
+    }
+  }
+  const sections = localizeSections(
+    workpiece.sections.slice(startSection, endSection).map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) => ({
+        ...block,
+        materialRegionId: `${id}/${block.materialRegionId}`,
+      })),
+    })),
+    nodes,
+    workpiece.grid,
+    0,
+  );
+  return { ...workpiece, id, nodes, sections };
+}
+
+function mergeWorkpieceGeometry(
+  first: WorkpieceState,
+  second: WorkpieceState,
+): { readonly nodes: readonly WorkpieceNode[]; readonly sections: readonly BladeSection[] } {
+  if (first.grid.widthBlocks !== second.grid.widthBlocks
+    || first.grid.heightBlocks !== second.grid.heightBlocks) {
+    throw new Error("Welded workpieces must use compatible simulation grids.");
+  }
+  const grid = first.grid;
+  const firstSectionCount = first.sections.length;
+  const secondSectionCount = second.sections.length;
+  const firstStart = first.nodes[workpieceNodeIndex(0, 0, 0, grid)];
+  const firstEnd = first.nodes[workpieceNodeIndex(firstSectionCount, 0, 0, grid)];
+  const secondStart = second.nodes[workpieceNodeIndex(0, 0, 0, grid)];
+  if (!firstStart || !firstEnd || !secondStart) throw new Error("Missing weld boundary node.");
+  const secondAxialOffset = firstEnd.axialPosition - secondStart.axialPosition;
+  const nodes: WorkpieceNode[] = [];
+  const planeSize = (grid.widthBlocks + 1) * (grid.heightBlocks + 1);
+  for (let axialIndex = 0; axialIndex <= firstSectionCount + secondSectionCount; axialIndex += 1) {
+    const sourceNodes = axialIndex <= firstSectionCount ? first.nodes : second.nodes;
+    const sourceAxialIndex = axialIndex <= firstSectionCount
+      ? axialIndex
+      : axialIndex - firstSectionCount;
+    const sourceOffset = sourceAxialIndex * planeSize;
+    for (let local = 0; local < planeSize; local += 1) {
+      const source = sourceNodes[sourceOffset + local];
+      if (!source) throw new Error("Missing node while welding workpieces.");
+      nodes.push({
+        ...source,
+        axialIndex,
+        axialPosition: source.axialPosition + (sourceNodes === second.nodes ? secondAxialOffset : 0),
+      });
+    }
+  }
+  const sections = [
+    ...localizeSections(first.sections, nodes, grid, 0),
+    ...localizeSections(second.sections, nodes, grid, firstSectionCount, secondAxialOffset),
+  ];
+  return { nodes, sections };
+}
+
+function localizeSections(
+  sourceSections: readonly BladeSection[],
+  nodes: readonly WorkpieceNode[],
+  grid: WorkpieceGrid,
+  sectionIndexOffset: number,
+  positionOffset = 0,
+): readonly BladeSection[] {
+  return sourceSections.map((section, localIndex) => {
+    const sectionIndex = localIndex + sectionIndexOffset;
+    const blocks = section.blocks.map((block) => deriveBlockGeometry(
+      block,
+      sectionIndex,
+      nodes,
+      grid,
+    ));
+    return summarizeSection({
+      ...section,
+      position: section.position + positionOffset,
+      blocks,
+    }, sectionIndex, nodes, grid);
+  });
+}
+
+function mixMaterials(
+  first: ForgeMaterial,
+  second: ForgeMaterial,
+  averageByVolume: (firstValue: number, secondValue: number) => number,
+): ForgeMaterial {
+  return {
+    ...first,
+    id: first.id === second.id ? first.id : "mixed-steel",
+    carbon: averageByVolume(first.carbon, second.carbon),
+    hotWorkability: averageByVolume(first.hotWorkability, second.hotWorkability),
+    hardenability: averageByVolume(first.hardenability, second.hardenability),
+    damageResistance: averageByVolume(first.damageResistance, second.damageResistance),
+    plasticityStartC: averageByVolume(first.plasticityStartC, second.plasticityStartC),
+    plasticityPeakC: averageByVolume(first.plasticityPeakC, second.plasticityPeakC),
+    overheatTemperatureC: averageByVolume(first.overheatTemperatureC, second.overheatTemperatureC),
+    stressRecoveryAtPeak: averageByVolume(first.stressRecoveryAtPeak, second.stressRecoveryAtPeak),
+    densityKgPerM3: averageByVolume(first.densityKgPerM3, second.densityKgPerM3),
+    molarMassKgPerMol: averageByVolume(first.molarMassKgPerMol, second.molarMassKgPerMol),
+    yieldStrengthAmbientMPa: averageByVolume(first.yieldStrengthAmbientMPa, second.yieldStrengthAmbientMPa),
+    yieldStrengthHotMPa: averageByVolume(first.yieldStrengthHotMPa, second.yieldStrengthHotMPa),
+    workHardeningExponent: averageByVolume(first.workHardeningExponent, second.workHardeningExponent),
+    cleanEmissivity: averageByVolume(first.cleanEmissivity, second.cleanEmissivity),
+    oxidizedEmissivity: averageByVolume(first.oxidizedEmissivity, second.oxidizedEmissivity),
+    oxidationActivationEnergyJPerMol: averageByVolume(
+      first.oxidationActivationEnergyJPerMol,
+      second.oxidationActivationEnergyJPerMol,
+    ),
+  };
+}
+
+function averageWorkpieceTemperatureOf(workpiece: WorkpieceState): number {
+  const volume = totalVolumeOf(workpiece);
+  return workpiece.sections.reduce(
+    (sum, section) => sum + section.blocks.reduce(
+      (sectionSum, block) => sectionSum + block.temperatureC * block.volume,
+      0,
+    ),
+    0,
+  ) / Math.max(volume, Number.EPSILON);
+}
+
+function evolveThermalState(
+  state: ForgeState,
+  environment: "inspection" | "furnace",
+  elapsedMs: number,
+): ForgeState {
+  if (elapsedMs === 0) return state;
+  const physicalSeconds = elapsedMs / 1000 * FORGE_RULES.thermalTimeScale;
+  const surfaceAreaM2 = workpieceSurfaceAreaM2(state.workpiece.nodes, state.workpiece.grid);
+  const massKg = totalVolume(state) * 1e-9 * state.workpiece.material.densityKgPerM3;
+  let temperatureC = averageWorkpieceTemperature(state);
+  let peakTemperatureC = state.workpiece.thermal.peakTemperatureC;
+  let hotExposureSeconds = state.workpiece.thermal.hotExposureSeconds;
+  let oxidationDose = state.workpiece.thermal.oxidationDose;
+  let overheatDose = state.workpiece.thermal.overheatDose;
+  let stressRecoveryDose = 0;
+  let remaining = physicalSeconds;
+
+  while (remaining > 0) {
+    const step = Math.min(FORGE_RULES.thermalStepSeconds, remaining);
+    const temperatureK = temperatureC + 273.15;
+    const oxidationBlend = clamp(oxidationDose / FORGE_RULES.oxidationEmissivityDose, 0, 1);
+    const emissivity = lerp(state.workpiece.material.cleanEmissivity, state.workpiece.material.oxidizedEmissivity, oxidationBlend);
+    const environmentGasC = environment === "furnace"
+      ? FORGE_RULES.furnaceGasTemperatureC
+      : FORGE_RULES.ambientTemperatureC;
+    const environmentWallC = environment === "furnace"
+      ? FORGE_RULES.furnaceWallTemperatureC
+      : FORGE_RULES.ambientTemperatureC;
+    const convection = (environment === "furnace"
+      ? FORGE_RULES.furnaceConvectionWPerM2K
+      : FORGE_RULES.airConvectionWPerM2K)
+      * surfaceAreaM2 * (environmentGasC - temperatureC);
+    const radiation = emissivity
+      * FORGE_RULES.stefanBoltzmannWPerM2K4
+      * surfaceAreaM2
+      * (environment === "furnace" ? FORGE_RULES.furnaceRadiationViewFactor : 1)
+      * ((environmentWallC + 273.15) ** 4 - temperatureK ** 4);
+    const heatCapacity = heatCapacityJPerKgK(temperatureC, state.workpiece.material);
+    temperatureC = clamp(
+      temperatureC + (convection + radiation) / Math.max(massKg * heatCapacity, Number.EPSILON) * step,
+      FORGE_RULES.ambientTemperatureC,
+      1300,
+    );
+    peakTemperatureC = Math.max(peakTemperatureC, temperatureC);
+    if (temperatureC >= FORGE_RULES.hotExposureThresholdC) hotExposureSeconds += step;
+    const referenceK = FORGE_RULES.oxidationReferenceTemperatureC + 273.15;
+    const rate = Math.exp(
+      -state.workpiece.material.oxidationActivationEnergyJPerMol / 8.314_462_618
+      * (1 / (temperatureC + 273.15) - 1 / referenceK),
+    );
+    oxidationDose += rate * step;
+    const overheatRatio = clamp(
+      (temperatureC - state.workpiece.material.overheatTemperatureC) / (1300 - state.workpiece.material.overheatTemperatureC),
+      0,
+      1,
+    );
+    overheatDose += overheatRatio * step;
+    stressRecoveryDose += calculatePlasticity(temperatureC, state.workpiece.material) * step;
+    remaining -= step;
+  }
+
+  const damageIncrease = (overheatDose - state.workpiece.thermal.overheatDose)
+    * FORGE_RULES.overheatDamagePerPhysicalSecond;
+  const stressRecovery = 1 - Math.exp(
+    -stressRecoveryDose * FORGE_RULES.stressRecoveryPerPhysicalSecond * state.workpiece.material.stressRecoveryAtPeak,
+  );
+  const sections = state.workpiece.sections.map((section, sectionIndex) => {
+    const blocks = section.blocks.map((block) => {
+      const thermalDamage = clamp(block.thermalDamage + damageIncrease, 0, 1);
+      return {
+        ...block,
+        temperatureC,
+        plasticity: calculatePlasticity(temperatureC, state.workpiece.material),
+        stress: block.stress * Math.exp(-stressRecovery),
+        elasticStrain: block.elasticStrain * Math.exp(-stressRecovery),
+        thermalDamage,
+        overheated: block.overheated || thermalDamage > 0,
+      };
+    });
+    return summarizeSection({ ...section, blocks }, sectionIndex, state.workpiece.nodes, state.workpiece.grid);
+  });
+  return {
+    ...state,
+    workpiece: {
+      ...state.workpiece,
+      sections,
+      thermal: {
+        ...state.workpiece.thermal,
+        peakTemperatureC: roundThermal(peakTemperatureC),
+        hotExposureSeconds: roundThermal(hotExposureSeconds),
+        oxidationDose: roundThermal(oxidationDose),
+        overheatDose: roundThermal(overheatDose),
+      },
+    },
+  };
+}
+
+function averageWorkpieceTemperature(state: ForgeState): number {
+  const volume = totalVolume(state);
+  return state.workpiece.sections.reduce(
+    (sum, section) => sum + section.blocks.reduce(
+      (sectionSum, block) => sectionSum + block.temperatureC * block.volume,
+      0,
+    ),
+    0,
+  ) / volume;
+}
+
+export function edgeCoverage(sections: readonly BladeSection[]): number {
+  return average(sections.map((section) => section.groundAmount));
+}
+
+export function edgeEvenness(sections: readonly BladeSection[]): number {
+  const amounts = sections.map((section) => section.groundAmount);
+  const mean = average(amounts);
+  const standardDeviation = Math.sqrt(average(amounts.map((amount) => (amount - mean) ** 2)));
+  // A standard deviation of 0.5 means half the edge is saturated while the
+  // other half is untouched, i.e. maximally uneven for a [0,1] quantity.
+  return clamp(1 - standardDeviation / 0.5, 0, 1);
+}
+
+function workpieceSurfaceAreaM2(nodes: readonly WorkpieceNode[], grid: WorkpieceGrid): number {
+  const axialCount = axialBlockCount(nodes, grid);
+  let area = 0;
+  const addQuad = (a: number, b: number, c: number, d: number) => {
+    const va = nodeVector(nodes[a]);
+    const vb = nodeVector(nodes[b]);
+    const vc = nodeVector(nodes[c]);
+    const vd = nodeVector(nodes[d]);
+    area += magnitude(cross(subtract(vb, va), subtract(vc, va))) / 2;
+    area += magnitude(cross(subtract(vc, va), subtract(vd, va))) / 2;
+  };
+  for (let axial = 0; axial < axialCount; axial += 1) {
+    for (let width = 0; width < grid.widthBlocks; width += 1) {
+      addQuad(
+        workpieceNodeIndex(axial, width, 0, grid),
+        workpieceNodeIndex(axial + 1, width, 0, grid),
+        workpieceNodeIndex(axial + 1, width + 1, 0, grid),
+        workpieceNodeIndex(axial, width + 1, 0, grid),
+      );
+      addQuad(
+        workpieceNodeIndex(axial, width, grid.heightBlocks, grid),
+        workpieceNodeIndex(axial, width + 1, grid.heightBlocks, grid),
+        workpieceNodeIndex(axial + 1, width + 1, grid.heightBlocks, grid),
+        workpieceNodeIndex(axial + 1, width, grid.heightBlocks, grid),
+      );
+    }
+    for (let height = 0; height < grid.heightBlocks; height += 1) {
+      addQuad(
+        workpieceNodeIndex(axial, 0, height, grid),
+        workpieceNodeIndex(axial, 0, height + 1, grid),
+        workpieceNodeIndex(axial + 1, 0, height + 1, grid),
+        workpieceNodeIndex(axial + 1, 0, height, grid),
+      );
+      addQuad(
+        workpieceNodeIndex(axial, grid.widthBlocks, height, grid),
+        workpieceNodeIndex(axial + 1, grid.widthBlocks, height, grid),
+        workpieceNodeIndex(axial + 1, grid.widthBlocks, height + 1, grid),
+        workpieceNodeIndex(axial, grid.widthBlocks, height + 1, grid),
+      );
+    }
+  }
+  for (const axial of [0, axialCount]) {
+    for (let width = 0; width < grid.widthBlocks; width += 1) {
+      for (let height = 0; height < grid.heightBlocks; height += 1) {
+        addQuad(
+          workpieceNodeIndex(axial, width, height, grid),
+          workpieceNodeIndex(axial, width + 1, height, grid),
+          workpieceNodeIndex(axial, width + 1, height + 1, grid),
+          workpieceNodeIndex(axial, width, height + 1, grid),
+        );
+      }
+    }
+  }
+  return area * 1e-6;
 }
 
 export function createHammerInfluencePreview(
@@ -219,6 +866,7 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
   const target = contactTargetFor(targetSection, face, operation.faceBias ?? 0.5);
   const contactCells = findContactCells(state.workpiece.sections, target, face, state.workpiece.grid);
   if (contactCells.length === 0) return state;
+  const supportRatio = hammerSupportRatio(targetSection, state.workpiece.feedOffset, state.workpiece.nodes);
 
   const plasticity = contactCells.reduce((sum, item) => (
     sum + (state.workpiece.sections[item.sectionIndex]?.blocks.find(
@@ -251,7 +899,14 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
       if (!before) throw new Error("Missing block state during hammer solve.");
       const weight = blockImpactWeight(section, before, target, face);
       return weight > 0
-        ? updateHammerState(before, geometry, operation, weight, state.material, neighbourPlasticStrain(state, sectionIndex, before))
+        ? updateHammerState(
+          before,
+          geometry,
+          weight,
+          state.workpiece.material,
+          neighbourPlasticStrain(state, sectionIndex, before),
+          supportRatio,
+        )
         : geometry;
     });
     return summarizeSection({ ...section, blocks: updatedBlocks }, sectionIndex, nodes, state.workpiece.grid);
@@ -681,11 +1336,15 @@ function createSection(
   sectionIndex: number,
   nodes: readonly WorkpieceNode[],
   grid: WorkpieceGrid,
+  materialId: string,
+  materialRegionId: string,
 ): BladeSection {
   const blocks = Array.from({ length: grid.widthBlocks * grid.heightBlocks }, (_, blockIndex): BladeBlock => {
     const widthIndex = blockIndex % grid.widthBlocks;
     const heightIndex = Math.floor(blockIndex / grid.widthBlocks);
     const initial: BladeBlock = {
+      materialId,
+      materialRegionId,
       widthIndex,
       heightIndex,
       length: FORGE_RULES.initialSectionLength,
@@ -696,6 +1355,8 @@ function createSection(
       plasticity: 0,
       stress: 0,
       plasticStrain: 0,
+      elasticStrain: 0,
+      mechanicalWorkJ: 0,
       damage: 0,
       integrity: 1,
       thermalDamage: 0,
@@ -715,6 +1376,8 @@ function createSection(
     plasticity: 0,
     stress: 0,
     plasticStrain: 0,
+    elasticStrain: 0,
+    mechanicalWorkJ: 0,
     damage: 0,
     integrity: 1,
     thermalDamage: 0,
@@ -722,6 +1385,8 @@ function createSection(
     lateralOffset: 0,
     cracked: false,
     overheated: false,
+    groundAmount: 0,
+    removedVolume: 0,
     blocks,
   }, sectionIndex, nodes, grid);
 }
@@ -780,6 +1445,8 @@ function summarizeSection(
     plasticity: weighted((block) => block.plasticity),
     stress: weighted((block) => block.stress),
     plasticStrain: weighted((block) => block.plasticStrain),
+    elasticStrain: weighted((block) => block.elasticStrain),
+    mechanicalWorkJ: section.blocks.reduce((sum, block) => sum + block.mechanicalWorkJ, 0),
     damage: weighted((block) => block.damage),
     integrity: Math.min(...section.blocks.map((block) => block.integrity)),
     thermalDamage: weighted((block) => block.thermalDamage),
@@ -793,40 +1460,56 @@ function summarizeSection(
 function updateHammerState(
   before: BladeBlock,
   geometry: BladeBlock,
-  operation: HammerOperation,
   impactWeight: number,
   material: ForgeMaterial,
   neighbourStrain: number,
+  supportRatio: number,
 ): BladeBlock {
-  const geometricStrain = average([
-    Math.abs(Math.log(Math.max(geometry.length, 0.001) / Math.max(before.length, 0.001))),
-    Math.abs(Math.log(Math.max(geometry.width, 0.001) / Math.max(before.width, 0.001))),
-    Math.abs(Math.log(Math.max(geometry.thickness, 0.001) / Math.max(before.thickness, 0.001))),
-  ]);
-  const stressIncrease = impactWeight * operation.energy * material.coldStressMultiplier * lerp(
-    FORGE_RULES.hotStressAtFullEnergy,
-    FORGE_RULES.coldStressAtFullEnergy,
-    1 - before.plasticity,
+  const thinness = clamp(
+    (FORGE_RULES.simulationCellSize - geometry.thickness) / FORGE_RULES.simulationCellSize,
+    0,
+    1,
   );
-  const stress = before.stress + stressIncrease;
-  const plasticStrain = before.plasticStrain + geometricStrain * FORGE_RULES.plasticStrainPerCompression;
-  const localisation = clamp((plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainRange, 0, 1);
-  const thinness = clamp((FORGE_RULES.simulationCellSize - geometry.thickness) / FORGE_RULES.simulationCellSize, 0, 1);
-  const coldness = (1 - before.plasticity) ** 3;
-  const damageIncrease = impactWeight * operation.energy * coldness * (
-    FORGE_RULES.coldImpactDamage
-    + localisation * FORGE_RULES.localisationDamage
-    + thinness * FORGE_RULES.thinSectionDamage
-  ) * (1 + before.thermalDamage) / material.damageResistance;
-  const damage = clamp(before.damage + damageIncrease, 0, 1);
-  const integrity = Math.max(0, 1 - damage);
+  const thinSectionRisk = clamp(
+    (thinness - FORGE_RULES.thinSectionRiskStart) / Math.max(1 - FORGE_RULES.thinSectionRiskStart, Number.EPSILON),
+    0,
+    1,
+  );
+  const response = integrateMechanicalResponse(
+    before,
+    {
+      length: before.length,
+      width: before.width,
+      thickness: before.thickness,
+      volume: before.volume,
+    },
+    {
+      length: geometry.length,
+      width: geometry.width,
+      thickness: geometry.thickness,
+      volume: geometry.volume,
+    },
+    material,
+    {
+      impactWeight,
+      localisation: clamp(
+        (before.plasticStrain - neighbourStrain) / FORGE_RULES.localisationStrainReference,
+        0,
+        1,
+      ),
+      thinSectionRisk,
+      supportRatio,
+    },
+  );
   return {
     ...geometry,
-    stress,
-    plasticStrain,
-    damage,
-    integrity,
-    cracked: before.cracked || integrity <= FORGE_RULES.crackIntegrityThreshold,
+    stress: response.stress,
+    plasticStrain: response.plasticStrain,
+    elasticStrain: response.elasticStrain,
+    mechanicalWorkJ: response.mechanicalWorkJ,
+    damage: response.damage,
+    integrity: response.integrity,
+    cracked: before.cracked || response.integrity <= FORGE_RULES.crackIntegrityThreshold,
   };
 }
 
@@ -846,7 +1529,8 @@ function applyHeat(
       ...block,
       temperatureC,
       plasticity,
-      stress: block.stress * (1 - plasticity * material.stressRecoveryAtPeak),
+      stress: block.stress * Math.exp(-plasticity * material.stressRecoveryAtPeak),
+      elasticStrain: block.elasticStrain * Math.exp(-plasticity * material.stressRecoveryAtPeak),
       thermalDamage,
       overheated: block.overheated || thermalDamage > 0,
     };
@@ -862,12 +1546,18 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
     thickness: section.thickness,
     temperatureC: section.temperatureC,
     plasticity: section.plasticity,
+    stress: section.stress,
+    plasticStrain: section.plasticStrain,
+    elasticStrain: section.elasticStrain,
+    mechanicalWorkJ: section.mechanicalWorkJ,
     thermalDamage: section.thermalDamage,
     damage: section.damage,
     verticalOffset: section.verticalOffset,
     lateralOffset: section.lateralOffset,
     cracked: section.cracked,
     overheated: section.overheated,
+    groundAmount: section.groundAmount,
+    removedVolume: section.removedVolume,
     blocks: section.blocks.map((block): ForgeSnapshotBlock => ({
       widthIndex: block.widthIndex,
       heightIndex: block.heightIndex,
@@ -877,6 +1567,10 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
       volume: block.volume,
       temperatureC: block.temperatureC,
       plasticity: block.plasticity,
+      stress: block.stress,
+      plasticStrain: block.plasticStrain,
+      elasticStrain: block.elasticStrain,
+      mechanicalWorkJ: block.mechanicalWorkJ,
       thermalDamage: block.thermalDamage,
       damage: block.damage,
       verticalOffset: block.verticalOffset,
@@ -892,19 +1586,23 @@ function appendOperation(state: ForgeState, operation: ForgeOperation): ForgeSta
 }
 
 function cloneStateWithoutOperations(state: ForgeState): ForgeState {
+  const cloneWorkpiece = (workpiece: WorkpieceState): WorkpieceState => ({
+    ...workpiece,
+    material: { ...workpiece.material },
+    grid: { ...workpiece.grid },
+    nodes: workpiece.nodes.map((node) => ({ ...node })),
+    sections: workpiece.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) => ({ ...block })),
+    })),
+    joints: workpiece.joints.map((joint) => ({ ...joint, workpieceIds: [...joint.workpieceIds] })),
+    thermal: { ...workpiece.thermal },
+    heatTreatments: workpiece.heatTreatments.map((event) => ({ ...event })),
+  });
   return {
     ...state,
-    material: { ...state.material },
-    workpiece: {
-      ...state.workpiece,
-      grid: { ...state.workpiece.grid },
-      nodes: state.workpiece.nodes.map((node) => ({ ...node })),
-      sections: state.workpiece.sections.map((section) => ({
-        ...section,
-        blocks: section.blocks.map((block) => ({ ...block })),
-      })),
-      joints: state.workpiece.joints.map((joint) => ({ ...joint, workpieceIds: [...joint.workpieceIds] })),
-    },
+    workpiece: cloneWorkpiece(state.workpiece),
+    bench: state.bench.map(cloneWorkpiece),
     operations: [],
   };
 }
@@ -1108,6 +1806,17 @@ function clampFeedOffset(feedOffset: number, nodes: readonly WorkpieceNode[]): n
   return clamp(feedOffset, -(Math.max(...axial) - Math.min(...axial)) / 2, (Math.max(...axial) - Math.min(...axial)) / 2);
 }
 
+function hammerSupportRatio(
+  section: Pick<BladeSection, "position">,
+  feedOffset: number,
+  nodes: readonly WorkpieceNode[],
+): number {
+  const axial = nodes.map((node) => node.axialPosition);
+  const workpieceCenter = (Math.min(...axial) + Math.max(...axial)) / 2;
+  const positionOnAnvil = section.position + feedOffset - workpieceCenter;
+  return clamp(1 - Math.abs(positionOnAnvil) / (FORGE_RULES.anvilFaceLength / 2), 0, 1);
+}
+
 function assertTemperature(temperatureC: number): void {
   if (!Number.isFinite(temperatureC) || temperatureC < FORGE_RULES.ambientTemperatureC || temperatureC > 1300) {
     throw new Error("Heat temperature must be between ambient temperature and 1300C.");
@@ -1115,8 +1824,14 @@ function assertTemperature(temperatureC: number): void {
 }
 
 function assertMaterial(material: ForgeMaterial): void {
-  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.coldStressMultiplier <= 0 || material.damageResistance <= 0) {
+  if (!material.id || material.hotWorkability <= 0 || material.hotWorkability > 1 || material.damageResistance <= 0) {
     throw new Error("Material workability values must be positive and hot workability at most one.");
+  }
+  if (material.hardenability <= 0 || material.hardenability > 1) {
+    throw new Error("Material hardenability must be greater than zero and at most one.");
+  }
+  if (material.carbon < 0 || material.carbon > 1) {
+    throw new Error("Material carbon must be between zero and one.");
   }
   if (material.plasticityStartC < FORGE_RULES.ambientTemperatureC || material.plasticityPeakC <= material.plasticityStartC
     || material.overheatTemperatureC <= material.plasticityPeakC || material.overheatTemperatureC >= 1300) {
@@ -1125,13 +1840,38 @@ function assertMaterial(material: ForgeMaterial): void {
   if (material.stressRecoveryAtPeak < 0 || material.stressRecoveryAtPeak > 1) {
     throw new Error("Material peak stress recovery must be between zero and one.");
   }
+  if (material.yieldStrengthAmbientMPa <= 0 || material.yieldStrengthHotMPa <= 0
+    || material.yieldStrengthHotMPa >= material.yieldStrengthAmbientMPa
+    || material.workHardeningExponent <= 0) {
+    throw new Error("Material mechanical response values must define a positive hot-softening curve.");
+  }
+  if (material.densityKgPerM3 <= 0 || material.molarMassKgPerMol <= 0
+    || material.cleanEmissivity <= 0 || material.cleanEmissivity > 1
+    || material.oxidizedEmissivity < material.cleanEmissivity || material.oxidizedEmissivity > 1
+    || material.oxidationActivationEnergyJPerMol <= 0 || material.heatCapacitySegments.length === 0) {
+    throw new Error("Material thermal values must define density, emissivity, activation energy, and heat capacity.");
+  }
+}
+
+function assertThermalDuration(elapsedMs: number): void {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > FORGE_RULES.maximumThermalIntentMs) {
+    throw new Error("Thermal duration must be finite and inside the interaction limit.");
+  }
 }
 
 function assertHammerOperation(state: ForgeState, operation: HammerOperation): void {
   assertHammerTarget(state.workpiece.sections, operation);
-  if (operation.lateralBias !== -1 && operation.lateralBias !== 0 && operation.lateralBias !== 1) {
-    throw new Error("Hammer lateral bias must be -1, 0, or 1.");
+}
+
+function applySelectWorkpiece(state: ForgeState, operation: { readonly kind: "select-workpiece"; readonly benchIndex: number }): ForgeState {
+  if (!Number.isInteger(operation.benchIndex) || operation.benchIndex < 0 || operation.benchIndex >= state.bench.length) {
+    throw new Error("Selected workpiece must exist on the bench.");
   }
+  const selected = state.bench[operation.benchIndex];
+  if (!selected) throw new Error("Selected workpiece must exist on the bench.");
+  const bench = state.bench.slice();
+  bench[operation.benchIndex] = state.workpiece;
+  return appendOperation({ ...state, workpiece: selected, bench }, operation);
 }
 
 function assertHammerTarget(
@@ -1153,6 +1893,31 @@ function assertQuarterTurns(quarterTurns: number): void {
   if (quarterTurns !== -1 && quarterTurns !== 1) throw new Error("Rotation must be exactly one quarter turn in either direction.");
 }
 
+function assertQuenchMedium(medium: QuenchMedium): void {
+  if (medium !== "water" && medium !== "oil") throw new Error("Quench medium must be water or oil.");
+}
+
+function assertGrindOperation(state: ForgeState, operation: GrindOperation): void {
+  if (!Number.isInteger(operation.sectionIndex) || operation.sectionIndex < 0 || operation.sectionIndex >= state.workpiece.sections.length) {
+    throw new Error("Grind target must be an existing section.");
+  }
+  if (!Number.isFinite(operation.amount) || operation.amount <= 0 || operation.amount > 1) {
+    throw new Error("Grind amount must be greater than zero and at most one.");
+  }
+}
+
+function assertCutOperation(state: ForgeState, operation: CutOperation): void {
+  if (!Number.isInteger(operation.sectionIndex) || operation.sectionIndex <= 0 || operation.sectionIndex >= state.workpiece.sections.length) {
+    throw new Error("Cut must split the workpiece into two non-empty halves.");
+  }
+}
+
+function assertTemperOperation(operation: TemperOperation): void {
+  if (!Number.isFinite(operation.temperatureC) || operation.temperatureC < FORGE_RULES.ambientTemperatureC || operation.temperatureC > 500) {
+    throw new Error("Temper temperature must be between ambient and 500C.");
+  }
+}
+
 function assertFeedStep(step: number): void {
   if (step !== -1 && step !== 1) throw new Error("Feed must move exactly one step in either direction.");
 }
@@ -1168,3 +1933,4 @@ function average(values: readonly number[]): number { return values.reduce((sum,
 function clamp(value: number, minimum: number, maximum: number): number { return Math.min(maximum, Math.max(minimum, value)); }
 function lerp(start: number, end: number, amount: number): number { return start + (end - start) * amount; }
 function roundWeight(value: number): number { return Math.round(value * 1_000) / 1_000; }
+function roundThermal(value: number): number { return Math.round(value * 1_000_000) / 1_000_000; }

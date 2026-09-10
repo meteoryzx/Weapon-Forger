@@ -5,16 +5,16 @@ const center = 4;
 const samples = {
   workableRangeShaping: [
     { kind: "heat", temperatureC: 950 },
-    { kind: "hammer", sectionIndex: center, energy: 0.65, lateralBias: -1 },
-    { kind: "hammer", sectionIndex: center, energy: 0.65, lateralBias: 1 },
+    { kind: "hammer", sectionIndex: center, energy: 0.65, faceBias: 0.25 },
+    { kind: "hammer", sectionIndex: center, energy: 0.65, faceBias: 0.75 },
   ],
   coldHeavyHammering: [
     { kind: "heat", temperatureC: 450 },
-    ...Array.from({ length: 5 }, () => ({ kind: "hammer", sectionIndex: center, energy: 1, lateralBias: 0 })),
+    ...Array.from({ length: 5 }, () => ({ kind: "hammer", sectionIndex: center, energy: 1 })),
   ],
   oneSidedHammering: [
     { kind: "heat", temperatureC: 950 },
-    { kind: "hammer", sectionIndex: center, energy: 0.9, lateralBias: 1 },
+    { kind: "hammer", sectionIndex: center, energy: 0.9, faceBias: 0.75 },
   ],
   repeatedOverheating: [
     { kind: "heat", temperatureC: 1200 },
