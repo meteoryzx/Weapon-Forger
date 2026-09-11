@@ -6,7 +6,9 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { FORGE_MATERIALS, FORGE_RULES, type ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
 
-export const MATERIALS_ORIGIN = new Vector3(-420, 0, -132);
+// Keep the selection area's accepted local arrangement; move the whole station
+// to the workshop's back-left so its full-sized table does not envelop the forge.
+export const MATERIALS_ORIGIN = new Vector3(-600, 0, -250);
 export const MATERIALS_FRAMES = {
   table: { position: [0, 262, 430], target: [0, 145, -28] },
   rack: { position: [0, 262, 430], target: [0, 145, -28] },
@@ -50,8 +52,6 @@ export class MaterialsStationView {
     const edge = new MeshStandardMaterial({ color: "#47372d", roughness: 0.9 });
     const iron = new MeshStandardMaterial({ color: "#424a50", metalness: 0.65, roughness: 0.5 });
     const stone = new MeshStandardMaterial({ color: "#626968", roughness: 1 });
-    const floor = new MeshStandardMaterial({ color: "#777776", roughness: 1 });
-    this.box(this.group, [700, 8, 620], [0, -34, 20], floor);
     this.box(this.group, [700, 360, 16], [0, 145, -270], stone);
 
     // The shelf is deep enough for a full stock billet and shares its front edge with the table.

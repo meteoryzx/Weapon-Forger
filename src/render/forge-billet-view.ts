@@ -22,6 +22,8 @@ import {
   Shape,
   Vector3,
   TorusGeometry,
+  Plane,
+  Matrix4,
 } from "three";
 
 import {
@@ -36,6 +38,8 @@ import {
 import { thermalSteelAppearance } from "./thermal-color.ts";
 import { solidSurface } from "../forge/solid-geometry.ts";
 import { MaterialsStationView, materialsCameraFrame } from "./materials-station-view.ts";
+import { SawStationView, SAW_ORIGIN, sawCameraFrame } from "./saw-station-view.ts";
+import { CUT_HOME, CUT_TABLE, type CutPose } from "../app/cut-placement.ts";
 
 const BILLET_AXIAL_SCALE = 0.58;
 const ROTATE_CONTROL_SIZE = 32;
@@ -109,11 +113,11 @@ const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number
 };
 
 const CAMERA_FRAMES: Record<ForgeStation, { readonly position: readonly [number, number, number]; readonly target: readonly [number, number, number] }> = {
-  overview: { position: [0, 430, 700], target: [0, 0, 30] },
+  overview: { position: [-100, 740, 1100], target: [-170, 55, 40] },
   anvil: { position: [0, 250, 330], target: [0, 0, 0] },
   materials: { position: [-420, 190, 180], target: [-420, 25, -70] },
   furnace: { position: [-260, 190, 170], target: [-260, 42, -20] },
-  cut: { position: [-340, 190, 195], target: [-340, 35, 150] },
+  cut: { position: [-420, 280, 790], target: [-420, 103, 368] },
   weld: { position: [330, 180, 225], target: [330, 35, 120] },
   "quench-water": { position: [250, 190, 160], target: [250, 35, -4] },
   "quench-oil": { position: [250, 190, 160], target: [250, 35, -96] },
@@ -158,6 +162,9 @@ export class ForgeBilletView {
   private readonly cameraTarget = new Vector3();
   private station: ForgeStation = "overview";
   private materialsView: MaterialsStationView | null = null;
+  private readonly sawView: SawStationView;
+  private cutPose: CutPose = CUT_HOME;
+  private cutValid: boolean | null = null;
   private materialsFocus: "table" | "rack" = "table";
   private transitionStartedAtMs = 0;
   private isTransitioning = false;
@@ -185,8 +192,18 @@ export class ForgeBilletView {
     const rimLight = new DirectionalLight("#9fb9d0", 1.7);
     rimLight.position.set(280, 180, 220);
     this.scene.add(rimLight);
+    const workLight=new DirectionalLight("#bed7e8",1.9);
+    workLight.position.set(-550,280,560);this.scene.add(workLight);
     this.scene.add(this.camera);
     this.createStationModels();
+    this.sawView=new SawStationView(piece=>createBilletGeometry(piece,null));
+    this.scene.add(this.sawView.group);
+    this.materialsView=new MaterialsStationView(piece=>createBilletGeometry(piece,null));
+    this.scene.add(this.materialsView.group);
+    const floor=new Mesh(new BoxGeometry(1600,8,1250),new MeshStandardMaterial({color:"#626867",roughness:1}));
+    floor.position.set(-160,-34,100); this.scene.add(floor);
+    const wall=new Mesh(new BoxGeometry(850,360,16),new MeshStandardMaterial({color:"#626968",roughness:1}));
+    wall.position.set(175,145,-520);this.scene.add(wall);
 
     const anvil = this.createAnvilModel();
     this.anvilModel = anvil;
@@ -225,6 +242,11 @@ export class ForgeBilletView {
     BILLET_MATERIAL.emissiveIntensity = appearance.emissiveIntensity;
     this.billet.rotation.x = snapshot.orientationQuarterTurns * (Math.PI / 2);
     this.billet.position.x = snapshot.feedOffset * BILLET_AXIAL_SCALE;
+    this.billet.position.z = 0;
+    if(!snapshot.geometry.solids){
+      this.billetHitTarget.geometry.dispose();
+      this.billetHitTarget.geometry=new BoxGeometry(FORGE_RULES.workpieceLength,24,FORGE_RULES.initialSectionWidth);
+    }
     const halfHeight = snapshot.orientationQuarterTurns % 2 === 0
       ? FORGE_RULES.initialSectionThickness / 2
       : FORGE_RULES.initialSectionWidth / 2;
@@ -246,8 +268,20 @@ export class ForgeBilletView {
     const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
+    if(snapshot.geometry.solids){
+      nextGeometry.computeBoundingBox();
+      const bounds=nextGeometry.boundingBox!.clone().applyMatrix4(new Matrix4().makeRotationX(this.billet.rotation.x));
+      const center=bounds.getCenter(new Vector3()),size=bounds.getSize(new Vector3());
+      this.billetRig.position.set(...anchor);
+      this.billet.position.set(-center.x*BILLET_AXIAL_SCALE+snapshot.feedOffset*BILLET_AXIAL_SCALE,-bounds.min.y,-center.z);
+      this.billetHitTarget.rotation.set(0,0,0);
+      this.billetHitTarget.geometry.dispose();
+      this.billetHitTarget.geometry=new BoxGeometry(size.x*BILLET_AXIAL_SCALE,Math.max(size.y,12),size.z);
+      this.billetHitTarget.position.set(snapshot.feedOffset*BILLET_AXIAL_SCALE,size.y/2,0);
+    }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
+    if(activeStation==="cut") this.sawView.update(snapshot,this.cutPose,this.cutValid);
     this.render();
   }
 
@@ -269,8 +303,9 @@ export class ForgeBilletView {
 
   tick(nowMs: number): void {
     const materialMoved = this.materialsView?.tick(nowMs) ?? false;
+    const sawMoved=this.sawView.tick(nowMs);
     if (!this.isTransitioning) {
-      if (materialMoved) this.render();
+      if (materialMoved || sawMoved) this.render();
       return;
     }
     const amount = clamp((nowMs - this.transitionStartedAtMs) / 420, 0, 1);
@@ -312,6 +347,27 @@ export class ForgeBilletView {
     const hit = this.pickObject(viewportX, viewportY, [...this.stationMeshes.values()], false);
     return (hit?.object.userData.station as ForgeStation | undefined) ?? null;
   }
+
+  updateCut(pose: CutPose, valid: boolean | null, trayPage = 0): void {
+    this.cutPose=pose; this.cutValid=valid;
+    if(!this.snapshot || this.station!=="cut")return;
+    this.sawView.update(this.snapshot,pose,valid);
+    this.sawView.updateTray(this.snapshot.bench,trayPage);
+    this.render();
+  }
+
+  cutTablePoint(x: number,y: number): {x:number;z:number}|null {
+    this.pointer.set(x/this.viewport.width*2-1,1-y/this.viewport.height*2);
+    this.raycaster.setFromCamera(this.pointer,this.camera);
+    const point=this.raycaster.ray.intersectPlane(new Plane(new Vector3(0,1,0),-CUT_TABLE.surface),new Vector3());
+    return point?{x:point.x-SAW_ORIGIN.x,z:point.z-SAW_ORIGIN.z}:null;
+  }
+  pickCutPiece(x:number,y:number): string|null {
+    const hit=this.pickObject(x,y,[this.sawView.item,...this.sawView.tray.children],false);
+    return hit ? hit.object===this.sawView.item ? this.snapshot?.workpieceId ?? null : hit.object.userData.workpieceId as string : null;
+  }
+  animateCut(): void {this.sawView.beginCut(performance.now());}
+  isSawBusy(): boolean {return this.sawView.busy;}
 
   pickMaterial(viewportX: number, viewportY: number): ForgeMaterialPick | null {
     const meshes = this.station === "materials" ? this.materialsView?.candidates ?? [] : [...this.materialMeshes.values()];
@@ -423,6 +479,7 @@ export class ForgeBilletView {
   }
 
   dispose(): void {
+    this.sawView.dispose();
     this.materialsView?.dispose();
     this.billet.geometry.dispose();
     this.weldBenchBillets.forEach((billet) => billet.geometry.dispose());
@@ -509,6 +566,10 @@ export class ForgeBilletView {
       billet.geometry = createBilletGeometry(workpiece, null);
       billet.scale.set(displayScale, 1, 1);
       billet.position.set(-rawLength / 2, FORGE_RULES.initialSectionThickness / 2, 0);
+      if(workpiece.geometry.solids){
+        billet.geometry.computeBoundingBox();const bounds=billet.geometry.boundingBox!;
+        billet.position.set(-(bounds.min.x+bounds.max.x)/2*displayScale,-bounds.min.y,-(bounds.min.z+bounds.max.z)/2);
+      }
       target.geometry.dispose();
       target.geometry = new BoxGeometry(length, 24, FORGE_RULES.initialSectionWidth * 0.72);
       target.position.set(0, FORGE_RULES.initialSectionThickness / 2, 0);
@@ -545,9 +606,9 @@ export class ForgeBilletView {
 
   private createStationModels(): void {
     const definitions: readonly [Exclude<ForgeStation, "overview">, [number, number, number], [number, number, number], string][] = [
-      ["materials", [-420, 14, -132], [112, 28, 60], "#4f5961"],
+      ["materials", [-600, 65, -130], [510, 14, 280], "#4f5961"],
       ["furnace", [-260, 28, -20], [100, 56, 92], "#8b3f28"],
-      ["cut", [-340, 14, 150], [104, 28, 66], "#7a7f86"],
+      ["cut", [-420, 54, 360], [410, 16, 250], "#7a7f86"],
       ["weld", [330, 14, 150], [104, 28, 66], "#536c74"],
       ["quench-water", [250, 16, -4], [84, 32, 62], "#315d72"],
       ["quench-oil", [250, 16, -96], [84, 32, 62], "#5a4a2f"],
@@ -581,19 +642,6 @@ export class ForgeBilletView {
     );
     furnaceEmber.position.set(-260, 82, -20);
     this.addStationObject("furnace", furnaceEmber);
-
-    const cutBlade = new Mesh(
-      new BoxGeometry(6, 54, 44),
-      new MeshStandardMaterial({ color: "#c6d0d4", metalness: 0.82, roughness: 0.28 }),
-    );
-    cutBlade.position.set(-340, 80, 150);
-    this.addStationObject("cut", cutBlade);
-    const cutHandle = new Mesh(
-      new BoxGeometry(18, 64, 18),
-      new MeshStandardMaterial({ color: "#6b432e", metalness: 0.05, roughness: 0.85 }),
-    );
-    cutHandle.position.set(-340, 112, 150);
-    this.addStationObject("cut", cutHandle);
 
     const weldClamp = new Mesh(
       new TorusGeometry(26, 5, 8, 20),
@@ -651,15 +699,17 @@ export class ForgeBilletView {
   }
 
   private updateStationEmphasis(activeStation: ForgeStation): void {
-    this.billetRig.visible = activeStation !== "materials";
-    if (this.materialsView) this.materialsView.group.visible = activeStation === "materials";
-    this.anvilModel.visible = activeStation === "overview" || activeStation === "anvil";
+    this.billetRig.visible = activeStation !== "materials" && activeStation !== "cut";
+    if (this.materialsView) this.materialsView.group.visible = true;
+    this.sawView.group.visible=true;
+    this.sawView.setActive(activeStation==="cut");
+    this.anvilModel.visible = true;
     for (const [station, objects] of this.stationProps) {
-      const visible = activeStation === "overview" || (activeStation === station && station !== "materials");
+      const visible = station!=="cut" && station!=="materials";
       objects.forEach((object) => { object.visible = visible; });
     }
     for (const mesh of this.materialMeshes.values()) {
-      mesh.visible = activeStation === "overview";
+      mesh.visible = false;
     }
     for (const [station, mesh] of this.stationMeshes) {
       const material = mesh.material as MeshStandardMaterial;
@@ -686,6 +736,7 @@ export class ForgeBilletView {
   }
 
   private cameraFrame(station: ForgeStation) {
+    if(station==="cut")return sawCameraFrame(this.camera.aspect);
     if (station !== "materials") return CAMERA_FRAMES[station];
     return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
   }

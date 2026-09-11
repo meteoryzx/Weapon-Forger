@@ -121,11 +121,99 @@ describe("finite cut conservation", () => {
     expect((first.operations[0] as CutOperation).path!.start.axialPosition).toBe(5);
   });
 
-  it.each([0, 1])("rejects a too-short finite path (%s mm kerf), without changing input", kerfWidth => {
+  it("rejects a partial zero-width legacy fracture without changing input", () => {
     const initial = initialState(), before = serializeForgeState(initial);
     expect(() => applyForgeOperation(initial, { kind: "cut", path: { id: "short",
-      start: { axialPosition: 8, lateralOffset: -10 }, end: { axialPosition: 8, lateralOffset: 10 }, kerfWidth } })).toThrow(/cover/);
+      start: { axialPosition: 8, lateralOffset: -10 }, end: { axialPosition: 8, lateralOffset: 10 }, kerfWidth:0 } })).toThrow(/cover/);
     expect(serializeForgeState(initial)).toBe(before);
+  });
+
+  it("keeps a finite notch connected, then separates only after the remaining bridge is cut", () => {
+    const initial=initialState(), before=serializeForgeState(initial);
+    const first:CutOperation={kind:"cut",path:{id:"notch",start:{axialPosition:8,lateralOffset:-30},end:{axialPosition:8,lateralOffset:0},kerfWidth:1}};
+    const notch=applyForgeOperation(initial,first);
+    expect(notch.workpiece.id).toBe(initial.workpiece.id);
+    expect(notch.bench).toHaveLength(0);
+    expect(lostVolume(notch)).toBeCloseTo(24*8,7);
+    expect(shapeVolume(notch)).toBeCloseTo(totalVolume(initial)-24*8,7);
+    expect(solidSurfaceArea(notch.workpiece.geometry)).toBeCloseTo(2560+336,6);
+    expectClosedRenderedVolume(notch);
+    expect(serializeForgeState(initial)).toBe(before);
+    const completed=applyForgeOperation(notch,{kind:"cut",path:{...first.path!,id:"bridge",start:{axialPosition:8,lateralOffset:0},end:{axialPosition:8,lateralOffset:30}}});
+    expect(completed.bench).toHaveLength(1);
+    expect(sumVolume(completed)+lostVolume(completed)).toBeCloseTo(totalVolume(initial),7);
+    expect(lostVolume(completed)).toBeCloseTo(48*8,7);
+    expectClosedRenderedVolume(completed);
+    expectClosedRenderedVolume({...completed,workpiece:completed.bench[0]!});
+    expect(replayForgeState(initial,completed.operations)).toEqual(completed);
+    expect(deserializeForgeState(serializeForgeState(notch))).toEqual(notch);
+  });
+
+  it("retains an internal finite slot without filling it or inventing separate pieces", () => {
+    const initial=initialState();
+    const operation:CutOperation={kind:"cut",path:{id:"slot",start:{axialPosition:8,lateralOffset:-10},end:{axialPosition:8,lateralOffset:10},kerfWidth:1}};
+    const slot=applyForgeOperation(initial,operation);
+    expect(slot.bench).toHaveLength(0);
+    expect(lostVolume(slot)).toBeCloseTo(20*8,7);
+    expect(solidSurfaceArea(slot.workpiece.geometry)).toBeCloseTo(2560-40+336,6);
+    expectClosedRenderedVolume(slot);
+    expect(()=>applyForgeOperation(slot,operation)).toThrow(/does not intersect/);
+    const reverse=applyForgeOperation(initial,{kind:"cut",path:{...operation.path!,start:operation.path!.end,end:operation.path!.start}});
+    expect(totalVolume(reverse)).toBeCloseTo(totalVolume(slot),7);
+    expectClosedRenderedVolume(reverse);
+  });
+
+  it("creates every new component when a final cut severs several previously notched fingers", () => {
+    const initial=initialState();
+    let state=initial;
+    for(const x of [5,11]) state=applyForgeOperation(state,{kind:"cut",path:{id:`finger-${x}`,
+      start:{axialPosition:x,lateralOffset:-30},end:{axialPosition:x,lateralOffset:10},kerfWidth:1}});
+    expect(state.bench).toHaveLength(0);
+    state=applyForgeOperation(state,{kind:"cut",path:{id:"sever-bridge",
+      start:{axialPosition:-1,lateralOffset:10},end:{axialPosition:17,lateralOffset:10},kerfWidth:1}});
+    expect(state.bench).toHaveLength(3);
+    expect(new Set([state.workpiece,...state.bench].map(p=>p.id)).size).toBe(4);
+    expect(sumVolume(state)+lostVolume(state)).toBeCloseTo(totalVolume(initial),7);
+    expect(lostVolume(state)).toBeCloseTo(2*34*8+15*8,7);
+    for(const workpiece of [state.workpiece,...state.bench]) expectClosedRenderedVolume({...state,workpiece});
+    expect(deserializeForgeState(serializeForgeState(state))).toEqual(state);
+  });
+
+  it("does not cut or charge loss when the finite tool misses all remaining material", () => {
+    const initial=initialState(), before=serializeForgeState(initial);
+    expect(()=>applyForgeOperation(initial,{kind:"cut",path:{id:"miss",
+      start:{axialPosition:8,lateralOffset:30},end:{axialPosition:8,lateralOffset:40},kerfWidth:1}})).toThrow(/does not intersect/);
+    expect(serializeForgeState(initial)).toBe(before);
+  });
+
+  it.each([0,16])("can shave an end at %s mm without requiring material on both sides", x=>{
+    const initial=initialState(), state=applyForgeOperation(initial,verticalCut(x,1));
+    expect(state.workpiece.id).toBe(initial.workpiece.id);
+    expect(state.bench).toHaveLength(0);
+    expect(lostVolume(state)).toBeCloseTo(0.5*48*8,7);
+    expect(sumVolume(state)+lostVolume(state)).toBeCloseTo(totalVolume(initial),7);
+    expectClosedRenderedVolume(state);
+  });
+
+  it("preserves an oblique notch through heating, hammering, grinding, saving and another cut", () => {
+    const initial=initialState();
+    let state=applyForgeOperation(initial,{kind:"cut",path:{id:"oblique-notch",
+      start:{axialPosition:5.13,lateralOffset:-30.7},end:{axialPosition:8.37,lateralOffset:0.63},kerfWidth:0.73}});
+    expect(state.bench).toHaveLength(0);
+    expectClosedRenderedVolume(state);
+    const notch=state.workpiece.geometry.solids!;
+    state=applyForgeOperation(state,{kind:"heat",temperatureC:1050});
+    state=applyForgeOperation(state,{kind:"hammer",sectionIndex:5,energy:0.4});
+    expect(state.workpiece.geometry.solids).toEqual(notch);
+    state=applyForgeOperation(state,{kind:"grind",sectionIndex:5,amount:0.4});
+    const ground=state.workpiece.sections.reduce((sum,s)=>sum+s.removedVolume,0);
+    state=deserializeForgeState(serializeForgeState(state));
+    expectClosedRenderedVolume(state);
+    state=applyForgeOperation(state,verticalCut(11,0.7));
+    expect(sumVolume(state)+lostVolume(state)+ground).toBeCloseTo(totalVolume(initial),6);
+    expect(state.bench).toHaveLength(1);
+    for(const workpiece of [state.workpiece,...state.bench]) expectClosedRenderedVolume({...state,workpiece});
+    expect(Object.values(createForgeFacts(state)).filter(v=>typeof v==="number").every(Number.isFinite)).toBe(true);
   });
 
   it("keeps the cut through heat, hammer, grind, weld, and save/load", () => {

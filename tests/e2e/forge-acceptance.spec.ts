@@ -22,7 +22,7 @@ for (const [verb, station, title] of acceptanceSlices) {
     await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
 
     await page.keyboard.press("Escape");
-    await expect(page.locator("body")).toHaveAttribute("data-active-station", station);
+    await expect(page.locator("body")).toHaveAttribute("data-active-station", verb==="cut"?"overview":station);
   });
 }
 
@@ -85,4 +85,76 @@ test("temper acceptance starts from a quenched workpiece", async ({ page }) => {
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-setup-operations", "3");
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
   await expect(page.locator("body")).toHaveAttribute("data-quench-medium", "water");
+});
+
+test("saw preview is read-only, confirms finite cuts, and preserves independently selectable pieces", async ({page})=>{
+  test.setTimeout(90000);
+  const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
+  await page.goto("/?accept=cut");
+  const body=page.locator("body"),confirm=page.getByRole("button",{name:"确认切割"});
+  await expect(confirm).toBeEnabled({timeout:30000});
+  const original=Number(await body.getAttribute("data-total-material-volume"));
+  await page.locator("#game").focus();
+  await page.keyboard.press("e");await page.keyboard.press("ArrowRight");
+  await expect(body).toHaveAttribute("data-cut-angle","5");
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","0");
+  expect(Number(await body.getAttribute("data-total-material-volume"))).toBe(original);
+  await expect(confirm).toBeEnabled({timeout:30000});
+  await confirm.click();
+  await expect(body).toHaveAttribute("data-cutting","true");
+  await expect(confirm).toBeDisabled();
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","1",{timeout:15000});
+  await expect(body).toHaveAttribute("data-bench-count","1");
+  const firstId=await body.getAttribute("data-workpiece-id");
+  const retained=Number(await body.getAttribute("data-total-material-volume"));
+  const loss=Number(await body.getAttribute("data-cut-loss-volume"));
+  expect(retained+loss).toBeCloseTo(original,5);expect(loss).toBeGreaterThan(0);expect(loss).toBeLessThan(original*0.01);
+  await page.locator("#cut-piece").selectOption({index:1});
+  await expect(body).not.toHaveAttribute("data-workpiece-id",firstId!);
+  await expect(confirm).toBeEnabled({timeout:30000});
+  await confirm.click();
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","2",{timeout:15000});
+  await expect(body).toHaveAttribute("data-bench-count","2");
+  expect(Number(await body.getAttribute("data-total-material-volume"))+Number(await body.getAttribute("data-cut-loss-volume"))).toBeCloseTo(original,5);
+  const current=await body.getAttribute("data-workpiece-id");
+  await page.getByRole("button",{name:"工坊总览"}).click();
+  await expect(body).toHaveAttribute("data-active-station","overview");
+  await expect(body).toHaveAttribute("data-workpiece-id",current!);
+  expect(errors).toEqual([]);
+});
+
+test("overhanging stock keeps a partial notch until a later cut severs its bridge",async({page})=>{
+  test.setTimeout(90000);
+  const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
+  await page.goto("/?accept=cut");
+  const body=page.locator("body"), confirm=page.getByRole("button",{name:"确认切割"});
+  await expect(confirm).toBeEnabled({timeout:30000});
+  const original=Number(await body.getAttribute("data-total-material-volume"));
+  const id=await body.getAttribute("data-workpiece-id");
+  await page.locator("#game").focus();
+  // The stock extends 25 mm beyond the right edge. At the table center only
+  // half its width is under the finite tool travel; an uncut bridge remains.
+  for(let i=0;i<24;i++)await page.keyboard.press("ArrowRight");
+  for(let i=0;i<5;i++)await page.keyboard.press("ArrowDown");
+  await expect(confirm).toBeEnabled({timeout:30000});
+  await expect(page.locator("#cut-status")).toContainText("仍为一块");
+  const pose=await body.getAttribute("data-cut-pose");
+  expect(JSON.parse(pose!).x).toBe(96);
+  expect(Number(await body.getAttribute("data-total-material-volume"))).toBe(original);
+  await confirm.click();
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","1",{timeout:15000});
+  await expect(body).toHaveAttribute("data-bench-count","0");
+  await expect(body).toHaveAttribute("data-workpiece-id",id!);
+  await expect(body).toHaveAttribute("data-cut-pose",pose!);
+  expect(Number(await body.getAttribute("data-cut-loss-volume"))).toBeCloseTo(24*8,5);
+  await page.locator("#game").focus();
+  for(let i=0;i<5;i++)await page.keyboard.press("ArrowUp");
+  await expect(confirm).toBeEnabled({timeout:30000});
+  await expect(page.locator("#cut-status")).toContainText("将分成 2 块");
+  await confirm.click();
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","2",{timeout:15000});
+  await expect(body).toHaveAttribute("data-bench-count","1");
+  expect(Number(await body.getAttribute("data-cut-loss-volume"))).toBeCloseTo(48*8,5);
+  expect(Number(await body.getAttribute("data-total-material-volume"))+Number(await body.getAttribute("data-cut-loss-volume"))).toBeCloseTo(original,5);
+  expect(errors).toEqual([]);
 });

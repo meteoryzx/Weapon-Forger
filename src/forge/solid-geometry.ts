@@ -1,5 +1,6 @@
 import type { SolidVertex, WorkpieceGeometry, WorkpieceSolid, WorkpieceState } from "./forge-types.ts";
 import type { FiniteThroughCut } from "./workpiece-geometry.ts";
+import { faceNormal, matchPartialFaces, type SolidFace } from "./solid-topology.ts";
 
 export interface SolidPoint { readonly x: number; readonly y: number; readonly z: number }
 const EPS = 1e-9;
@@ -169,6 +170,38 @@ export function partitionSolids(piece: WorkpieceState, path: FiniteThroughCut) {
   const signed = (p: SolidPoint) => (-dz * (p.x-path.start.axialPosition) + dx * (p.z-path.start.lateralOffset)) / pathLength;
   const along = (p: SolidPoint) => (dx * (p.x-path.start.axialPosition) + dz * (p.z-path.start.lateralOffset)) / pathLength;
   const source = workpieceSolids(piece);
+  if (path.kerfWidth > 0) {
+    // Subtract the actual finite rectangular sweep. Each outside remainder is
+    // retained, including bridges beyond the two ends of the tool's travel.
+    const half = path.kerfWidth / 2;
+    const planes = [(p: SolidPoint) => signed(p)-half, (p: SolidPoint) => -signed(p)-half,
+      (p: SolidPoint) => -along(p), (p: SolidPoint) => along(p)-pathLength];
+    const remaining: WorkpieceSolid[] = [], kerf: WorkpieceSolid[] = [];
+    for (const solid of source) {
+      const points = solid.vertices.map(v => solidPoint(v, piece.geometry));
+      if (planes.some(distance => points.every(p => distance(p) >= -EPS))) {
+        remaining.push(solid); continue;
+      }
+      let inside: WorkpieceSolid | null = solid;
+      for (const [index, distance] of planes.entries()) {
+        const outside = clipSolid(inside, piece.geometry, p => -distance(p), `${path.id}:outside:${index}`);
+        if (outside) remaining.push(outside);
+        inside = clipSolid(inside, piece.geometry, distance, `${path.id}:inside:${index}`);
+        if (!inside) break;
+      }
+      if (inside) kerf.push(inside);
+    }
+    if (!kerf.length) throw new Error("Finite cut does not intersect remaining material.");
+    if (!remaining.length) throw new Error("Finite cut would remove all remaining material.");
+    const components = solidComponents(remaining, piece.geometry);
+    // Stable side ordering preserves the existing through-cut interaction.
+    components.sort((a,b) => signed(mean(a[0]!.vertices.map(v=>solidPoint(v,piece.geometry))))
+      - signed(mean(b[0]!.vertices.map(v=>solidPoint(v,piece.geometry)))));
+    return { source, components, kerf };
+  }
+  // Compatibility for legacy ideal (zero-width) through cuts. A partial crack
+  // with no removed volume needs a separate fracture representation; the saw
+  // always uses a positive physical kerf and follows the finite sweep above.
   const negative: WorkpieceSolid[] = [], positive: WorkpieceSolid[] = [], kerf: WorkpieceSolid[] = [];
   const half = path.kerfWidth / 2;
   let crossed = false;
@@ -212,16 +245,12 @@ export function partitionSolids(piece: WorkpieceState, path: FiniteThroughCut) {
       throw new Error("Finite cut path must cover the boundary between both pieces.");
     }
   }
-  if (!connectedSolids(negative, piece.geometry) || !connectedSolids(positive, piece.geometry)) {
-    throw new Error("Cut would create disconnected fragments; this operation requires two connected pieces.");
-  }
-  return {source, negative, positive, kerf};
+  return {source, components: [...solidComponents(negative, piece.geometry), ...solidComponents(positive, piece.geometry)], kerf};
 }
 
-// Shared faces establish material connectivity; touching at one point or edge
-// is not enough to treat detached fragments as a single workpiece. A seam with
-// unmatched face tessellation is conservatively rejected, never silently filled.
-function connectedSolids(solids: readonly WorkpieceSolid[], geometry: WorkpieceGeometry): boolean {
+// Positive-area shared faces establish connectivity. A point or edge contact
+// does not join pieces; partial shared faces still preserve an uncut bridge.
+export function solidComponents(solids: readonly WorkpieceSolid[], geometry: WorkpieceGeometry): WorkpieceSolid[][] {
   const parents = solids.map((_, index) => index);
   const root = (index: number): number => {
     while (parents[index] !== index) {
@@ -230,16 +259,35 @@ function connectedSolids(solids: readonly WorkpieceSolid[], geometry: WorkpieceG
     }
     return index;
   };
-  const faces = new Map<string, number>();
+  scanSolidFaces(solids, geometry, (a,b) => { parents[root(a)] = root(b); }, false);
+  const groups = new Map<number, WorkpieceSolid[]>();
+  solids.forEach((solid, index) => {
+    const key = root(index), group = groups.get(key);
+    if (group) group.push(solid); else groups.set(key, [solid]);
+  });
+  return [...groups.values()];
+}
+
+function scanSolidFaces(solids: readonly WorkpieceSolid[], geometry: WorkpieceGeometry,
+  onContact: (a: number, b: number) => void, surface: boolean): SolidFace[] {
+  const faces = new Map<string, SolidFace & {center: SolidPoint}>();
   solids.forEach((solid, index) => {
     const points = solid.vertices.map(vertex => solidPoint(vertex, geometry));
+    const center = mean(points);
     for (const face of solid.faces) {
-      const key = face.map(vertex => pointKey(points[vertex]!)).sort().join(";");
+      const polygon = face.map(vertex => points[vertex]!);
+      const key = polygon.map(pointKey).sort().join(";");
       const other = faces.get(key);
-      if (other === undefined) faces.set(key, index); else parents[root(index)] = root(other);
+      if (other === undefined) faces.set(key, {owner:index,blockId:solid.blockId,points:polygon,center});
+      else { onContact(index, other.owner); faces.delete(key); }
     }
   });
-  return solids.every((_, index) => root(index) === root(0));
+  const unmatched = [...faces.values()].map(face => {
+    const points = [...face.points];
+    if (dot(faceNormal(points), sub(mean(points), face.center)) < 0) points.reverse();
+    return { owner:face.owner, blockId:face.blockId, points };
+  });
+  return matchPartialFaces(unmatched, onContact, surface);
 }
 
 function pointKey(point: SolidPoint): string {
@@ -257,19 +305,7 @@ export function solidBounds(solids: readonly WorkpieceSolid[], geometry: Workpie
 }
 
 export function solidSurface(geometry: WorkpieceGeometry): readonly {blockId: string; points: readonly SolidPoint[]}[] {
-  const faces = new Map<string, {blockId:string; points:SolidPoint[]; count:number}>();
-  for(const solid of geometry.solids ?? []) {
-    const positions=solid.vertices.map(v=>solidPoint(v,geometry));
-    const center=mean(positions);
-    for(const face of solid.faces) {
-      const points=face.map(i=>positions[i]!);
-      if(dot(cross(sub(points[1]!,points[0]!),sub(points[2]!,points[0]!)),sub(mean(points),center))<0) points.reverse();
-      const faceKey=points.map(pointKey).sort().join(";");
-      const existing=faces.get(faceKey);
-      if(existing) existing.count++; else faces.set(faceKey,{blockId:solid.blockId,points,count:1});
-    }
-  }
-  return [...faces.values()].filter(f=>f.count===1);
+  return scanSolidFaces(geometry.solids ?? [], geometry, () => {}, true);
 }
 
 export function solidSurfaceArea(geometry: WorkpieceGeometry): number {

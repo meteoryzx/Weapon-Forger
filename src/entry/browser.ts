@@ -5,10 +5,13 @@ import {
   createHammerInfluencePreview,
   type ForgeSnapshot,
   type ForgeState,
+  type CutOperation,
+  totalVolume,
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
 import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
 import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
+import { CUT_HOME, cutBounds, cutOperationFor, tablePoint, validCutPose, type CutPose } from "../app/cut-placement.ts";
 import {
   ForgeBilletView,
   type ForgeMaterialPick,
@@ -91,6 +94,136 @@ const acceptanceSetupOperationCount = acceptanceStation ? application.getState()
 let view: ForgeBilletView | null = null;
 let latestSnapshot: ForgeSnapshot = application.getSnapshot();
 let activeStation: ForgeStation = "overview";
+const cutControls=document.querySelector<HTMLElement>("#cut-controls")!;
+const cutStatus=document.querySelector<HTMLElement>("#cut-status")!;
+const cutConfirm=document.querySelector<HTMLButtonElement>("#cut-confirm")!;
+const cutAngle=document.querySelector<HTMLInputElement>("#cut-angle")!;
+const cutAngleLabel=document.querySelector<HTMLOutputElement>("#cut-angle-label")!;
+const cutPieces=document.querySelector<HTMLSelectElement>("#cut-piece")!;
+let cutPose:CutPose={...CUT_HOME};
+let cutReady=false, cutting=false, cutPage=0, cutGeneration=0;
+let cutValidity:boolean|null=null;
+let cutWorker:Worker|null=null, cutTimer:ReturnType<typeof setTimeout>|null=null;
+let cutOperation:CutOperation|null=null;
+let cutDrag:{point:{x:number;z:number};pose:CutPose;rotate:boolean}|null=null;
+
+function cancelCutPreview():void {
+  cutGeneration++;cutReady=false;cutValidity=null;cutOperation=null;
+  application.cancelPreparedCut();cutWorker?.terminate();cutWorker=null;
+  if(cutTimer!==null)clearTimeout(cutTimer);
+  cutConfirm.disabled=true;
+}
+
+function refreshCutInterface():void {
+  cutControls.hidden=activeStation!=="cut";
+  if(cutControls.hidden)return;
+  cutAngle.value=String(Math.round(cutPose.angle*180/Math.PI));
+  cutAngleLabel.value=`${cutAngle.value}°`;
+  cutAngle.disabled=cutting;cutPieces.disabled=cutting;
+  cutConfirm.disabled=!cutReady||cutting||view?.isCameraTransitioning()===true;
+  const all=[latestSnapshot,...latestSnapshot.bench];
+  cutPieces.replaceChildren(...all.map((piece,index)=>{
+    const option=document.createElement("option");option.value=piece.workpieceId;
+    const volume=piece.sections.reduce((sum,s)=>sum+s.blocks.reduce((v,b)=>v+b.volume,0),0);
+    option.textContent=`${index===0?"当前":"暂存 "+index} · ${materialLabels[piece.materialId]??piece.materialId} · ${(volume/1000).toFixed(1)} cm³`;
+    return option;
+  }));
+  cutPieces.value=latestSnapshot.workpieceId;
+  const pages=Math.max(1,latestSnapshot.bench.length);cutPage=Math.min(cutPage,pages-1);
+  document.querySelector("#cut-page")!.textContent=`暂存区 ${cutPage+1} / ${pages}`;
+  (document.querySelector("#cut-prev") as HTMLButtonElement).disabled=cutPage===0||cutting;
+  (document.querySelector("#cut-next") as HTMLButtonElement).disabled=cutPage===pages-1||cutting;
+  document.body.dataset.cutReady=String(cutReady);
+  document.body.dataset.cutting=String(cutting);
+  document.body.dataset.cutAngle=cutAngle.value;
+  document.body.dataset.cutPose=JSON.stringify(cutPose);
+  view?.updateCut(cutPose,cutValidity,cutPage);
+}
+
+function scheduleCutPreview():void {
+  cancelCutPreview();
+  if(activeStation!=="cut"||cutting)return;
+  const generation=cutGeneration;
+  cutStatus.textContent="正在检查切割范围…";
+  refreshCutInterface();
+  cutTimer=setTimeout(async()=>{
+    const operation=cutOperationFor(latestSnapshot,cutPose,application.getState().operations.length);
+    cutOperation=operation;
+    const worker=new Worker(new URL("./cut-preview.worker.ts",import.meta.url),{type:"module"});cutWorker=worker;
+    try {
+      let result:ForgeState|null=null;
+      const ready=await application.prepareCut(operation,(state,op)=>new Promise<ForgeState>((resolve,reject)=>{
+        worker.onmessage=(event:MessageEvent<{result?:ForgeState;error?:string}>)=>{
+          if(event.data.error)reject(new Error(event.data.error));
+          else if(event.data.result){result=event.data.result;resolve(event.data.result);}
+        };
+        worker.onerror=()=>reject(new Error("preview-worker"));
+        worker.postMessage({id:generation,state,operation:op});
+      }));
+      if(generation!==cutGeneration||activeStation!=="cut")return;
+      cutReady=ready;
+      cutValidity=ready;
+      const evaluated=result as ForgeState|null;
+      const loss=evaluated?.cutLosses?.at(-1)?.volume??0;
+      const extra=(evaluated?.bench.length??latestSnapshot.bench.length)-latestSnapshot.bench.length;
+      cutStatus.textContent=ready?`可以切割 · ${extra>0?`将分成 ${extra+1} 块`:"形成切口，仍为一块"} · 预计损耗 ${(loss/1000).toFixed(2)} cm³` : "工件已改变，请重新摆放。";
+      refreshCutInterface();
+    }catch(error){
+      if(generation!==cutGeneration)return;
+      cutValidity=false;
+      const message=String(error);
+      cutStatus.textContent=message.includes("does not intersect")?"刀路没有接触剩余金属，请移动或旋转后重试。"
+        :message.includes("remove all")?"该刀路会磨掉整块剩余金属，请调整摆放。":"切割检查未完成，请重新摆放后再试。";
+      refreshCutInterface();view?.updateCut(cutPose,false,cutPage);
+    }finally{worker.terminate();if(cutWorker===worker)cutWorker=null;}
+  },180);
+}
+
+function placeCut(pose:CutPose):void {
+  if(cutting)return;
+  pose={...pose,angle:Math.atan2(Math.sin(pose.angle),Math.cos(pose.angle))};
+  if(!validCutPose(pose))return;
+  cutPose=pose;scheduleCutPreview();
+}
+
+function chooseCutPiece(id:string):void {
+  if(cutting||id===latestSnapshot.workpieceId)return;
+  const index=application.getState().bench.findIndex(piece=>piece.id===id);
+  if(index<0)return;
+  cancelCutPreview();application.applyIntent({kind:"select-workpiece",benchIndex:index});
+  cutPose={...CUT_HOME};updateView();scheduleCutPreview();
+}
+
+cutAngle.addEventListener("input",()=>placeCut({...cutPose,angle:Number(cutAngle.value)*Math.PI/180}));
+document.querySelector("#cut-center")!.addEventListener("click",()=>placeCut({...CUT_HOME}));
+cutPieces.addEventListener("change",()=>chooseCutPiece(cutPieces.value));
+document.querySelector("#cut-prev")!.addEventListener("click",()=>{cutPage--;refreshCutInterface();});
+document.querySelector("#cut-next")!.addEventListener("click",()=>{cutPage++;refreshCutInterface();});
+document.querySelector("#cut-overview")!.addEventListener("click",()=>{if(!cutting)setStation("overview");});
+cutConfirm.addEventListener("click",()=>{
+  if(!cutReady||!cutOperation||cutting||view?.isCameraTransitioning())return;
+  cutting=true;cutReady=false;const operation=cutOperation;
+  cutStatus.textContent="切割中…";refreshCutInterface();view?.animateCut();
+  setTimeout(()=>{
+    try{
+      const previous=latestSnapshot;
+      application.commitPreparedCut(operation);
+      const next=application.getSnapshot(), extra=next.bench.length-previous.bench.length;
+      if(extra===0){
+        const b=cutBounds(next);
+        const center=tablePoint(previous,cutPose,(b.minX+b.maxX)/2,(b.minZ+b.maxZ)/2);
+        cutPose={...cutPose,...center};
+        cutStatus.textContent="切口已形成，材料仍连接。可以继续移动、旋转并切断剩余连接。";
+      }else{
+        cutPose={...CUT_HOME};
+        cutStatus.textContent=`切割完成，分成 ${extra+1} 块。新工件已放入后沿暂存区，可选择后继续切割。`;
+      }
+    }
+    catch{cutStatus.textContent="工件已改变，本次未执行切割，请重新摆放。";}
+    cutting=false;cutOperation=null;cutValidity=null;updateView();
+    // Keep the result visible; preparing the next cut requires a deliberate reposition.
+  },1150);
+});
 let pressStartedAtMs: number | null = null;
 let pressTarget: HammerPickTarget | null = null;
 let heatingStartedAtMs: number | null = null;
@@ -98,7 +231,7 @@ let heatingFrame: number | null = null;
 let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
 let gesture: {
-  readonly kind: "cut" | "grind" | "weld" | "quench";
+  readonly kind: "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
   readonly weldBenchIndex: number | null;
   readonly startedAtMs: number;
@@ -111,7 +244,7 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   materials: { title: "选料桌 · 选料", hint: "" },
   furnace: { title: "火炉 · 加热", hint: "按住炉口中的钢坯，观察热色和温度；松开取出。" },
   anvil: { title: "铁砧 · 锤击", hint: "按住钢坯落锤；A/D 转面，W/S 送料。" },
-  cut: { title: "切割台 · 切割", hint: "从钢坯表面拖过切口，松开完成一次切割。" },
+  cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
   "quench-water": { title: "水槽 · 淬火", hint: "把钢坯拖进水面，松开完成水淬。" },
   "quench-oil": { title: "油槽 · 淬火", hint: "把钢坯拖进油面，松开完成油淬。" },
@@ -178,8 +311,8 @@ function acceptanceState(state: ForgeState): readonly string[] {
       ];
     case "cut":
       return [
-        `当前截面 ${latestSnapshot.sections.length} · 当前节点 ${latestSnapshot.geometry.nodes.length}`,
-        `工作台 ${latestSnapshot.benchCount} 块 · 工件 ${latestSnapshot.workpieceId}`,
+        `当前材料 ${(totalVolume(state)/1000).toFixed(1)} cm³ · 暂存 ${latestSnapshot.benchCount} 块`,
+        `累计锯缝损耗 ${((state.cutLosses??[]).reduce((sum,loss)=>sum+loss.volume,0)/1000).toFixed(2)} cm³`,
         shared,
       ];
     case "weld":
@@ -278,6 +411,8 @@ function renderState(): void {
   document.body.dataset.jointCount = String(state.workpiece.joints.length);
   document.body.dataset.removedVolume = latestSnapshot.removedVolume.toFixed(6);
   document.body.dataset.carbon = latestSnapshot.carbon.toFixed(6);
+  document.body.dataset.totalMaterialVolume=String([state.workpiece,...state.bench].reduce((sum,workpiece)=>sum+totalVolume({...state,workpiece}),0));
+  document.body.dataset.cutLossVolume=String((state.cutLosses??[]).reduce((sum,loss)=>sum+loss.volume,0));
   document.body.dataset.quenchMedium = latestSnapshot.quenchMedium ?? "none";
   document.body.dataset.cameraState = view?.isCameraTransitioning() ? "moving" : "settled";
   if (materialSession && materialSelection.getAcquiredCount() === 0) {
@@ -292,11 +427,13 @@ function updateView(hammerPreview = null): void {
   latestSnapshot = application.getSnapshot();
   view?.update(latestSnapshot, hammerPreview, activeStation, temperPreviewC);
   updateMaterialsInterface();
+  refreshCutInterface();
   renderState();
 }
 
 function setStation(station: ForgeStation): void {
-  if (acceptanceStation && !materialSession && station !== acceptanceStation) return;
+  if(cutting)return;
+  if (acceptanceStation && acceptanceVerb!=="cut" && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
   if (activeStation === "materials" && station !== "materials"
     && materialSelection.getPieces().length > 0
@@ -313,8 +450,12 @@ function setStation(station: ForgeStation): void {
   temperPreviewC = null;
   materialSelection.cancel();
   activeStation = station;
+  cancelCutPreview();cutDrag=null;
+  document.body.classList.toggle("cut-view",station==="cut");
   view?.setStation(station);
+  view?.resize(viewport());
   updateView();
+  if(station==="cut"){cutPose={...CUT_HOME};scheduleCutPreview();}
 }
 
 function materialToStation(materialId: ForgeMaterialPick): void {
@@ -443,11 +584,7 @@ function finishGesture(endX: number, endY: number): void {
     return;
   }
 
-  if (gesture.kind === "cut") {
-    if (gesture.target.sectionIndex > 0 && gesture.target.sectionIndex < latestSnapshot.sections.length) {
-      application.applyIntent({ kind: "cut", sectionIndex: gesture.target.sectionIndex });
-    }
-  } else if (gesture.kind === "grind") {
+  if (gesture.kind === "grind") {
     application.applyIntent({
       kind: "grind",
       sectionIndex: gesture.target.sectionIndex,
@@ -484,10 +621,12 @@ function finishTemper(): void {
   updateView();
 }
 
+document.body.classList.toggle("cut-view",acceptanceStation==="cut");
 view = new ForgeBilletView(canvas, viewport());
 view.setStation(acceptanceStation ?? "overview");
 activeStation = acceptanceStation ?? "overview";
 updateView();
+if(activeStation==="cut")scheduleCutPreview();
 
 canvas.addEventListener("pointerdown", (event) => {
   if (!view) return;
@@ -496,6 +635,14 @@ canvas.addEventListener("pointerdown", (event) => {
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
+
+  if(activeStation==="cut"){
+    if(cutting)return;
+    const id=view.pickCutPiece(x,y);
+    if(id && id!==latestSnapshot.workpieceId){chooseCutPiece(id);return;}
+    if(id){const point=view.cutTablePoint(x,y);if(point)cutDrag={point,pose:{...cutPose},rotate:event.shiftKey};}
+    return;
+  }
 
   if (activeStation === "materials") {
     const material = view.pickMaterial(x, y);
@@ -543,7 +690,7 @@ canvas.addEventListener("pointerdown", (event) => {
     }), activeStation, temperPreviewC);
     return;
   }
-  if ((activeStation === "cut" || activeStation === "grind") && target) {
+  if (activeStation === "grind" && target) {
     gesture = {
       kind: activeStation,
       target,
@@ -587,12 +734,24 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if(cutDrag && !cutting){
+    const bounds=canvas.getBoundingClientRect(),point=view?.cutTablePoint(event.clientX-bounds.left,event.clientY-bounds.top);
+    if(point){
+      const start=cutDrag;
+      if(start.rotate){
+        const angle=start.pose.angle-Math.atan2(point.z-start.pose.z,point.x-start.pose.x)+Math.atan2(start.point.z-start.pose.z,start.point.x-start.pose.x);
+        placeCut({...start.pose,angle:Math.atan2(Math.sin(angle),Math.cos(angle))});
+      }else placeCut({...start.pose,x:start.pose.x+point.x-start.point.x,z:start.pose.z+point.z-start.point.z});
+    }
+    return;
+  }
   if (temperDrag === null) return;
   const bounds = canvas.getBoundingClientRect();
   updateTemperPreview(event.clientY - bounds.top);
 });
 
 canvas.addEventListener("pointerup", (event) => {
+  cutDrag=null;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
@@ -604,6 +763,7 @@ canvas.addEventListener("pointerup", (event) => {
 });
 
 canvas.addEventListener("pointercancel", () => {
+  cutDrag=null;
   if (heatingStartedAtMs !== null) stopHeating();
   pressStartedAtMs = null;
   pressTarget = null;
@@ -615,6 +775,14 @@ canvas.addEventListener("pointercancel", () => {
 
 window.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement) return;
+  if(activeStation==="cut" && ["q","e","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Enter"].includes(event.key.length===1?event.key.toLowerCase():event.key)){
+    event.preventDefault();if(cutting)return;
+    const key=event.key.toLowerCase();
+    if(key==="enter")cutConfirm.click();
+    else if(key==="q"||key==="e")placeCut({...cutPose,angle:cutPose.angle+(key==="q"?-1:1)*Math.PI/36});
+    else placeCut({...cutPose,x:cutPose.x+(key==="arrowleft"?-4:key==="arrowright"?4:0),z:cutPose.z+(key==="arrowup"?-4:key==="arrowdown"?4:0)});
+    return;
+  }
   if (event.key === "Escape" && activeStation === "materials") {
     if (materialSelection.getCandidate()) {
       materialSelection.cancel();
@@ -628,7 +796,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && activeStation !== "overview") {
-    if (acceptanceStation) return;
+    if (acceptanceStation && acceptanceVerb!=="cut") return;
     event.preventDefault();
     setStation("overview");
     return;
@@ -650,12 +818,14 @@ window.addEventListener("keydown", (event) => {
 const renderFrame = (nowMs: number): void => {
   view?.tick(nowMs);
   if (view) document.body.dataset.cameraState = view.isCameraTransitioning() ? "moving" : "settled";
+  if(activeStation==="cut" && cutReady && !cutting)cutConfirm.disabled=view?.isCameraTransitioning()??true;
   requestAnimationFrame(renderFrame);
 };
 requestAnimationFrame(renderFrame);
 
 window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {
+  cutWorker?.terminate();
   if (heatingStartedAtMs !== null) stopHeating();
   view?.dispose();
 });
