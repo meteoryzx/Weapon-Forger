@@ -1,5 +1,6 @@
 import { FORGE_STATE_VERSION } from "./forge-rules.ts";
 import { assertWorkpieceOutline, createStructuredWorkpieceGeometry } from "./workpiece-geometry.ts";
+import { solidEnvelope, solidVolume } from "./solid-geometry.ts";
 import type {
   ForgeState,
   HeatTreatmentEvent,
@@ -7,6 +8,7 @@ import type {
   WorkpieceNode,
   WorkpieceOutlinePoint,
   WorkpieceState,
+  WorkpieceGeometry,
 } from "./forge-types.ts";
 
 const PREVIOUS_FORGE_STATE_VERSION = "forge-state-2";
@@ -46,6 +48,21 @@ export function assertForgeState(value: unknown): asserts value is ForgeState {
   arrayValue(state.operations, "Forge operations").forEach((item, index) => {
     const operation = record(item, `Forge operation ${index}`);
     stringValue(operation.kind, `Forge operation ${index} kind`);
+  });
+  if (state.cutLosses !== undefined) arrayValue(state.cutLosses, "Cut losses").forEach(value => {
+    const loss = record(value, "Cut loss");
+    nonNegativeInteger(loss.operationIndex, "Cut loss operation index");
+    stringValue(loss.workpieceId, "Cut loss source");
+    nonNegativeNumber(loss.volume, "Cut loss volume");
+    nonNegativeNumber(loss.mechanicalWorkJ, "Cut loss mechanical work");
+    const volume = arrayValue(loss.materials, "Cut loss materials").reduce<number>((sum, value) => {
+      const material = record(value, "Lost material");
+      stringValue(material.materialId, "Lost material id");
+      stringValue(material.materialRegionId, "Lost material region");
+      nonNegativeNumber(material.volume, "Lost material volume");
+      return sum + material.volume;
+    }, 0);
+    if (Math.abs(volume - loss.volume) > 1e-7) throw new Error("Cut loss material volumes do not match.");
   });
 }
 
@@ -96,6 +113,7 @@ function workpiece(
   assertWorkpieceOutline(outlinePoints);
 
   const sections = arrayValue(item.sections, `${label} sections`);
+  const localBlocks = new Set<string>();
   sections.forEach((section, sectionIndex) => {
     const slice = record(section, `${label} section ${sectionIndex}`);
     nonNegativeNumber(slice.removedVolume, `${label} section ${sectionIndex} removed volume`);
@@ -103,6 +121,7 @@ function workpiece(
       const cell = record(block, `${label} block ${sectionIndex}:${blockIndex}`);
       stringValue(cell.id, `${label} block id`);
       uniqueId(identities.blocks, cell.id, "Geometry block");
+      localBlocks.add(cell.id);
       stringValue(cell.materialId, `${label} block material`);
       stringValue(cell.materialRegionId, `${label} block material region`);
       positiveNumber(cell.volume, `${label} block volume`);
@@ -112,6 +131,51 @@ function workpiece(
     * ((grid.widthBlocks as number) + 1)
     * ((grid.heightBlocks as number) + 1);
   if (nodes.length !== expectedNodeCount) throw new Error(`${label} geometry node count does not match its grid.`);
+  if (geometry.solids !== undefined) {
+    const solidIds = new Set<string>(), occupied = new Set<string>();
+    const solids = arrayValue(geometry.solids, `${label} solids`);
+    if (!solids.length) throw new Error(`${label} must contain occupied solids.`);
+    solids.forEach(value => {
+      const solid = record(value, "Solid");
+      stringValue(solid.id, "Solid id"); uniqueId(solidIds, solid.id, "Solid");
+      stringValue(solid.blockId, "Solid block id");
+      if (!localBlocks.has(solid.blockId)) throw new Error("Solid references a missing material block.");
+      occupied.add(solid.blockId);
+      const vertices = arrayValue(solid.vertices, "Solid vertices");
+      if (vertices.length < 4) throw new Error("Solid needs at least four vertices.");
+      vertices.forEach(value => {
+        const vertex = record(value, "Solid vertex");
+        const indices = new Set<number>();
+        const sum = arrayValue(vertex.weights, "Solid vertex weights").reduce<number>((total, value) => {
+          const weight = record(value, "Solid weight");
+          nonNegativeInteger(weight.nodeIndex, "Solid node index");
+          if (weight.nodeIndex >= nodes.length || indices.has(weight.nodeIndex)) throw new Error("Invalid solid node reference.");
+          indices.add(weight.nodeIndex);
+          nonNegativeNumber(weight.weight, "Solid weight");
+          return total + weight.weight;
+        }, 0);
+        if (Math.abs(sum - 1) > 1e-8) throw new Error("Solid vertex weights must sum to one.");
+      });
+      const edges = new Map<string, number>();
+      arrayValue(solid.faces, "Solid faces").forEach(value => {
+        const face = arrayValue(value, "Solid face");
+        if (face.length < 3 || new Set(face).size !== face.length) throw new Error("Invalid solid face.");
+        face.forEach((index, position) => {
+          nonNegativeInteger(index, "Solid face index");
+          if (index >= vertices.length) throw new Error("Invalid solid face index.");
+          const next = face[(position + 1) % face.length];
+          const key = [index, next].sort().join(":");
+          edges.set(key, (edges.get(key) ?? 0) + 1);
+        });
+      });
+      if ([...edges.values()].some(count => count !== 2)) throw new Error("Solid must have a closed surface.");
+    });
+    if (occupied.size !== localBlocks.size) throw new Error("Material block has no occupied solid.");
+    const typed = geometry as unknown as WorkpieceGeometry;
+    for (const solid of typed.solids!) positiveNumber(solidVolume(solid, typed), "Solid volume");
+    const expected = solidEnvelope(typed);
+    if (JSON.stringify(expected) !== JSON.stringify(typed.outline)) throw new Error("Solid envelope does not match occupied geometry.");
+  }
   arrayValue(item.joints, `${label} joints`).forEach((joint, index) => {
     const connection = record(joint, `${label} joint ${index}`);
     nonNegativeNumber(connection.contactArea, `${label} joint contact area`);
@@ -124,6 +188,13 @@ function workpiece(
 
 function migrateForgeState(value: unknown): unknown {
   const state = record(value, "Forge state");
+  if (state.stateVersion === "forge-state-3") {
+    const operations = arrayValue(state.operations, "Forge operations");
+    if (operations.some(value => { const op = record(value, "Forge operation"); return op.kind === "cut" && op.path !== undefined; })) {
+      throw new Error("Legacy finite-cut save has unreliable material volumes; replay its operations from the original uncut state.");
+    }
+    return { ...state, stateVersion: FORGE_STATE_VERSION };
+  }
   if (state.stateVersion !== PREVIOUS_FORGE_STATE_VERSION) return value;
   return {
     ...state,

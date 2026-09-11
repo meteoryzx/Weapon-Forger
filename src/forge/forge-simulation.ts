@@ -9,9 +9,8 @@ import { integrateMechanicalResponse } from "./forge-physics.ts";
 import {
   cloneWorkpieceGeometry,
   createStructuredWorkpieceGeometry,
-  outlineArea,
-  splitOutlineByFiniteThroughCut,
 } from "./workpiece-geometry.ts";
+import { grindSolids, partitionSolids, solidBounds, solidEnvelope, solidVolumesByBlock, solidSurfaceArea, workpieceSolids } from "./solid-geometry.ts";
 import type {
   BladeBlock,
   BladeSection,
@@ -213,7 +212,8 @@ export function replayForgeState(initialState: ForgeState, operations: readonly 
 
 export function previewThermalState(state: ForgeState, elapsedMs: number): ForgeState {
   assertThermalDuration(elapsedMs);
-  return evolveThermalState(state, state.workpiece.thermal.location, elapsedMs);
+  const evolved = evolveThermalState(state, state.workpiece.thermal.location, elapsedMs);
+  return { ...evolved, workpiece: refreshSolidWorkpiece(evolved.workpiece) };
 }
 
 export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
@@ -363,6 +363,7 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
 // strokes on one spot leaves an uneven edge while spreading them stays even.
 function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
   assertGrindOperation(state, operation);
+  const fractions = new Map<string, number>();
   const sectionCount = state.workpiece.sections.length;
   const sections = state.workpiece.sections.map((section, index) => {
     const distance = Math.abs(index - operation.sectionIndex) / Math.max(1, sectionCount - 1);
@@ -378,6 +379,7 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
         section.length * block.thickness * FORGE_RULES.grindRemovalDepthAtFullAmount * progress,
       );
       removedVolume += removal;
+      fractions.set(block.id, (block.volume - removal) / block.volume);
       return { ...block, volume: block.volume - removal };
     });
     return summarizeSection({
@@ -389,7 +391,9 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
   });
   return appendOperation({
     ...state,
-    workpiece: { ...state.workpiece, sections },
+    workpiece: { ...state.workpiece, sections, geometry: state.workpiece.geometry.solids
+      ? { ...state.workpiece.geometry, solids: grindSolids(state.workpiece.geometry, fractions) }
+      : state.workpiece.geometry },
   }, operation);
 }
 
@@ -404,79 +408,82 @@ function applySelectMaterial(state: ForgeState, operation: SelectMaterialOperati
   }, operation);
 }
 
-// 切割：把当前工件在 sectionIndex 处一分为二。两半都拥有独立、从零开始的
-// 点阵坐标；后半段不能继续引用原工件的节点索引，否则后续锤击会读到错误截面。
+// Finite cuts partition occupied material. The legacy section-index operation
+// retains its original structured-grid behavior for existing callers.
 function applyCut(state: ForgeState, operation: CutOperation): ForgeState {
   assertCutOperation(state, operation);
   const { workpiece } = state;
-  const cutIndex = operation.path
-    ? sectionIndexForPath(workpiece, operation.path)
-    : operation.sectionIndex!;
-  const finiteResult = operation.path
-    ? splitOutlineByFiniteThroughCut(workpiece.geometry.outline, operation.path)
-    : null;
-  const front = sliceWorkpiece(
-    workpiece,
-    0,
-    cutIndex,
-    `${workpiece.id}-front`,
-    finiteResult ? localizeOutline(finiteResult.negative, 0, `${workpiece.id}-front`) : undefined,
-  );
-  const backBase = workpiece.geometry.nodes[workpieceNodeIndex(cutIndex, 0, 0, workpiece.geometry.grid)]?.axialPosition ?? 0;
-  const back = sliceWorkpiece(
-    workpiece,
-    cutIndex,
-    workpiece.sections.length,
-    `${workpiece.id}-back`,
-    finiteResult ? localizeOutline(finiteResult.positive, backBase, `${workpiece.id}-back`) : undefined,
-  );
-  const scaled = finiteResult
-    ? [
-      scalePieceToOutline(front, outlineArea(finiteResult.negative) / finiteResult.originalArea),
-      scalePieceToOutline(back, outlineArea(finiteResult.positive) / finiteResult.originalArea),
-    ] as const
-    : [front, back] as const;
+  if (operation.path) return applyFiniteCut(state, operation.path, operation);
+  const cutIndex = operation.sectionIndex!;
+  if (workpiece.geometry.solids) {
+    const x = workpiece.geometry.nodes[workpieceNodeIndex(cutIndex,0,0,workpiece.geometry.grid)]!.axialPosition;
+    const bounds=solidBounds(workpiece.geometry.solids,workpiece.geometry);
+    return applyFiniteCut(state,{id:`legacy-${state.operations.length}`,start:{axialPosition:x,lateralOffset:bounds.minZ-1},
+      end:{axialPosition:x,lateralOffset:bounds.maxZ+1},kerfWidth:0},operation);
+  }
   return appendOperation({
     ...state,
-    workpiece: scaled[0],
-    bench: [...state.bench, scaled[1]],
+    workpiece: sliceWorkpiece(workpiece,0,cutIndex,`${workpiece.id}-front`),
+    bench: [...state.bench,sliceWorkpiece(workpiece,cutIndex,workpiece.sections.length,`${workpiece.id}-back`)],
   }, operation);
 }
 
-function sectionIndexForPath(workpiece: WorkpieceState, path: NonNullable<CutOperation["path"]>): number {
-  const midpoint = (path.start.axialPosition + path.end.axialPosition) / 2;
-  let best = 1;
-  let distance = Number.POSITIVE_INFINITY;
-  for (let index = 1; index < workpiece.sections.length; index += 1) {
-    const section = workpiece.sections[index];
-    if (!section) continue;
-    const candidate = section.position - section.length / 2;
-    if (Math.abs(candidate - midpoint) < distance) {
-      distance = Math.abs(candidate - midpoint);
-      best = index;
-    }
+function applyFiniteCut(state: ForgeState, path: NonNullable<CutOperation["path"]>, operation: CutOperation): ForgeState {
+  const source=state.workpiece;
+  const partition=partitionSolids(source,path);
+  const original=solidVolumesByBlock(partition.source,source.geometry);
+  const volumes=[partition.negative,partition.positive,partition.kerf].map(solids=>solidVolumesByBlock(solids,source.geometry));
+  const ratio=(id:string,side:number)=>{
+    const before=original.get(id) ?? 0;
+    if(before<=0) throw new Error("Cannot cut a non-positive material cell.");
+    return (volumes[side]!.get(id) ?? 0)/before;
+  };
+  // Check every source cell, not merely the sum across two whole pieces.
+  for(const [id,before] of original) {
+    const sum=volumes.reduce((total,map)=>total+(map.get(id) ?? 0),0);
+    if(Math.abs(sum-before)>Math.max(1e-8,before*1e-8)) throw new Error("Cut cell volume conservation failed.");
   }
-  return best;
-}
-
-function localizeOutline(
-  outline: readonly WorkpieceState["geometry"]["outline"][number][],
-  axialOffset: number,
-  idPrefix: string,
-): WorkpieceState["geometry"]["outline"] {
-  return outline.map((point) => ({
-    ...point,
-    id: `${idPrefix}:outline:${point.id}`,
-    axialPosition: point.axialPosition - axialOffset,
-  }));
-}
-
-function scalePieceToOutline(workpiece: WorkpieceState, areaRatio: number): WorkpieceState {
-  const sections = workpiece.sections.map((section, sectionIndex) => {
-    const blocks = section.blocks.map((block) => ({ ...block, volume: block.volume * areaRatio }));
-    return summarizeSection({ ...section, blocks }, sectionIndex, workpiece.geometry.nodes, workpiece.geometry.grid);
+  const pieces=[partition.negative,partition.positive].map((solids,side)=>{
+    const id=`${source.id}:cut:${state.operations.length}:${side}`;
+    const ids=new Map<string,string>();
+    const sections=source.sections.map(section=>({ ...section,
+      removedVolume:0,
+      blocks:section.blocks.flatMap(block=>{
+        const fraction=ratio(block.id,side);
+        if(fraction<=0) return [];
+        const blockId=ratio(block.id,1-side)>0 || ratio(block.id,2)>0 ? `${block.id}:${id}` : block.id;
+        ids.set(block.id,blockId);
+        return [{...block,id:blockId,volume:block.volume*fraction,mechanicalWorkJ:block.mechanicalWorkJ*fraction}];
+      }),
+    }));
+    const geometry={...cloneWorkpieceGeometry(source.geometry),
+      nodes:source.geometry.nodes.map(node=>({...node,id:`${id}:${node.id}`})),
+      solids:solids.map(solid=>({...solid,id:`${id}:${solid.id}`,blockId:ids.get(solid.blockId)!})),
+    };
+    geometry.outline=solidEnvelope(geometry);
+    return refreshSolidWorkpiece({...source,id,geometry,sections});
   });
-  return { ...workpiece, sections };
+  const materials=new Map<string,{materialId:string;materialRegionId:string;volume:number}>();
+  let volume=0, mechanicalWorkJ=0;
+  for(const section of source.sections) for(const block of section.blocks) {
+    const fraction=ratio(block.id,2), removed=block.volume*fraction;
+    volume+=removed; mechanicalWorkJ+=block.mechanicalWorkJ*fraction;
+    if(removed<=0) continue;
+    const key=JSON.stringify([block.materialId,block.materialRegionId]);
+    const previous=materials.get(key);
+    materials.set(key,{materialId:block.materialId,materialRegionId:block.materialRegionId,volume:(previous?.volume ?? 0)+removed});
+  }
+  // Historical grinding loss is an extensive quantity too: partition it once.
+  const before=totalVolumeOf(source);
+  const historic=source.sections.reduce((sum,s)=>sum+s.removedVolume,0);
+  const retained=pieces.reduce((sum,p)=>sum+totalVolumeOf(p),0);
+  const withHistory=pieces.map(piece=>({...piece,sections:piece.sections.map((s,index)=>({...s,
+    removedVolume:index===0 ? historic*totalVolumeOf(piece)/retained : 0,
+  }))}));
+  if(Math.abs(retained+volume-before)>Math.max(1e-7,before*1e-8)) throw new Error("Material volume conservation failed.");
+  return appendOperation({...state,workpiece:withHistory[0]!,bench:[...state.bench,withHistory[1]!],
+    cutLosses:[...(state.cutLosses ?? []),{operationIndex:state.operations.length,workpieceId:source.id,volume,mechanicalWorkJ,materials:[...materials.values()]}],
+  },operation);
 }
 
 // 焊合：把当前工件与 bench[benchIndex] 沿轴向拼成连续点阵。工件级材料按体积
@@ -539,8 +546,8 @@ function averageWeldTemperature(a: WorkpieceState, b: WorkpieceState): number {
 }
 
 function weldContactArea(a: WorkpieceState, b: WorkpieceState): number {
-  const aEnd = a.sections.at(-1);
-  const bStart = b.sections[0];
+  const aEnd = [...a.sections].reverse().find(section => section.blocks.length > 0);
+  const bStart = b.sections.find(section => section.blocks.length > 0);
   if (!aEnd || !bStart) return 0;
   return Math.min(aEnd.width * aEnd.thickness, bStart.width * bStart.thickness);
 }
@@ -571,6 +578,28 @@ function totalVolumeOf(workpiece: WorkpieceState): number {
     (total, section) => total + section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0),
     0,
   );
+}
+
+function refreshSolidWorkpiece(workpiece: WorkpieceState): WorkpieceState {
+  const { geometry } = workpiece;
+  if (!geometry.solids) return workpiece;
+  const byBlock = new Map<string, typeof geometry.solids>();
+  for (const solid of geometry.solids) byBlock.set(solid.blockId, [...(byBlock.get(solid.blockId) ?? []), solid]);
+  const sections = workpiece.sections.map((section, index) => {
+    const blocks = section.blocks.map(block => {
+      const bounds = solidBounds(byBlock.get(block.id) ?? [], geometry);
+      return { ...block, length: bounds.maxX - bounds.minX, width: bounds.maxZ - bounds.minZ,
+        thickness: bounds.maxY - bounds.minY, lateralOffset: (bounds.maxZ + bounds.minZ) / 2,
+        verticalOffset: (bounds.maxY + bounds.minY) / 2 };
+    });
+    const result = summarizeSection({ ...section, blocks }, index, geometry.nodes, geometry.grid);
+    if (!blocks.length) return { ...result, length: 0, width: 0, thickness: 0 };
+    const bounds = solidBounds(blocks.flatMap(block => byBlock.get(block.id) ?? []), geometry);
+    return { ...result, position: (bounds.minX + bounds.maxX) / 2, length: bounds.maxX - bounds.minX,
+      width: bounds.maxZ - bounds.minZ, thickness: bounds.maxY - bounds.minY,
+      lateralOffset: (bounds.maxZ + bounds.minZ) / 2, verticalOffset: (bounds.maxY + bounds.minY) / 2 };
+  });
+  return { ...workpiece, geometry: { ...geometry, outline: solidEnvelope(geometry) }, sections };
 }
 
 function sliceWorkpiece(
@@ -639,6 +668,24 @@ function mergeWorkpieceGeometry(
     throw new Error("Welded workpieces must use compatible simulation grids.");
   }
   const grid = first.geometry.grid;
+  if (first.geometry.solids || second.geometry.solids) {
+    // Keep both deformation lattices, including their boundary planes. An
+    // empty separator owns no material and prevents a shared grid plane from
+    // stretching an oblique cut back into an uncut rectangular cell.
+    const firstSolids = workpieceSolids(first), secondSolids = workpieceSolids(second);
+    const aBounds = solidBounds(firstSolids, first.geometry), bBounds = solidBounds(secondSolids, second.geometry);
+    const offset = aBounds.maxX - bBounds.minX;
+    const sectionOffset = first.sections.length + 1;
+    const nodes = [...first.geometry.nodes, ...second.geometry.nodes.map(node => ({ ...node,
+      axialIndex: node.axialIndex + sectionOffset, axialPosition: node.axialPosition + offset }))];
+    const separator = { ...first.sections[0]!, blocks: [], removedVolume: 0, groundAmount: 0 };
+    const sections = [...first.sections, separator, ...second.sections];
+    const geometry = { ...createStructuredWorkpieceGeometry(first.id, grid, nodes, sections.length),
+      solids: [...firstSolids, ...secondSolids.map(solid => ({ ...solid,
+        vertices: solid.vertices.map(vertex => ({ weights: vertex.weights.map(weight => ({ ...weight,
+          nodeIndex: weight.nodeIndex + first.geometry.nodes.length })) })) }))] };
+    return { geometry: { ...geometry, outline: solidEnvelope(geometry) }, sections };
+  }
   const firstSectionCount = first.sections.length;
   const secondSectionCount = second.sections.length;
   const firstStart = first.geometry.nodes[workpieceNodeIndex(0, 0, 0, grid)];
@@ -750,7 +797,9 @@ function evolveThermalState(
 ): ForgeState {
   if (elapsedMs === 0) return state;
   const physicalSeconds = elapsedMs / 1000 * FORGE_RULES.thermalTimeScale;
-  const surfaceAreaM2 = workpieceSurfaceAreaM2(state.workpiece.geometry.nodes, state.workpiece.geometry.grid);
+  const surfaceAreaM2 = state.workpiece.geometry.solids
+    ? solidSurfaceArea(state.workpiece.geometry) * 1e-6
+    : workpieceSurfaceAreaM2(state.workpiece.geometry.nodes, state.workpiece.geometry.grid);
   const massKg = totalVolume(state) * 1e-9 * state.workpiece.material.densityKgPerM3;
   let temperatureC = averageWorkpieceTemperature(state);
   let peakTemperatureC = state.workpiece.thermal.peakTemperatureC;
@@ -857,11 +906,11 @@ function averageWorkpieceTemperature(state: ForgeState): number {
 }
 
 export function edgeCoverage(sections: readonly BladeSection[]): number {
-  return average(sections.map((section) => section.groundAmount));
+  return average(sections.filter(section => section.blocks.length > 0).map((section) => section.groundAmount));
 }
 
 export function edgeEvenness(sections: readonly BladeSection[]): number {
-  const amounts = sections.map((section) => section.groundAmount);
+  const amounts = sections.filter(section => section.blocks.length > 0).map((section) => section.groundAmount);
   const mean = average(amounts);
   const standardDeviation = Math.sqrt(average(amounts.map((amount) => (amount - mean) ** 2)));
   // A standard deviation of 0.5 means half the edge is saturated while the
@@ -957,6 +1006,7 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
   const face = struckFaceForOrientation(state.workpiece.orientationQuarterTurns);
   const targetSection = state.workpiece.sections[operation.sectionIndex];
   if (!targetSection) throw new Error("Missing hammer target section.");
+  if (!targetSection.blocks.length) return state;
   const target = contactTargetFor(targetSection, face, operation.faceBias ?? 0.5);
   const contactCells = findContactCells(state.workpiece.sections, target, face, state.workpiece.geometry.grid);
   if (contactCells.length === 0) return state;
@@ -983,11 +1033,14 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
     plasticity,
     state.workpiece.feedOffset,
   );
+  const occupiedDeformation = state.workpiece.geometry.solids
+    ? refreshSolidWorkpiece({ ...state.workpiece, geometry: { ...state.workpiece.geometry, nodes } })
+    : null;
   const sections = state.workpiece.sections.map((section, sectionIndex) => {
     if (sectionIndex < activeBounds.axialMinimum || sectionIndex > activeBounds.axialMaximum) {
       return section;
     }
-    const geometricBlocks = section.blocks.map((block) => deriveBlockGeometry(
+    const geometricBlocks = occupiedDeformation?.sections[sectionIndex]?.blocks ?? section.blocks.map((block) => deriveBlockGeometry(
       block,
       sectionIndex,
       nodes,
@@ -1020,12 +1073,12 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
     ...state,
     workpiece: {
       ...state.workpiece,
-      geometry: createStructuredWorkpieceGeometry(
+      geometry: { ...createStructuredWorkpieceGeometry(
         state.workpiece.id,
         state.workpiece.geometry.grid,
         nodes,
         state.workpiece.sections.length,
-      ),
+      ), ...(state.workpiece.geometry.solids ? { solids: state.workpiece.geometry.solids } : {}) },
       sections,
     },
   };
@@ -1546,7 +1599,7 @@ function summarizeSection(
   const weighted = (value: (block: BladeBlock) => number) => section.blocks.reduce(
     (sum, block) => sum + value(block) * block.volume,
     0,
-  ) / total;
+  ) / Math.max(total, Number.EPSILON);
   const axial = sectionNodes.map((node) => node.axialPosition);
   const lateral = sectionNodes.map((node) => node.lateralOffset);
   const vertical = sectionNodes.map((node) => node.verticalOffset);
@@ -1563,7 +1616,7 @@ function summarizeSection(
     elasticStrain: weighted((block) => block.elasticStrain),
     mechanicalWorkJ: section.blocks.reduce((sum, block) => sum + block.mechanicalWorkJ, 0),
     damage: weighted((block) => block.damage),
-    integrity: Math.min(...section.blocks.map((block) => block.integrity)),
+    integrity: section.blocks.length ? Math.min(...section.blocks.map((block) => block.integrity)) : 1,
     thermalDamage: weighted((block) => block.thermalDamage),
     verticalOffset: (Math.min(...vertical) + Math.max(...vertical)) / 2,
     lateralOffset: (Math.min(...lateral) + Math.max(...lateral)) / 2,
@@ -1700,7 +1753,10 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
 }
 
 function appendOperation(state: ForgeState, operation: ForgeOperation): ForgeState {
-  return { ...state, operations: [...state.operations, { ...operation }] };
+  const copied = operation.kind === "cut" && operation.path
+    ? { ...operation, path: { ...operation.path, start: { ...operation.path.start }, end: { ...operation.path.end } } }
+    : { ...operation };
+  return { ...state, workpiece: refreshSolidWorkpiece(state.workpiece), operations: [...state.operations, copied] };
 }
 
 function cloneStateWithoutOperations(state: ForgeState): ForgeState {
@@ -1720,6 +1776,7 @@ function cloneStateWithoutOperations(state: ForgeState): ForgeState {
     ...state,
     workpiece: cloneWorkpiece(state.workpiece),
     bench: state.bench.map(cloneWorkpiece),
+    ...(state.cutLosses ? { cutLosses: state.cutLosses.map(loss => ({ ...loss, materials: loss.materials.map(material => ({ ...material })) })) } : {}),
     operations: [],
   };
 }
@@ -2058,7 +2115,7 @@ function dot(a: Vec3, b: Vec3): number { return a.x * b.x + a.y * b.y + a.z * b.
 function cross(a: Vec3, b: Vec3): Vec3 { return { x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x }; }
 function magnitude(value: Vec3): number { return Math.sqrt(dot(value, value)); }
 function distance(a: Vec3, b: Vec3): number { return magnitude(subtract(a, b)); }
-function average(values: readonly number[]): number { return values.reduce((sum, value) => sum + value, 0) / values.length; }
+function average(values: readonly number[]): number { return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0; }
 function clamp(value: number, minimum: number, maximum: number): number { return Math.min(maximum, Math.max(minimum, value)); }
 function lerp(start: number, end: number, amount: number): number { return start + (end - start) * amount; }
 function roundWeight(value: number): number { return Math.round(value * 1_000) / 1_000; }

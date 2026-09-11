@@ -114,9 +114,31 @@ export interface WorkpieceGeometry {
   readonly kind: "planar-height-field-v1";
   readonly grid: WorkpieceGrid;
   readonly nodes: readonly WorkpieceNode[];
-  // One counter-clockwise outer contour. Closed holes and overlapping height
-  // layers are deliberately outside the current 2.5D contract.
+  // Structured boundary; for solids this is a derived broad-phase convex
+  // envelope ONLY. Occupancy, surfaces and cuts must use solids when present.
   readonly outline: readonly WorkpieceOutlinePoint[];
+  // Retained material inside the deformation lattice. Once present, these
+  // convex fragments (not the enclosing lattice) define occupied space.
+  readonly solids?: readonly WorkpieceSolid[];
+}
+
+export interface SolidVertex {
+  readonly weights: readonly { readonly nodeIndex: number; readonly weight: number }[];
+}
+
+export interface WorkpieceSolid {
+  readonly id: string;
+  readonly blockId: string;
+  readonly vertices: readonly SolidVertex[];
+  readonly faces: readonly (readonly number[])[];
+}
+
+export interface CutLoss {
+  readonly operationIndex: number;
+  readonly workpieceId: string;
+  readonly volume: number;
+  readonly mechanicalWorkJ: number;
+  readonly materials: readonly { readonly materialId: string; readonly materialRegionId: string; readonly volume: number }[];
 }
 
 export interface JointState {
@@ -301,10 +323,7 @@ export interface GrindIntent {
   readonly amount: number;
 }
 
-export interface CutIntent {
-  readonly kind: "cut";
-  readonly sectionIndex: number;
-}
+export type CutIntent = CutOperation;
 
 export interface WeldIntent {
   readonly kind: "weld";
@@ -336,6 +355,7 @@ export interface ForgeState {
   readonly workpiece: WorkpieceState;
   readonly bench: readonly WorkpieceState[];
   readonly operations: readonly ForgeOperation[];
+  readonly cutLosses?: readonly CutLoss[];
 }
 
 export interface ForgeSnapshotSection {

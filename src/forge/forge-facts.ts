@@ -1,4 +1,5 @@
 import { createForgeSnapshot, totalVolume } from "./forge-simulation.ts";
+import { occupiedAxialCenter, solidBounds } from "./solid-geometry.ts";
 import type { ForgeSnapshot, ForgeState } from "./forge-types.ts";
 
 export interface ForgeFacts {
@@ -41,10 +42,11 @@ export function createForgeFacts(
   state: ForgeState,
   snapshot: ForgeSnapshot = createForgeSnapshot(state),
 ): ForgeFacts {
-  const sections = state.workpiece.sections;
-  const totalLength = sections.reduce((sum, section) => sum + section.length, 0);
+  const sections = state.workpiece.sections.filter(section => section.blocks.length > 0);
+  const occupiedBounds = state.workpiece.geometry.solids && solidBounds(state.workpiece.geometry.solids, state.workpiece.geometry);
+  const totalLength = occupiedBounds ? occupiedBounds.maxX - occupiedBounds.minX : sections.reduce((sum, section) => sum + section.length, 0);
   const workpieceVolume = totalVolume(state);
-  const centerOfMass = workpieceVolume === 0
+  const centerOfMass = state.workpiece.geometry.solids ? occupiedAxialCenter(state.workpiece) : workpieceVolume === 0
     ? 0
     : sections.reduce((sum, section) => {
       const sectionVolume = section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0);

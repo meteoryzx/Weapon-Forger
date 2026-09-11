@@ -47,6 +47,11 @@ export function cloneWorkpieceGeometry(geometry: WorkpieceGeometry): WorkpieceGe
     grid: { ...geometry.grid },
     nodes: geometry.nodes.map((node) => ({ ...node })),
     outline: geometry.outline.map((point) => ({ ...point })),
+    ...(geometry.solids ? { solids: geometry.solids.map(solid => ({
+      ...solid,
+      vertices: solid.vertices.map(vertex => ({ weights: vertex.weights.map(weight => ({ ...weight })) })),
+      faces: solid.faces.map(face => [...face]),
+    })) } : {}),
   };
 }
 

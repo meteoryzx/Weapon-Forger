@@ -34,6 +34,7 @@ import {
   type WorkpieceNode,
 } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
+import { solidSurface } from "../forge/solid-geometry.ts";
 import { MaterialsStationView, materialsCameraFrame } from "./materials-station-view.ts";
 
 const BILLET_AXIAL_SCALE = 0.58;
@@ -717,10 +718,29 @@ export class ForgeBilletView {
   }
 }
 
-function createBilletGeometry(
+export function createBilletGeometry(
   snapshot: ForgeSnapshotWorkpiece,
   hammerPreview: HammerInfluencePreview | null,
 ): BufferGeometry {
+  if (snapshot.geometry.solids) {
+    const positions: number[] = [], colors: number[] = [];
+    const blocks = new Map(snapshot.sections.flatMap(section => section.blocks.map(block => [block.id, block] as const)));
+    for (const face of solidSurface(snapshot.geometry)) {
+      const block = blocks.get(face.blockId);
+      const color = temperatureColor(block?.temperatureC ?? 20, 0).lerp(materialColor(snapshot.carbon), 0.12);
+      for (let index = 1; index + 1 < face.points.length; index++) {
+        for (const point of [face.points[0]!, face.points[index]!, face.points[index + 1]!]) {
+          positions.push(point.x, point.y, point.z);
+          colors.push(color.r, color.g, color.b);
+        }
+      }
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute("color", new BufferAttribute(new Float32Array(colors), 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  }
   const perimeterVertexCount = (snapshot.geometry.grid.widthBlocks + snapshot.geometry.grid.heightBlocks) * 2;
   const ringCount = snapshot.sections.length + 1;
   const positions: number[] = [];
