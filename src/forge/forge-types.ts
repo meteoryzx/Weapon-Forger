@@ -221,7 +221,14 @@ export interface GrindOperation {
 // 切割：把当前工件在 sectionIndex 处一分为二，后半段移入工作台 bench。
 export interface CutOperation {
   readonly kind: "cut";
-  readonly sectionIndex: number;
+  /** Legacy orthogonal cut location. Omit when a finite path is supplied. */
+  readonly sectionIndex?: number;
+  readonly path?: {
+    readonly id: string;
+    readonly start: { readonly axialPosition: number; readonly lateralOffset: number };
+    readonly end: { readonly axialPosition: number; readonly lateralOffset: number };
+    readonly kerfWidth: number;
+  };
 }
 
 // 焊合：把当前工件与指定 bench 工件合并；保留来源区域，工件级材料按体积汇总。

@@ -9,6 +9,8 @@ import { integrateMechanicalResponse } from "./forge-physics.ts";
 import {
   cloneWorkpieceGeometry,
   createStructuredWorkpieceGeometry,
+  outlineArea,
+  splitOutlineByFiniteThroughCut,
 } from "./workpiece-geometry.ts";
 import type {
   BladeBlock,
@@ -407,14 +409,74 @@ function applySelectMaterial(state: ForgeState, operation: SelectMaterialOperati
 function applyCut(state: ForgeState, operation: CutOperation): ForgeState {
   assertCutOperation(state, operation);
   const { workpiece } = state;
-  const cutIndex = operation.sectionIndex;
-  const front = sliceWorkpiece(workpiece, 0, cutIndex, `${workpiece.id}-front`);
-  const back = sliceWorkpiece(workpiece, cutIndex, workpiece.sections.length, `${workpiece.id}-back`);
+  const cutIndex = operation.path
+    ? sectionIndexForPath(workpiece, operation.path)
+    : operation.sectionIndex!;
+  const finiteResult = operation.path
+    ? splitOutlineByFiniteThroughCut(workpiece.geometry.outline, operation.path)
+    : null;
+  const front = sliceWorkpiece(
+    workpiece,
+    0,
+    cutIndex,
+    `${workpiece.id}-front`,
+    finiteResult ? localizeOutline(finiteResult.negative, 0, `${workpiece.id}-front`) : undefined,
+  );
+  const backBase = workpiece.geometry.nodes[workpieceNodeIndex(cutIndex, 0, 0, workpiece.geometry.grid)]?.axialPosition ?? 0;
+  const back = sliceWorkpiece(
+    workpiece,
+    cutIndex,
+    workpiece.sections.length,
+    `${workpiece.id}-back`,
+    finiteResult ? localizeOutline(finiteResult.positive, backBase, `${workpiece.id}-back`) : undefined,
+  );
+  const scaled = finiteResult
+    ? [
+      scalePieceToOutline(front, outlineArea(finiteResult.negative) / finiteResult.originalArea),
+      scalePieceToOutline(back, outlineArea(finiteResult.positive) / finiteResult.originalArea),
+    ] as const
+    : [front, back] as const;
   return appendOperation({
     ...state,
-    workpiece: front,
-    bench: [...state.bench, back],
+    workpiece: scaled[0],
+    bench: [...state.bench, scaled[1]],
   }, operation);
+}
+
+function sectionIndexForPath(workpiece: WorkpieceState, path: NonNullable<CutOperation["path"]>): number {
+  const midpoint = (path.start.axialPosition + path.end.axialPosition) / 2;
+  let best = 1;
+  let distance = Number.POSITIVE_INFINITY;
+  for (let index = 1; index < workpiece.sections.length; index += 1) {
+    const section = workpiece.sections[index];
+    if (!section) continue;
+    const candidate = section.position - section.length / 2;
+    if (Math.abs(candidate - midpoint) < distance) {
+      distance = Math.abs(candidate - midpoint);
+      best = index;
+    }
+  }
+  return best;
+}
+
+function localizeOutline(
+  outline: readonly WorkpieceState["geometry"]["outline"][number][],
+  axialOffset: number,
+  idPrefix: string,
+): WorkpieceState["geometry"]["outline"] {
+  return outline.map((point) => ({
+    ...point,
+    id: `${idPrefix}:outline:${point.id}`,
+    axialPosition: point.axialPosition - axialOffset,
+  }));
+}
+
+function scalePieceToOutline(workpiece: WorkpieceState, areaRatio: number): WorkpieceState {
+  const sections = workpiece.sections.map((section, sectionIndex) => {
+    const blocks = section.blocks.map((block) => ({ ...block, volume: block.volume * areaRatio }));
+    return summarizeSection({ ...section, blocks }, sectionIndex, workpiece.geometry.nodes, workpiece.geometry.grid);
+  });
+  return { ...workpiece, sections };
 }
 
 // 焊合：把当前工件与 bench[benchIndex] 沿轴向拼成连续点阵。工件级材料按体积
@@ -516,6 +578,7 @@ function sliceWorkpiece(
   startSection: number,
   endSection: number,
   id: string,
+  outlineOverride?: WorkpieceState["geometry"]["outline"],
 ): WorkpieceState {
   const sectionCount = endSection - startSection;
   const { grid, nodes: sourceNodes } = workpiece.geometry;
@@ -559,7 +622,10 @@ function sliceWorkpiece(
   return {
     ...workpiece,
     id,
-    geometry: createStructuredWorkpieceGeometry(id, grid, nodes, sectionCount),
+    geometry: {
+      ...createStructuredWorkpieceGeometry(id, grid, nodes, sectionCount),
+      ...(outlineOverride ? { outline: outlineOverride } : {}),
+    },
     sections,
   };
 }
@@ -1958,7 +2024,19 @@ function assertGrindOperation(state: ForgeState, operation: GrindOperation): voi
 }
 
 function assertCutOperation(state: ForgeState, operation: CutOperation): void {
-  if (!Number.isInteger(operation.sectionIndex) || operation.sectionIndex <= 0 || operation.sectionIndex >= state.workpiece.sections.length) {
+  if (operation.path) {
+    if (!operation.path.id || !Number.isFinite(operation.path.start.axialPosition)
+      || !Number.isFinite(operation.path.start.lateralOffset)
+      || !Number.isFinite(operation.path.end.axialPosition)
+      || !Number.isFinite(operation.path.end.lateralOffset)
+      || !Number.isFinite(operation.path.kerfWidth)) {
+      throw new Error("Finite cut path must contain finite coordinates and kerf width.");
+    }
+    return;
+  }
+  const sectionIndex = operation.sectionIndex;
+  if (typeof sectionIndex !== "number" || !Number.isInteger(sectionIndex)
+    || sectionIndex <= 0 || sectionIndex >= state.workpiece.sections.length) {
     throw new Error("Cut must split the workpiece into two non-empty halves.");
   }
 }

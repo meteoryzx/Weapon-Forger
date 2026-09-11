@@ -96,6 +96,28 @@ describe("cut, weld, temper", () => {
     expect(primitiveVolumes[1]).toBeCloseTo(legacyVolumes[1]!, 6);
   });
 
+  it("executes a finite diagonal path and records the path in the replayable operation history", () => {
+    const initial = createForgeState({ sectionCount: 8 });
+    const outline = initial.workpiece.geometry.outline;
+    const axial = outline.map((point) => point.axialPosition);
+    const lateral = outline.map((point) => point.lateralOffset);
+    const path = {
+      id: "finite-diagonal-1",
+      start: { axialPosition: Math.min(...axial) - 4, lateralOffset: Math.min(...lateral) - 4 },
+      end: { axialPosition: Math.max(...axial) + 4, lateralOffset: Math.max(...lateral) + 4 },
+      kerfWidth: 1,
+    } as const;
+    const before = totalVolume(initial);
+    const cut = applyForgeOperation(initial, { kind: "cut", path });
+
+    expect(cut.operations.at(-1)).toEqual({ kind: "cut", path });
+    expect(cut.workpiece.geometry.outline).not.toEqual(initial.workpiece.geometry.outline);
+    expect(cut.workpiece.geometry.outline.some((point) => point.id.includes("finite-diagonal-1"))).toBe(true);
+    expect(cut.bench[0]?.geometry.outline.some((point) => point.id.includes("finite-diagonal-1"))).toBe(true);
+    expect(totalVolume(cut) + volumeOf(cut.bench[0]!)).toBeLessThan(before);
+    expect(totalVolume(cut) + volumeOf(cut.bench[0]!)).toBeGreaterThan(0);
+  });
+
   it("switches the active workpiece without losing either raw state", () => {
     const initial = createForgeState({ sectionCount: 8 });
     const cut = applyForgeOperation(initial, { kind: "cut", sectionIndex: 4 });
