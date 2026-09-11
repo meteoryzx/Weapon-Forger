@@ -10,12 +10,39 @@ import {
   type ForgeMaterial,
   type ForgeSnapshot,
   type ForgeState,
+  type CutOperation,
 } from "../forge/index.ts";
 
 export class GameApplication {
   private state: ForgeState;
   private previewState: ForgeState;
   private previewElapsedMs = 0;
+  private preparedCut: { source: ForgeState; result: ForgeState; operation: CutOperation } | null = null;
+  private cutGeneration = 0;
+
+  async prepareCut(operation: CutOperation, evaluate: (state: ForgeState, operation: CutOperation) => Promise<ForgeState>): Promise<boolean> {
+    this.preparedCut = null;
+    const generation=++this.cutGeneration;
+    const source = this.state;
+    const result = await evaluate(source, operation);
+    if (source !== this.state || generation!==this.cutGeneration) return false;
+    this.preparedCut = { source, result, operation };
+    return true;
+  }
+
+  cancelPreparedCut(): void { this.preparedCut = null; this.cutGeneration++; }
+
+  commitPreparedCut(operation: CutOperation): ForgeSnapshot {
+    const prepared = this.preparedCut;
+    if (!prepared || prepared.source !== this.state || JSON.stringify(operation) !== JSON.stringify(prepared.operation)) {
+      throw new Error("Cut preview is stale. Position the workpiece again.");
+    }
+    this.state = prepared.result;
+    this.previewState = this.state;
+    this.previewElapsedMs = 0;
+    this.preparedCut = null;
+    return this.getSnapshot();
+  }
 
   constructor(material?: ForgeMaterial) {
     this.state = createForgeState(material ? { material } : {});

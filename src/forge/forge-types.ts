@@ -240,7 +240,7 @@ export interface GrindOperation {
   readonly amount: number;
 }
 
-// 切割：把当前工件在 sectionIndex 处一分为二，后半段移入工作台 bench。
+// 切割：移除有限刀路扫过的锯缝；仍连通则保留当前工件，仅将新独立组件移入 bench。
 export interface CutOperation {
   readonly kind: "cut";
   /** Legacy orthogonal cut location. Omit when a finite path is supplied. */

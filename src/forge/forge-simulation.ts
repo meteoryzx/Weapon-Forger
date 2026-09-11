@@ -432,32 +432,34 @@ function applyFiniteCut(state: ForgeState, path: NonNullable<CutOperation["path"
   const source=state.workpiece;
   const partition=partitionSolids(source,path);
   const original=solidVolumesByBlock(partition.source,source.geometry);
-  const volumes=[partition.negative,partition.positive,partition.kerf].map(solids=>solidVolumesByBlock(solids,source.geometry));
+  const volumes=[...partition.components,partition.kerf].map(solids=>solidVolumesByBlock(solids,source.geometry));
+  const lossIndex=partition.components.length;
   const ratio=(id:string,side:number)=>{
     const before=original.get(id) ?? 0;
     if(before<=0) throw new Error("Cannot cut a non-positive material cell.");
     return (volumes[side]!.get(id) ?? 0)/before;
   };
-  // Check every source cell, not merely the sum across two whole pieces.
+  // Check every source cell, not merely the total across connected components.
   for(const [id,before] of original) {
     const sum=volumes.reduce((total,map)=>total+(map.get(id) ?? 0),0);
     if(Math.abs(sum-before)>Math.max(1e-8,before*1e-8)) throw new Error("Cut cell volume conservation failed.");
   }
-  const pieces=[partition.negative,partition.positive].map((solids,side)=>{
-    const id=`${source.id}:cut:${state.operations.length}:${side}`;
+  const pieces=partition.components.map((solids,side)=>{
+    const id=partition.components.length===1 ? source.id : `${source.id}:cut:${state.operations.length}:${side}`;
     const ids=new Map<string,string>();
     const sections=source.sections.map(section=>({ ...section,
       removedVolume:0,
       blocks:section.blocks.flatMap(block=>{
         const fraction=ratio(block.id,side);
         if(fraction<=0) return [];
-        const blockId=ratio(block.id,1-side)>0 || ratio(block.id,2)>0 ? `${block.id}:${id}` : block.id;
+        const blockId=partition.components.length>1 && volumes.some((map,index)=>index!==side && (map.get(block.id)??0)>0)
+          ? `${block.id}:${id}` : block.id;
         ids.set(block.id,blockId);
         return [{...block,id:blockId,volume:block.volume*fraction,mechanicalWorkJ:block.mechanicalWorkJ*fraction}];
       }),
     }));
     const geometry={...cloneWorkpieceGeometry(source.geometry),
-      nodes:source.geometry.nodes.map(node=>({...node,id:`${id}:${node.id}`})),
+      nodes:source.geometry.nodes.map(node=>({...node,id:id===source.id ? node.id : `${id}:${node.id}`})),
       solids:solids.map(solid=>({...solid,id:`${id}:${solid.id}`,blockId:ids.get(solid.blockId)!})),
     };
     geometry.outline=solidEnvelope(geometry);
@@ -466,7 +468,7 @@ function applyFiniteCut(state: ForgeState, path: NonNullable<CutOperation["path"
   const materials=new Map<string,{materialId:string;materialRegionId:string;volume:number}>();
   let volume=0, mechanicalWorkJ=0;
   for(const section of source.sections) for(const block of section.blocks) {
-    const fraction=ratio(block.id,2), removed=block.volume*fraction;
+    const fraction=ratio(block.id,lossIndex), removed=block.volume*fraction;
     volume+=removed; mechanicalWorkJ+=block.mechanicalWorkJ*fraction;
     if(removed<=0) continue;
     const key=JSON.stringify([block.materialId,block.materialRegionId]);
@@ -481,7 +483,7 @@ function applyFiniteCut(state: ForgeState, path: NonNullable<CutOperation["path"
     removedVolume:index===0 ? historic*totalVolumeOf(piece)/retained : 0,
   }))}));
   if(Math.abs(retained+volume-before)>Math.max(1e-7,before*1e-8)) throw new Error("Material volume conservation failed.");
-  return appendOperation({...state,workpiece:withHistory[0]!,bench:[...state.bench,withHistory[1]!],
+  return appendOperation({...state,workpiece:withHistory[0]!,bench:[...state.bench,...withHistory.slice(1)],
     cutLosses:[...(state.cutLosses ?? []),{operationIndex:state.operations.length,workpieceId:source.id,volume,mechanicalWorkJ,materials:[...materials.values()]}],
   },operation);
 }

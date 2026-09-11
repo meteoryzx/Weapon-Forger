@@ -108,6 +108,8 @@ export const FORGE_RULES = {
   initialSectionLength: SIMULATION_CELL_SIZE,
   initialSectionWidth: WORKPIECE_WIDTH,
   initialSectionThickness: WORKPIECE_THICKNESS,
+  sawKerfWidth: 1,
+  sawTravelLength: 90,
 
   // Tool dimensions share the billet's physical unit system.
   hammerFaceLength: 48,
