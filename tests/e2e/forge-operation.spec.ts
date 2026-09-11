@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { PerspectiveCamera, Vector3 } from "three";
 import { materialsCameraFrame, MATERIALS_ORIGIN } from "../../src/render/materials-station-view.ts";
+import { FURNACE_ORIGIN } from "../../src/render/furnace-station-view.ts";
 
 function materialPoint(focus: "table" | "rack", local: [number, number, number]) {
   const camera = new PerspectiveCamera(52, 1280 / 720, 0.1, 2000);
@@ -29,7 +30,7 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
 
   await page.locator("#game").click({ position: overviewPoint([0,4,0]) });
   await expect(page.locator("body")).toHaveAttribute("data-active-station", "anvil");
-  await expect(page.locator("body")).toHaveAttribute("data-camera-state", "moving");
+  // Poll the final view: a short transition can finish before the assertion runs.
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await expect(page.locator("#hud-title")).toHaveText("铁砧 · 锤击");
   const initialOperations = await page.locator("body").getAttribute("data-operation-count");
@@ -86,13 +87,12 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.locator("#game").click({ position: overviewPoint([-260,56,-20]) });
+  await page.locator("#game").click({ position: overviewPoint([FURNACE_ORIGIN.x, 110, FURNACE_ORIGIN.z]) });
   await expect(page.locator("#hud-title")).toHaveText("火炉 · 加热");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.mouse.move(400, 330);
-  await page.mouse.down();
-  await page.waitForTimeout(80);
-  await page.mouse.up();
+  await page.getByRole("button", { name: "送入加热", exact: true }).click();
+  await expect.poll(async () => Number(await page.locator("body").getAttribute("data-temperature-c"))).toBeGreaterThan(50);
+  await page.getByRole("button", { name: "取出查看", exact: true }).click();
   await expect(page.locator("body")).toHaveAttribute("data-completed-verbs", /heat/);
 
   await page.keyboard.press("Escape");

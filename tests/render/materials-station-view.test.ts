@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Box3, BoxGeometry, PerspectiveCamera, Vector3 } from "three";
 import { createForgeSnapshot, createForgeState } from "../../src/forge/index.ts";
 import { MaterialsStationView, materialsCameraFrame } from "../../src/render/materials-station-view.ts";
+import { WORKSHOP_UNITS_PER_MM } from "../../src/app/workshop-scale.ts";
 
 function cameraFor(aspect: number) {
   const camera = new PerspectiveCamera(52, aspect, 0.1, 2000);
@@ -49,9 +50,9 @@ describe("material station geometry without browser rendering", () => {
     const crossSectionSide = new Vector3(0, 0, 1).applyQuaternion(selected.quaternion).normalize();
     expect(crossSectionSide.x).toBeGreaterThan(0.99);
     expect(Math.abs(crossSectionSide.y)).toBeLessThan(0.01);
-    const rearEnd = selected.position.clone().addScaledVector(axis, 336 * 0.46 / 2);
+    const rearEnd = selected.position.clone().addScaledVector(axis, 336 * WORKSHOP_UNITS_PER_MM / 2);
     expect(rearEnd.y).toBeCloseTo(
-      (selected.userData.storageShelfSurfaceY as number) + 8 * 0.46 / 2,
+      (selected.userData.storageShelfSurfaceY as number) + 8 * WORKSHOP_UNITS_PER_MM / 2,
       0,
     );
     expect(rearEnd.z).toBeCloseTo(-5, 0);

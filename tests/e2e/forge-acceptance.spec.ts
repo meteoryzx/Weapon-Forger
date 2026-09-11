@@ -22,7 +22,7 @@ for (const [verb, station, title] of acceptanceSlices) {
     await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
 
     await page.keyboard.press("Escape");
-    await expect(page.locator("body")).toHaveAttribute("data-active-station", verb==="cut"?"overview":station);
+    await expect(page.locator("body")).toHaveAttribute("data-active-station", verb==="cut" || verb==="heat" ? "overview" : station);
   });
 }
 
@@ -123,7 +123,7 @@ test("saw preview is read-only, confirms finite cuts, and preserves independentl
   expect(errors).toEqual([]);
 });
 
-test("overhanging stock keeps a partial notch until a later cut severs its bridge",async({page})=>{
+test("stock can overhang freely and a partial notch remains until a later cut severs its bridge",async({page})=>{
   test.setTimeout(90000);
   const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
   await page.goto("/?accept=cut");
@@ -132,14 +132,18 @@ test("overhanging stock keeps a partial notch until a later cut severs its bridg
   const original=Number(await body.getAttribute("data-total-material-volume"));
   const id=await body.getAttribute("data-workpiece-id");
   await page.locator("#game").focus();
-  // The stock extends 25 mm beyond the right edge. At the table center only
-  // half its width is under the finite tool travel; an uncut bridge remains.
-  for(let i=0;i<24;i++)await page.keyboard.press("ArrowRight");
+  // At the shared smaller scale the stock cannot span the blade and table edge
+  // simultaneously. First verify overhang is unclamped, then return to the blade.
+  for(let i=0;i<56;i++)await page.keyboard.press("ArrowRight");
+  await expect.poll(async()=>JSON.parse((await body.getAttribute("data-cut-pose"))!).x).toBe(224);
+  expect(Number(await body.getAttribute("data-total-material-volume"))).toBe(original);
+  for(let i=0;i<46;i++)await page.keyboard.press("ArrowLeft");
+  // Center the width on the finite guide's endpoint, leaving half uncut.
   for(let i=0;i<5;i++)await page.keyboard.press("ArrowDown");
   await expect(confirm).toBeEnabled({timeout:30000});
   await expect(page.locator("#cut-status")).toContainText("仍为一块");
   const pose=await body.getAttribute("data-cut-pose");
-  expect(JSON.parse(pose!).x).toBe(96);
+  expect(JSON.parse(pose!).x).toBe(40);
   expect(Number(await body.getAttribute("data-total-material-volume"))).toBe(original);
   await confirm.click();
   await expect(body).toHaveAttribute("data-acceptance-operation-count","1",{timeout:15000});

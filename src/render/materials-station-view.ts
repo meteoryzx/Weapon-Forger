@@ -5,6 +5,7 @@ import {
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { FORGE_MATERIALS, FORGE_RULES, type ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
+import { WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 
 // Keep the selection area's accepted local arrangement; move the whole station
 // to the workshop's back-left so its full-sized table does not envelop the forge.
@@ -18,7 +19,7 @@ const TABLE_SURFACE_Y = 72;
 const TABLE_ITEM_BASE_Y = TABLE_SURFACE_Y + 1.25;
 const STOCK_SHELF_SURFACE_Y = 200;
 const RETURN_SHELF_SURFACE_Y = 288;
-const STOCK_SCALE = 0.46;
+const STOCK_SCALE = WORKSHOP_UNITS_PER_MM;
 const STOCK_LENGTH = FORGE_RULES.workpieceLength * STOCK_SCALE;
 const SIDE_AXIS = new Vector3(1, 0, 0);
 const STORED_DIRECTION = new Vector3(0, 0, -1);
@@ -219,7 +220,6 @@ export class MaterialsStationView {
     const geometry = this.geometryOf(piece);
     const bounds = new Box3().setFromBufferAttribute(geometry.getAttribute("position") as import("three").BufferAttribute);
     const center = bounds.getCenter(new Vector3());
-    const size = bounds.getSize(new Vector3());
     geometry.translate(-center.x, -bounds.min.y, -center.z);
     const appearance = thermalSteelAppearance(piece.averageTemperatureC);
     const material = new MeshStandardMaterial({
@@ -230,7 +230,7 @@ export class MaterialsStationView {
       emissiveIntensity: active ? Math.max(0.18, appearance.emissiveIntensity) : appearance.emissiveIntensity,
     });
     const mesh = new Mesh(geometry, material);
-    mesh.scale.setScalar(Math.min(0.46, 168 / Math.max(size.x, 1), 34 / Math.max(size.z, 1), 28 / Math.max(size.y, 1)));
+    mesh.scale.setScalar(WORKSHOP_UNITS_PER_MM);
     mesh.userData.workpieceId = piece.workpieceId;
     return mesh;
   }
