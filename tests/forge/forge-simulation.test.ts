@@ -390,7 +390,7 @@ describe("forge simulation", () => {
     expect(() => applyForgeOperation(initial, { kind: "feed", step: 0 } as unknown as ForgeOperation)).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1.1 } as unknown as ForgeOperation)).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "hammer", sectionIndex: CENTER, energy: 1, faceBias: 1.1 })).toThrow();
-    expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "inspection", elapsedMs: 1_000 })).toThrow();
+    expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "inspection", elapsedMs: 0 })).toThrow();
     expect(() => applyForgeOperation(initial, { kind: "move-billet", destination: "furnace", elapsedMs: 120_001 })).toThrow();
     expect(initial.operations).toHaveLength(0);
   });

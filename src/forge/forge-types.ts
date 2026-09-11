@@ -208,6 +208,7 @@ export interface HeatOperation {
 
 export interface MoveBilletOperation {
   readonly kind: "move-billet";
+  // A positive duration can retain the location to record ongoing heating/cooling.
   readonly destination: BilletLocation;
   readonly elapsedMs: number;
 }

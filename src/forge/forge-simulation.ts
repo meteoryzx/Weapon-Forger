@@ -310,8 +310,8 @@ export function heatCapacityJPerKgK(temperatureC: number, material: ForgeMateria
 
 function applyMoveBillet(state: ForgeState, operation: MoveBilletOperation): ForgeState {
   assertThermalDuration(operation.elapsedMs);
-  if (operation.destination === state.workpiece.thermal.location) {
-    throw new Error("Billet destination must differ from its current location.");
+  if (operation.destination === state.workpiece.thermal.location && operation.elapsedMs === 0) {
+    throw new Error("Remaining at the same location requires elapsed time.");
   }
   const evolved = evolveThermalState(state, state.workpiece.thermal.location, operation.elapsedMs);
   return appendOperation({

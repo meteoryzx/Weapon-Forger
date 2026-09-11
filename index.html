@@ -24,6 +24,11 @@
       #acceptance-reset { margin-top: 12px; }
       body.acceptance-mode #hud { left: 212px; }
       [hidden] { display: none !important; }
+      body.heat-view #game {position:fixed;left:212px;top:108px;width:calc(100% - 212px);height:calc(100% - 200px);}
+      body.heat-view #hud {left:212px;height:108px;box-sizing:border-box;overflow:auto;}
+      body.heat-view #materials-controls {display:none;}
+      #heat-controls {position:fixed;left:212px;right:0;bottom:0;height:92px;box-sizing:border-box;padding:10px 18px;background:#202624;color:#e5e9e7;border-top:1px solid #59605d;font:14px system-ui,sans-serif;z-index:16;}
+      #heat-controls button {padding:7px 16px;margin:8px 12px 0 0;border:1px solid #9b8158;border-radius:4px;background:#4b4030;color:#fff4dc;font:inherit;cursor:pointer;}
       #cut-controls {position:fixed;left:212px;right:0;bottom:0;min-height:148px;box-sizing:border-box;padding:12px 18px;background:#202624;border-top:1px solid #59605d;color:#e5e9e7;font:14px system-ui,sans-serif;z-index:16;}
       #cut-controls button,#cut-controls select {min-height:34px;padding:6px 12px;background:#333d38;color:#e5e9e7;border:1px solid #727c77;border-radius:4px;font:inherit;cursor:pointer;}
       #cut-controls button:disabled {opacity:0.4;cursor:default;}
@@ -61,6 +66,8 @@
         body.cut-view #game {left:164px;width:calc(100% - 164px);top:120px;height:calc(100% - 345px);}
         body.cut-view #hud,#cut-controls {left:164px;}
         #cut-controls {max-height:225px;overflow:auto;}
+        body.heat-view #game {left:164px;width:calc(100% - 164px);}
+        body.heat-view #hud,#heat-controls {left:164px;}
       }
     </style>
   </head>
@@ -130,6 +137,11 @@
         <button id="cut-next" type="button" aria-label="下一页切割产物">→</button>
         <button id="cut-overview" type="button">工坊总览</button>
       </div>
+    </section>
+    <section id="heat-controls" aria-label="加热操作" hidden>
+      <div id="heat-status" role="status"></div>
+      <button id="heat-toggle" type="button">送入加热</button>
+      <button id="heat-overview" type="button">工坊总览</button>
     </section>
     <script type="module" src="/src/entry/browser.ts"></script>
   </body>

@@ -226,8 +226,10 @@ cutConfirm.addEventListener("click",()=>{
 });
 let pressStartedAtMs: number | null = null;
 let pressTarget: HammerPickTarget | null = null;
-let heatingStartedAtMs: number | null = null;
-let heatingFrame: number | null = null;
+let furnaceLastTick: number | null = null;
+const heatControls = document.querySelector<HTMLElement>("#heat-controls")!;
+const heatToggle = document.querySelector<HTMLButtonElement>("#heat-toggle")!;
+const heatStatus = document.querySelector<HTMLElement>("#heat-status")!;
 let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
 let gesture: {
@@ -242,7 +244,7 @@ let gesture: {
 const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint: string }> = {
   overview: { title: "铁匠铺 · 总览", hint: "点击材料、工位或铁砧进入第一人称近景；Esc 返回总览。" },
   materials: { title: "选料桌 · 选料", hint: "" },
-  furnace: { title: "火炉 · 加热", hint: "按住炉口中的钢坯，观察热色和温度；松开取出。" },
+  furnace: { title: "火炉 · 加热", hint: "点击炉口把钢坯送入加热；再次点击取出，根据颜色和温度判断火候。" },
   anvil: { title: "铁砧 · 锤击", hint: "按住钢坯落锤；A/D 转面，W/S 送料。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
@@ -292,7 +294,7 @@ function acceptanceOperationCount(state: ForgeState): number {
   if (acceptanceVerb === "materials") return materialSelection.getAcquiredCount();
   if (!acceptanceVerb) return state.operations.length;
   return state.operations.filter((operation) => (
-    acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.elapsedMs > 0
+    acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.destination === "furnace" && operation.elapsedMs === 0
     : operation.kind === acceptanceVerb
   )).length;
 }
@@ -366,7 +368,7 @@ function renderState(): void {
     materialSelection.getAcquiredCount() > 0 || state.operations.some((operation) => operation.kind === "select-material") ? "materials" : null,
     state.operations.some((operation) => operation.kind === "cut") ? "cut" : null,
     state.operations.some((operation) => operation.kind === "weld") ? "weld" : null,
-    state.operations.some((operation) => operation.kind === "move-billet" && operation.elapsedMs > 0) ? "heat" : null,
+    state.operations.some((operation) => operation.kind === "move-billet" && operation.destination === "furnace" && operation.elapsedMs > 0) ? "heat" : null,
     state.operations.some((operation) => operation.kind === "hammer") ? "hammer" : null,
     state.operations.some((operation) => operation.kind === "quench") ? "quench" : null,
     state.operations.some((operation) => operation.kind === "temper") ? "temper" : null,
@@ -402,6 +404,11 @@ function renderState(): void {
   document.body.dataset.completedVerbs = completedVerbs.join(",");
   document.body.dataset.verbCount = String(completedVerbs.length);
   document.body.dataset.temperatureC = latestSnapshot.averageTemperatureC.toFixed(2);
+  document.body.dataset.billetLocation = latestSnapshot.billetLocation;
+  heatControls.hidden = activeStation !== "furnace";
+  heatToggle.textContent = latestSnapshot.billetLocation === "furnace" ? "取出查看" : "送入加热";
+  const overheating = latestSnapshot.averageTemperatureC >= state.workpiece.material.overheatTemperatureC;
+  heatStatus.textContent = `${latestSnapshot.billetLocation === "furnace" ? "炉内 · 整体加热中" : "炉外 · 查看火色 / 自然冷却"} · ${latestSnapshot.averageTemperatureC.toFixed(0)}℃${overheating ? " · 过热，继续加热会增加氧化与损伤" : ""}`;
   document.body.dataset.benchCount = String(latestSnapshot.benchCount);
   document.body.dataset.benchMaterialIds = state.bench.map((piece) => piece.material.id).join(",");
   document.body.dataset.benchWorkpieceIds = state.bench.map((piece) => piece.id).join(",");
@@ -433,7 +440,7 @@ function updateView(hammerPreview = null): void {
 
 function setStation(station: ForgeStation): void {
   if(cutting)return;
-  if (acceptanceStation && acceptanceVerb!=="cut" && !materialSession && station !== acceptanceStation) return;
+  if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
   if (activeStation === "materials" && station !== "materials"
     && materialSelection.getPieces().length > 0
@@ -442,7 +449,11 @@ function setStation(station: ForgeStation): void {
     updateView();
     return;
   }
-  if (heatingStartedAtMs !== null) stopHeating();
+  if (activeStation === "furnace") {
+    tickFurnace(performance.now(), true);
+    if (latestSnapshot.billetLocation === "furnace") stopHeating();
+  }
+  furnaceLastTick = null;
   pressStartedAtMs = null;
   pressTarget = null;
   gesture = null;
@@ -452,6 +463,7 @@ function setStation(station: ForgeStation): void {
   activeStation = station;
   cancelCutPreview();cutDrag=null;
   document.body.classList.toggle("cut-view",station==="cut");
+  document.body.classList.toggle("heat-view",station==="furnace");
   view?.setStation(station);
   view?.resize(viewport());
   updateView();
@@ -536,31 +548,36 @@ previousRackPage.addEventListener("click", () => { rackPage = Math.max(0, rackPa
 nextRackPage.addEventListener("click", () => { rackPage += 1; updateView(); });
 workpieceTravel.addEventListener("click", () => setStation(workpieceStation.value as ForgeStation));
 
+function tickFurnace(now: number, flush = false): void {
+  if (activeStation !== "furnace" || document.hidden || !document.hasFocus()) { furnaceLastTick = null; return; }
+  if (furnaceLastTick === null) { furnaceLastTick = now; return; }
+  const elapsedMs = now - furnaceLastTick;
+  if (elapsedMs <= 0 || (!flush && elapsedMs < 250)) return;
+  furnaceLastTick = now;
+  application.applyIntent({ kind: "move-billet", destination: latestSnapshot.billetLocation, elapsedMs: Math.min(elapsedMs, FORGE_RULES.maximumThermalIntentMs) });
+  updateView();
+}
+
 function startHeating(): void {
-  if (heatingStartedAtMs !== null) return;
-  if (latestSnapshot.billetLocation === "inspection") {
-    application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
-  }
-  heatingStartedAtMs = performance.now();
-  const tick = (): void => {
-    if (heatingStartedAtMs === null) return;
-    latestSnapshot = application.getSnapshot(Math.min(performance.now() - heatingStartedAtMs, 120_000));
-    view?.update(latestSnapshot, null, activeStation, temperPreviewC);
-    renderState();
-    heatingFrame = requestAnimationFrame(tick);
-  };
-  heatingFrame = requestAnimationFrame(tick);
+  tickFurnace(performance.now(), true);
+  application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+  updateView();
 }
 
 function stopHeating(): void {
-  if (heatingStartedAtMs === null) return;
-  const elapsedMs = Math.min(performance.now() - heatingStartedAtMs, 120_000);
-  if (heatingFrame !== null) cancelAnimationFrame(heatingFrame);
-  heatingFrame = null;
-  heatingStartedAtMs = null;
-  application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs });
+  tickFurnace(performance.now(), true);
+  application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
   updateView();
 }
+
+function toggleHeating(): void {
+  if (activeStation !== "furnace") return;
+  if (latestSnapshot.billetLocation === "furnace") stopHeating(); else startHeating();
+}
+heatToggle.addEventListener("click", toggleHeating);
+document.querySelector("#heat-overview")!.addEventListener("click", () => setStation("overview"));
+window.addEventListener("blur", () => { furnaceLastTick = null; });
+document.addEventListener("visibilitychange", () => { furnaceLastTick = null; });
 
 function releaseHammer(): void {
   if (pressStartedAtMs === null || pressTarget === null) return;
@@ -625,6 +642,8 @@ document.body.classList.toggle("cut-view",acceptanceStation==="cut");
 view = new ForgeBilletView(canvas, viewport());
 view.setStation(acceptanceStation ?? "overview");
 activeStation = acceptanceStation ?? "overview";
+document.body.classList.toggle("heat-view", activeStation === "furnace");
+view?.resize(viewport());
 updateView();
 if(activeStation==="cut")scheduleCutPreview();
 
@@ -675,11 +694,11 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
 
-  const target = view.pickHammerTarget(x, y);
-  if (activeStation === "furnace" && target) {
-    startHeating();
+  if (activeStation === "furnace") {
+    if (view.pickFurnace(x, y)) toggleHeating();
     return;
   }
+  const target = view.pickHammerTarget(x, y);
   if (activeStation === "anvil" && target) {
     pressStartedAtMs = performance.now();
     pressTarget = target;
@@ -756,15 +775,13 @@ canvas.addEventListener("pointerup", (event) => {
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
-  if (heatingStartedAtMs !== null) stopHeating();
-  else if (pressStartedAtMs !== null) releaseHammer();
+  if (pressStartedAtMs !== null) releaseHammer();
   else if (temperDrag !== null) finishTemper();
   else if (gesture !== null) finishGesture(x, y);
 });
 
 canvas.addEventListener("pointercancel", () => {
   cutDrag=null;
-  if (heatingStartedAtMs !== null) stopHeating();
   pressStartedAtMs = null;
   pressTarget = null;
   temperDrag = null;
@@ -774,7 +791,7 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement) return;
+  if (event.key !== "Escape" && (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement)) return;
   if(activeStation==="cut" && ["q","e","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Enter"].includes(event.key.length===1?event.key.toLowerCase():event.key)){
     event.preventDefault();if(cutting)return;
     const key=event.key.toLowerCase();
@@ -796,7 +813,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && activeStation !== "overview") {
-    if (acceptanceStation && acceptanceVerb!=="cut") return;
+    if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat") return;
     event.preventDefault();
     setStation("overview");
     return;
@@ -816,6 +833,7 @@ window.addEventListener("keydown", (event) => {
 });
 
 const renderFrame = (nowMs: number): void => {
+  tickFurnace(nowMs);
   view?.tick(nowMs);
   if (view) document.body.dataset.cameraState = view.isCameraTransitioning() ? "moving" : "settled";
   if(activeStation==="cut" && cutReady && !cutting)cutConfirm.disabled=view?.isCameraTransitioning()??true;
@@ -826,6 +844,5 @@ requestAnimationFrame(renderFrame);
 window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {
   cutWorker?.terminate();
-  if (heatingStartedAtMs !== null) stopHeating();
   view?.dispose();
 });
