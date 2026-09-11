@@ -178,7 +178,7 @@ function acceptanceState(state: ForgeState): readonly string[] {
       ];
     case "cut":
       return [
-        `当前截面 ${latestSnapshot.sections.length} · 当前节点 ${latestSnapshot.nodes.length}`,
+        `当前截面 ${latestSnapshot.sections.length} · 当前节点 ${latestSnapshot.geometry.nodes.length}`,
         `工作台 ${latestSnapshot.benchCount} 块 · 工件 ${latestSnapshot.workpieceId}`,
         shared,
       ];

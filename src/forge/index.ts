@@ -4,3 +4,4 @@ export * from "./forge-physics.ts";
 export * from "./forge-facts.ts";
 export * from "./forge-simulation.ts";
 export * from "./forge-types.ts";
+export * from "./workpiece-geometry.ts";

@@ -63,6 +63,7 @@ export interface BladeSection {
 }
 
 export interface WorkpieceNode {
+  readonly id: string;
   readonly axialIndex: number;
   readonly widthIndex: number;
   readonly heightIndex: number;
@@ -72,9 +73,10 @@ export interface WorkpieceNode {
 }
 
 export interface BladeBlock {
+  readonly id: string;
   readonly materialId: string;
-  // Identifies a spatial material region. Cutting creates new region identities;
-  // welding keeps them separate instead of pretending the result is homogeneous.
+  // Identifies a spatial material region. Cutting may partition one source region;
+  // welding keeps regions separate instead of pretending the result is homogeneous.
   readonly materialRegionId: string;
   readonly widthIndex: number;
   readonly heightIndex: number;
@@ -100,6 +102,43 @@ export interface BladeBlock {
 export interface WorkpieceGrid {
   readonly widthBlocks: number;
   readonly heightBlocks: number;
+}
+
+export interface WorkpieceOutlinePoint {
+  readonly id: string;
+  readonly axialPosition: number;
+  readonly lateralOffset: number;
+}
+
+export interface WorkpieceGeometry {
+  readonly kind: "planar-height-field-v1";
+  readonly grid: WorkpieceGrid;
+  readonly nodes: readonly WorkpieceNode[];
+  // Structured boundary; for solids this is a derived broad-phase convex
+  // envelope ONLY. Occupancy, surfaces and cuts must use solids when present.
+  readonly outline: readonly WorkpieceOutlinePoint[];
+  // Retained material inside the deformation lattice. Once present, these
+  // convex fragments (not the enclosing lattice) define occupied space.
+  readonly solids?: readonly WorkpieceSolid[];
+}
+
+export interface SolidVertex {
+  readonly weights: readonly { readonly nodeIndex: number; readonly weight: number }[];
+}
+
+export interface WorkpieceSolid {
+  readonly id: string;
+  readonly blockId: string;
+  readonly vertices: readonly SolidVertex[];
+  readonly faces: readonly (readonly number[])[];
+}
+
+export interface CutLoss {
+  readonly operationIndex: number;
+  readonly workpieceId: string;
+  readonly volume: number;
+  readonly mechanicalWorkJ: number;
+  readonly materials: readonly { readonly materialId: string; readonly materialRegionId: string; readonly volume: number }[];
 }
 
 export interface JointState {
@@ -136,8 +175,7 @@ export interface WorkpieceState {
   readonly layerCount: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
-  readonly grid: WorkpieceGrid;
-  readonly nodes: readonly WorkpieceNode[];
+  readonly geometry: WorkpieceGeometry;
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
   readonly thermal: WorkpieceThermalState;
@@ -205,7 +243,14 @@ export interface GrindOperation {
 // 切割：把当前工件在 sectionIndex 处一分为二，后半段移入工作台 bench。
 export interface CutOperation {
   readonly kind: "cut";
-  readonly sectionIndex: number;
+  /** Legacy orthogonal cut location. Omit when a finite path is supplied. */
+  readonly sectionIndex?: number;
+  readonly path?: {
+    readonly id: string;
+    readonly start: { readonly axialPosition: number; readonly lateralOffset: number };
+    readonly end: { readonly axialPosition: number; readonly lateralOffset: number };
+    readonly kerfWidth: number;
+  };
 }
 
 // 焊合：把当前工件与指定 bench 工件合并；保留来源区域，工件级材料按体积汇总。
@@ -278,10 +323,7 @@ export interface GrindIntent {
   readonly amount: number;
 }
 
-export interface CutIntent {
-  readonly kind: "cut";
-  readonly sectionIndex: number;
-}
+export type CutIntent = CutOperation;
 
 export interface WeldIntent {
   readonly kind: "weld";
@@ -313,6 +355,7 @@ export interface ForgeState {
   readonly workpiece: WorkpieceState;
   readonly bench: readonly WorkpieceState[];
   readonly operations: readonly ForgeOperation[];
+  readonly cutLosses?: readonly CutLoss[];
 }
 
 export interface ForgeSnapshotSection {
@@ -338,6 +381,9 @@ export interface ForgeSnapshotSection {
 }
 
 export interface ForgeSnapshotBlock {
+  readonly id: string;
+  readonly materialId: string;
+  readonly materialRegionId: string;
   readonly widthIndex: number;
   readonly heightIndex: number;
   readonly length: number;
@@ -362,8 +408,7 @@ export interface ForgeSnapshotWorkpiece {
   readonly workpieceId: string;
   readonly materialId: string;
   readonly averageTemperatureC: number;
-  readonly grid: WorkpieceGrid;
-  readonly nodes: readonly WorkpieceNode[];
+  readonly geometry: WorkpieceGeometry;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly layerCount: number;
   readonly carbon: number;
@@ -383,8 +428,7 @@ export interface ForgeSnapshot {
   readonly overheatDose: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
-  readonly grid: WorkpieceGrid;
-  readonly nodes: readonly WorkpieceNode[];
+  readonly geometry: WorkpieceGeometry;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;

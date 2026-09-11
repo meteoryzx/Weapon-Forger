@@ -93,8 +93,8 @@ describe("forge simulation", () => {
     const first = block(state, 0, 0, 0);
 
     expect(state.workpiece.sections).toHaveLength(168);
-    expect(state.workpiece.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
-    expect(state.workpiece.nodes).toHaveLength(169 * 25 * 5);
+    expect(state.workpiece.geometry.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
+    expect(state.workpiece.geometry.nodes).toHaveLength(169 * 25 * 5);
     expect(section(state, 0).blocks).toHaveLength(96);
     expect(first.length).toBe(FORGE_RULES.simulationCellSize);
     expect(first.width).toBe(FORGE_RULES.simulationCellSize);
@@ -397,9 +397,10 @@ describe("forge simulation", () => {
 });
 
 function latticeNode(state: ForgeState, axialIndex: number, widthIndex: number, heightIndex: number): WorkpieceNode {
-  const planeSize = (state.workpiece.grid.widthBlocks + 1) * (state.workpiece.grid.heightBlocks + 1);
-  const index = axialIndex * planeSize + heightIndex * (state.workpiece.grid.widthBlocks + 1) + widthIndex;
-  const result = state.workpiece.nodes[index];
+  const grid = state.workpiece.geometry.grid;
+  const planeSize = (grid.widthBlocks + 1) * (grid.heightBlocks + 1);
+  const index = axialIndex * planeSize + heightIndex * (grid.widthBlocks + 1) + widthIndex;
+  const result = state.workpiece.geometry.nodes[index];
   if (!result) throw new Error("Missing lattice node.");
   return result;
 }
@@ -434,8 +435,8 @@ function cellVolume(state: ForgeState, axial: number, width: number, height: num
 function geometricVolume(state: ForgeState): number {
   let volume = 0;
   for (let axial = 0; axial < state.workpiece.sections.length; axial += 1) {
-    for (let width = 0; width < state.workpiece.grid.widthBlocks; width += 1) {
-      for (let height = 0; height < state.workpiece.grid.heightBlocks; height += 1) {
+    for (let width = 0; width < state.workpiece.geometry.grid.widthBlocks; width += 1) {
+      for (let height = 0; height < state.workpiece.geometry.grid.heightBlocks; height += 1) {
         volume += cellVolume(state, axial, width, height);
       }
     }
@@ -445,8 +446,8 @@ function geometricVolume(state: ForgeState): number {
 
 function allTetrahedraPositive(state: ForgeState): boolean {
   for (let axial = 0; axial < state.workpiece.sections.length; axial += 1) {
-    for (let width = 0; width < state.workpiece.grid.widthBlocks; width += 1) {
-      for (let height = 0; height < state.workpiece.grid.heightBlocks; height += 1) {
+    for (let width = 0; width < state.workpiece.geometry.grid.widthBlocks; width += 1) {
+      for (let height = 0; height < state.workpiece.geometry.grid.heightBlocks; height += 1) {
         const nodes = cellNodes(state, axial, width, height);
         for (const tetrahedron of TETRAHEDRA) {
           const [a, b, c, d] = tetrahedron.map((index) => nodes[index]);
@@ -459,7 +460,7 @@ function allTetrahedraPositive(state: ForgeState): boolean {
 }
 
 function withRoughTop(state: ForgeState): ForgeState {
-  const nodes = state.workpiece.nodes.map((node) => {
+  const nodes = state.workpiece.geometry.nodes.map((node) => {
     const nearHammer = Math.abs(node.axialIndex - CENTER) <= 5
       && node.widthIndex >= CENTER_LEFT - 3 && node.widthIndex <= CENTER_LEFT + 4
       && node.heightIndex === FORGE_RULES.crossSectionHeightBlocks;
@@ -467,11 +468,17 @@ function withRoughTop(state: ForgeState): ForgeState {
       ? { ...node, verticalOffset: node.verticalOffset + ((node.axialIndex + node.widthIndex) % 2 === 0 ? 0.45 : -0.25) }
       : { ...node };
   });
-  return { ...state, workpiece: { ...state.workpiece, nodes } };
+  return {
+    ...state,
+    workpiece: {
+      ...state.workpiece,
+      geometry: { ...state.workpiece.geometry, nodes },
+    },
+  };
 }
 
 function topSurfaceRange(state: ForgeState): number {
-  const values = state.workpiece.nodes.filter((node) => (
+  const values = state.workpiece.geometry.nodes.filter((node) => (
     Math.abs(node.axialIndex - CENTER) <= 5
     && node.widthIndex >= CENTER_LEFT - 3 && node.widthIndex <= CENTER_LEFT + 4
     && node.heightIndex === FORGE_RULES.crossSectionHeightBlocks
@@ -480,7 +487,7 @@ function topSurfaceRange(state: ForgeState): number {
 }
 
 function billetLength(state: ForgeState): number {
-  const axial = state.workpiece.nodes.map((node) => node.axialPosition);
+  const axial = state.workpiece.geometry.nodes.map((node) => node.axialPosition);
   return Math.max(...axial) - Math.min(...axial);
 }
 

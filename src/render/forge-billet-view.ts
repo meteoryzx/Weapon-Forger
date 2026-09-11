@@ -34,6 +34,7 @@ import {
   type WorkpieceNode,
 } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
+import { solidSurface } from "../forge/solid-geometry.ts";
 import { MaterialsStationView, materialsCameraFrame } from "./materials-station-view.ts";
 
 const BILLET_AXIAL_SCALE = 0.58;
@@ -717,11 +718,30 @@ export class ForgeBilletView {
   }
 }
 
-function createBilletGeometry(
+export function createBilletGeometry(
   snapshot: ForgeSnapshotWorkpiece,
   hammerPreview: HammerInfluencePreview | null,
 ): BufferGeometry {
-  const perimeterVertexCount = (snapshot.grid.widthBlocks + snapshot.grid.heightBlocks) * 2;
+  if (snapshot.geometry.solids) {
+    const positions: number[] = [], colors: number[] = [];
+    const blocks = new Map(snapshot.sections.flatMap(section => section.blocks.map(block => [block.id, block] as const)));
+    for (const face of solidSurface(snapshot.geometry)) {
+      const block = blocks.get(face.blockId);
+      const color = temperatureColor(block?.temperatureC ?? 20, 0).lerp(materialColor(snapshot.carbon), 0.12);
+      for (let index = 1; index + 1 < face.points.length; index++) {
+        for (const point of [face.points[0]!, face.points[index]!, face.points[index + 1]!]) {
+          positions.push(point.x, point.y, point.z);
+          colors.push(color.r, color.g, color.b);
+        }
+      }
+    }
+    const geometry = new BufferGeometry();
+    geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3));
+    geometry.setAttribute("color", new BufferAttribute(new Float32Array(colors), 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  }
+  const perimeterVertexCount = (snapshot.geometry.grid.widthBlocks + snapshot.geometry.grid.heightBlocks) * 2;
   const ringCount = snapshot.sections.length + 1;
   const positions: number[] = [];
   const colors: number[] = [];
@@ -731,13 +751,13 @@ function createBilletGeometry(
     const profile = workpiecePerimeter(snapshot, ringIndex);
     profile.points.forEach((point, pointIndex) => {
       positions.push(point.axialPosition, point.verticalOffset, point.lateralOffset);
-      const preview = previewIntensityAtRingPoint(ringIndex, pointIndex, hammerPreview, snapshot.grid);
+      const preview = previewIntensityAtRingPoint(ringIndex, pointIndex, hammerPreview, snapshot.geometry.grid);
       const sectionIndex = Math.min(ringIndex, snapshot.sections.length - 1);
       const section = snapshot.sections[sectionIndex];
       const color = temperatureColor(temperatureAtPlane(snapshot.sections, ringIndex), preview)
         .lerp(materialColor(snapshot.carbon), 0.12)
         .lerp(new Color("#c9b58d"), Math.min(0.16, Math.max(0, snapshot.layerCount - 1) * 0.03));
-      const tint = perimeterTint(pointIndex, snapshot.grid) * (1 - (section?.groundAmount ?? 0) * 0.12);
+      const tint = perimeterTint(pointIndex, snapshot.geometry.grid) * (1 - (section?.groundAmount ?? 0) * 0.12);
       colors.push(color.r * tint, color.g * tint, color.b * tint);
     });
   }
@@ -765,7 +785,7 @@ function createBilletGeometry(
 
 function workpiecePerimeter(snapshot: ForgeSnapshotWorkpiece, axialIndex: number): { readonly points: readonly WorkpieceNode[] } {
   const points: WorkpieceNode[] = [];
-  const grid = snapshot.grid;
+  const grid = snapshot.geometry.grid;
 
   for (let boundary = 0; boundary < grid.widthBlocks; boundary += 1) {
     points.push(groundedNode(snapshot, axialIndex, boundary, grid.heightBlocks));
@@ -790,7 +810,7 @@ function groundedNode(
   heightIndex: number,
 ): WorkpieceNode {
   const node = workpieceNodeAt(snapshot, axialIndex, widthIndex, heightIndex);
-  if (heightIndex !== snapshot.grid.heightBlocks) return node;
+  if (heightIndex !== snapshot.geometry.grid.heightBlocks) return node;
   const sectionIndex = Math.min(axialIndex, snapshot.sections.length - 1);
   const groundAmount = snapshot.sections[sectionIndex]?.groundAmount ?? 0;
   return { ...node, verticalOffset: node.verticalOffset - groundAmount * 1.6 };
@@ -802,9 +822,10 @@ function workpieceNodeAt(
   widthIndex: number,
   heightIndex: number,
 ): WorkpieceNode {
-  const planeSize = (snapshot.grid.widthBlocks + 1) * (snapshot.grid.heightBlocks + 1);
-  const index = axialIndex * planeSize + heightIndex * (snapshot.grid.widthBlocks + 1) + widthIndex;
-  const node = snapshot.nodes[index];
+  const grid = snapshot.geometry.grid;
+  const planeSize = (grid.widthBlocks + 1) * (grid.heightBlocks + 1);
+  const index = axialIndex * planeSize + heightIndex * (grid.widthBlocks + 1) + widthIndex;
+  const node = snapshot.geometry.nodes[index];
   if (!node || node.axialIndex !== axialIndex || node.widthIndex !== widthIndex || node.heightIndex !== heightIndex) {
     throw new Error(`Missing billet node ${axialIndex}:${widthIndex}:${heightIndex}.`);
   }
