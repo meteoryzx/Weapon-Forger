@@ -63,6 +63,7 @@ export interface BladeSection {
 }
 
 export interface WorkpieceNode {
+  readonly id: string;
   readonly axialIndex: number;
   readonly widthIndex: number;
   readonly heightIndex: number;
@@ -72,9 +73,10 @@ export interface WorkpieceNode {
 }
 
 export interface BladeBlock {
+  readonly id: string;
   readonly materialId: string;
-  // Identifies a spatial material region. Cutting creates new region identities;
-  // welding keeps them separate instead of pretending the result is homogeneous.
+  // Identifies a spatial material region. Cutting may partition one source region;
+  // welding keeps regions separate instead of pretending the result is homogeneous.
   readonly materialRegionId: string;
   readonly widthIndex: number;
   readonly heightIndex: number;
@@ -100,6 +102,21 @@ export interface BladeBlock {
 export interface WorkpieceGrid {
   readonly widthBlocks: number;
   readonly heightBlocks: number;
+}
+
+export interface WorkpieceOutlinePoint {
+  readonly id: string;
+  readonly axialPosition: number;
+  readonly lateralOffset: number;
+}
+
+export interface WorkpieceGeometry {
+  readonly kind: "planar-height-field-v1";
+  readonly grid: WorkpieceGrid;
+  readonly nodes: readonly WorkpieceNode[];
+  // One counter-clockwise outer contour. Closed holes and overlapping height
+  // layers are deliberately outside the current 2.5D contract.
+  readonly outline: readonly WorkpieceOutlinePoint[];
 }
 
 export interface JointState {
@@ -136,8 +153,7 @@ export interface WorkpieceState {
   readonly layerCount: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
-  readonly grid: WorkpieceGrid;
-  readonly nodes: readonly WorkpieceNode[];
+  readonly geometry: WorkpieceGeometry;
   readonly sections: readonly BladeSection[];
   readonly joints: readonly JointState[];
   readonly thermal: WorkpieceThermalState;
@@ -338,6 +354,9 @@ export interface ForgeSnapshotSection {
 }
 
 export interface ForgeSnapshotBlock {
+  readonly id: string;
+  readonly materialId: string;
+  readonly materialRegionId: string;
   readonly widthIndex: number;
   readonly heightIndex: number;
   readonly length: number;
@@ -362,8 +381,7 @@ export interface ForgeSnapshotWorkpiece {
   readonly workpieceId: string;
   readonly materialId: string;
   readonly averageTemperatureC: number;
-  readonly grid: WorkpieceGrid;
-  readonly nodes: readonly WorkpieceNode[];
+  readonly geometry: WorkpieceGeometry;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly layerCount: number;
   readonly carbon: number;
@@ -383,8 +401,7 @@ export interface ForgeSnapshot {
   readonly overheatDose: number;
   readonly orientationQuarterTurns: 0 | 1 | 2 | 3;
   readonly feedOffset: number;
-  readonly grid: WorkpieceGrid;
-  readonly nodes: readonly WorkpieceNode[];
+  readonly geometry: WorkpieceGeometry;
   readonly sections: readonly ForgeSnapshotSection[];
   readonly hasCracks: boolean;
   readonly hasOverheatedSections: boolean;

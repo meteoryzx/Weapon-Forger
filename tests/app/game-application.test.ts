@@ -9,7 +9,7 @@ describe("heating application", () => {
 
     expect(initial.billetLocation).toBe("inspection");
     expect(initial.averageTemperatureC).toBe(20);
-    expect(initial.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
+    expect(initial.geometry.grid).toEqual({ widthBlocks: 24, heightBlocks: 4 });
 
     application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
     const heatingPreview = application.getSnapshot(15_000);

@@ -5,8 +5,11 @@ import {
   createForgeFacts,
   createForgeSnapshot,
   createForgeState,
+  FORGE_RULES,
+  outlineArea,
   replayForgeState,
   SPRING_STEEL,
+  splitOutlineByFiniteThroughCut,
   totalVolume,
   type ForgeOperation,
   type WorkpieceState,
@@ -17,6 +20,20 @@ function volumeOf(workpiece: WorkpieceState): number {
     (total, section) => total + section.blocks.reduce((subtotal, block) => subtotal + block.volume, 0),
     0,
   );
+}
+
+function conservedCellState(workpieces: readonly WorkpieceState[]) {
+  const blocks = workpieces.flatMap((workpiece) => workpiece.sections.flatMap((section) => section.blocks));
+  const weighted = (value: (block: (typeof blocks)[number]) => number) => (
+    blocks.reduce((sum, block) => sum + value(block) * block.volume, 0)
+  );
+  return {
+    volume: blocks.reduce((sum, block) => sum + block.volume, 0),
+    temperature: weighted((block) => block.temperatureC),
+    stress: weighted((block) => block.stress),
+    damage: weighted((block) => block.damage),
+    mechanicalWork: blocks.reduce((sum, block) => sum + block.mechanicalWorkJ, 0),
+  };
 }
 
 describe("cut, weld, temper", () => {
@@ -31,13 +48,52 @@ describe("cut, weld, temper", () => {
     expect(volumeOf(cut.workpiece) + volumeOf(cut.bench[0]!)).toBeCloseTo(before, 8);
     expect(cut.workpiece.layerCount).toBe(1);
 
-    const frontLastNode = cut.workpiece.nodes[cut.workpiece.nodes.length - 1];
-    const backFirstNode = cut.bench[0]?.nodes[0];
-    const backLastNode = cut.bench[0]?.nodes[cut.bench[0].nodes.length - 1];
-    expect(cut.workpiece.nodes[0]?.axialIndex).toBe(0);
+    const originalCellIds = initial.workpiece.sections.flatMap((section) => section.blocks.map((block) => block.id));
+    const cutCellIds = [cut.workpiece, ...cut.bench]
+      .flatMap((piece) => piece.sections.flatMap((section) => section.blocks.map((block) => block.id)));
+    expect(cutCellIds.sort()).toEqual(originalCellIds.sort());
+
+    const frontLastNode = cut.workpiece.geometry.nodes[cut.workpiece.geometry.nodes.length - 1];
+    const backFirstNode = cut.bench[0]?.geometry.nodes[0];
+    const backLastNode = cut.bench[0]?.geometry.nodes[cut.bench[0].geometry.nodes.length - 1];
+    expect(cut.workpiece.geometry.nodes[0]?.axialIndex).toBe(0);
     expect(backFirstNode?.axialIndex).toBe(0);
     expect(backFirstNode?.axialPosition).toBeCloseTo(0, 8);
     expect(backLastNode?.axialPosition).toBeCloseTo(frontLastNode?.axialPosition ?? 0, 8);
+  });
+
+  it("matches the old orthogonal cut and conserves cell process state", () => {
+    let initial = createForgeState({ sectionCount: 8 });
+    initial = applyForgeOperation(initial, { kind: "heat", temperatureC: 900 });
+    initial = applyForgeOperation(initial, { kind: "hammer", sectionIndex: 4, energy: 0.6 });
+    const before = conservedCellState([initial.workpiece]);
+    const cut = applyForgeOperation(initial, { kind: "cut", sectionIndex: 4 });
+    const after = conservedCellState([cut.workpiece, ...cut.bench]);
+
+    expect(after).toEqual(before);
+    expect(before.stress).toBeGreaterThan(0);
+
+    const pristine = createForgeState({ sectionCount: 8 });
+    const legacyCut = applyForgeOperation(pristine, { kind: "cut", sectionIndex: 4 });
+    const outline = pristine.workpiece.geometry.outline;
+    const cutPosition = pristine.workpiece.sections[4]!.position
+      - pristine.workpiece.sections[4]!.length / 2;
+    const lateral = outline.map((point) => point.lateralOffset);
+    const geometricCut = splitOutlineByFiniteThroughCut(outline, {
+      id: "legacy-equivalence",
+      start: { axialPosition: cutPosition, lateralOffset: Math.min(...lateral) - 1 },
+      end: { axialPosition: cutPosition, lateralOffset: Math.max(...lateral) + 1 },
+      kerfWidth: 0,
+    });
+    const primitiveVolumes = [geometricCut.negative, geometricCut.positive]
+      .map((piece) => outlineArea(piece) * FORGE_RULES.initialSectionThickness)
+      .sort((first, second) => first - second);
+    const legacyVolumes = [legacyCut.workpiece, ...legacyCut.bench]
+      .map(volumeOf)
+      .sort((first, second) => first - second);
+
+    expect(primitiveVolumes[0]).toBeCloseTo(legacyVolumes[0]!, 6);
+    expect(primitiveVolumes[1]).toBeCloseTo(legacyVolumes[1]!, 6);
   });
 
   it("switches the active workpiece without losing either raw state", () => {

@@ -6,6 +6,10 @@ import {
   FORGE_STATE_VERSION,
 } from "./forge-rules.ts";
 import { integrateMechanicalResponse } from "./forge-physics.ts";
+import {
+  cloneWorkpieceGeometry,
+  createStructuredWorkpieceGeometry,
+} from "./workpiece-geometry.ts";
 import type {
   BladeBlock,
   BladeSection,
@@ -109,7 +113,7 @@ function createWorkpiece(material: ForgeMaterial, id: string, sectionCount: numb
     throw new Error("A forge workpiece needs at least three sections.");
   }
   assertMaterial(material);
-  const nodes = createWorkpieceNodes(sectionCount, DEFAULT_GRID);
+  const nodes = createWorkpieceNodes(id, sectionCount, DEFAULT_GRID);
   const sections = Array.from({ length: sectionCount }, (_, sectionIndex) => (
     createSection(sectionIndex, nodes, DEFAULT_GRID, material.id, id)
   ));
@@ -119,8 +123,7 @@ function createWorkpiece(material: ForgeMaterial, id: string, sectionCount: numb
     layerCount: 1,
     orientationQuarterTurns: 0,
     feedOffset: 0,
-    grid: { ...DEFAULT_GRID },
-    nodes,
+    geometry: createStructuredWorkpieceGeometry(id, DEFAULT_GRID, nodes, sectionCount),
     sections,
     joints: [],
     thermal: {
@@ -149,10 +152,10 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
           sections: state.workpiece.sections.map((section, sectionIndex) => applyHeat(
             section,
             sectionIndex,
-            state.workpiece.nodes,
+            state.workpiece.geometry.nodes,
             operation.temperatureC,
             state.workpiece.material,
-            state.workpiece.grid,
+            state.workpiece.geometry.grid,
           )),
           thermal: {
             ...state.workpiece.thermal,
@@ -179,7 +182,7 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
           ...state.workpiece,
           feedOffset: clampFeedOffset(
             state.workpiece.feedOffset + operation.step * FORGE_RULES.feedStepLength,
-            state.workpiece.nodes,
+            state.workpiece.geometry.nodes,
           ),
         },
       }, operation);
@@ -228,8 +231,7 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
     overheatDose: state.workpiece.thermal.overheatDose,
     orientationQuarterTurns: state.workpiece.orientationQuarterTurns,
     feedOffset: state.workpiece.feedOffset,
-    grid: workpiece.grid,
-    nodes: workpiece.nodes,
+    geometry: workpiece.geometry,
     hasCracks: state.workpiece.sections.some((section) => section.cracked),
     hasOverheatedSections: state.workpiece.sections.some((section) => section.overheated),
     quenchMedium: quench?.medium ?? null,
@@ -254,8 +256,7 @@ function snapshotWorkpiece(workpiece: WorkpieceState): ForgeSnapshotWorkpiece {
     workpieceId: workpiece.id,
     materialId: workpiece.material.id,
     averageTemperatureC: averageWorkpieceTemperatureOf(workpiece),
-    grid: { ...workpiece.grid },
-    nodes: workpiece.nodes.map((node) => ({ ...node })),
+    geometry: cloneWorkpieceGeometry(workpiece.geometry),
     sections: workpiece.sections.map(sectionSnapshot),
     layerCount: workpiece.layerCount,
     carbon: workpiece.material.carbon,
@@ -331,7 +332,12 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
       temperatureC: FORGE_RULES.ambientTemperatureC,
       plasticity: calculatePlasticity(FORGE_RULES.ambientTemperatureC, state.workpiece.material),
     }));
-    return summarizeSection({ ...section, blocks }, sectionIndex, state.workpiece.nodes, state.workpiece.grid);
+    return summarizeSection(
+      { ...section, blocks },
+      sectionIndex,
+      state.workpiece.geometry.nodes,
+      state.workpiece.geometry.grid,
+    );
   });
   return appendOperation({
     ...state,
@@ -364,7 +370,7 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
     const progress = groundAmount - section.groundAmount;
     let removedVolume = 0;
     const blocks = section.blocks.map((block) => {
-      if (block.widthIndex !== state.workpiece.grid.widthBlocks - 1 || progress <= 0) return block;
+      if (block.widthIndex !== state.workpiece.geometry.grid.widthBlocks - 1 || progress <= 0) return block;
       const removal = Math.min(
         block.volume * 0.25,
         section.length * block.thickness * FORGE_RULES.grindRemovalDepthAtFullAmount * progress,
@@ -377,7 +383,7 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
       groundAmount,
       removedVolume: section.removedVolume + removedVolume,
       blocks,
-    }, index, state.workpiece.nodes, state.workpiece.grid);
+    }, index, state.workpiece.geometry.nodes, state.workpiece.geometry.grid);
   });
   return appendOperation({
     ...state,
@@ -429,7 +435,7 @@ function applyWeld(state: ForgeState, operation: WeldOperation): ForgeState {
     ...a,
     material,
     layerCount: a.layerCount + b.layerCount,
-    nodes: mergedGeometry.nodes,
+    geometry: mergedGeometry.geometry,
     sections: mergedGeometry.sections,
     thermal: {
       ...a.thermal,
@@ -512,22 +518,26 @@ function sliceWorkpiece(
   id: string,
 ): WorkpieceState {
   const sectionCount = endSection - startSection;
-  const baseNode = workpiece.nodes[workpieceNodeIndex(startSection, 0, 0, workpiece.grid)];
+  const { grid, nodes: sourceNodes } = workpiece.geometry;
+  const baseNode = sourceNodes[workpieceNodeIndex(startSection, 0, 0, grid)];
   if (!baseNode) throw new Error("Missing cut boundary node.");
   const nodes = [] as WorkpieceNode[];
   for (let axialIndex = 0; axialIndex <= sectionCount; axialIndex += 1) {
     const sourceAxialIndex = startSection + axialIndex;
-    for (let heightIndex = 0; heightIndex <= workpiece.grid.heightBlocks; heightIndex += 1) {
-      for (let widthIndex = 0; widthIndex <= workpiece.grid.widthBlocks; widthIndex += 1) {
-        const source = workpiece.nodes[workpieceNodeIndex(
+    for (let heightIndex = 0; heightIndex <= grid.heightBlocks; heightIndex += 1) {
+      for (let widthIndex = 0; widthIndex <= grid.widthBlocks; widthIndex += 1) {
+        const source = sourceNodes[workpieceNodeIndex(
           sourceAxialIndex,
           widthIndex,
           heightIndex,
-          workpiece.grid,
+          grid,
         )];
         if (!source) throw new Error("Missing node while slicing workpiece.");
+        const duplicatesCutBoundary = (sourceAxialIndex === startSection && startSection > 0)
+          || (sourceAxialIndex === endSection && endSection < workpiece.sections.length);
         nodes.push({
           ...source,
+          id: duplicatesCutBoundary ? `${source.id}:cut-boundary:${id}` : source.id,
           axialIndex,
           axialPosition: source.axialPosition - baseNode.axialPosition,
         });
@@ -543,32 +553,37 @@ function sliceWorkpiece(
       })),
     })),
     nodes,
-    workpiece.grid,
+    grid,
     0,
   );
-  return { ...workpiece, id, nodes, sections };
+  return {
+    ...workpiece,
+    id,
+    geometry: createStructuredWorkpieceGeometry(id, grid, nodes, sectionCount),
+    sections,
+  };
 }
 
 function mergeWorkpieceGeometry(
   first: WorkpieceState,
   second: WorkpieceState,
-): { readonly nodes: readonly WorkpieceNode[]; readonly sections: readonly BladeSection[] } {
-  if (first.grid.widthBlocks !== second.grid.widthBlocks
-    || first.grid.heightBlocks !== second.grid.heightBlocks) {
+): { readonly geometry: WorkpieceState["geometry"]; readonly sections: readonly BladeSection[] } {
+  if (first.geometry.grid.widthBlocks !== second.geometry.grid.widthBlocks
+    || first.geometry.grid.heightBlocks !== second.geometry.grid.heightBlocks) {
     throw new Error("Welded workpieces must use compatible simulation grids.");
   }
-  const grid = first.grid;
+  const grid = first.geometry.grid;
   const firstSectionCount = first.sections.length;
   const secondSectionCount = second.sections.length;
-  const firstStart = first.nodes[workpieceNodeIndex(0, 0, 0, grid)];
-  const firstEnd = first.nodes[workpieceNodeIndex(firstSectionCount, 0, 0, grid)];
-  const secondStart = second.nodes[workpieceNodeIndex(0, 0, 0, grid)];
+  const firstStart = first.geometry.nodes[workpieceNodeIndex(0, 0, 0, grid)];
+  const firstEnd = first.geometry.nodes[workpieceNodeIndex(firstSectionCount, 0, 0, grid)];
+  const secondStart = second.geometry.nodes[workpieceNodeIndex(0, 0, 0, grid)];
   if (!firstStart || !firstEnd || !secondStart) throw new Error("Missing weld boundary node.");
   const secondAxialOffset = firstEnd.axialPosition - secondStart.axialPosition;
   const nodes: WorkpieceNode[] = [];
   const planeSize = (grid.widthBlocks + 1) * (grid.heightBlocks + 1);
   for (let axialIndex = 0; axialIndex <= firstSectionCount + secondSectionCount; axialIndex += 1) {
-    const sourceNodes = axialIndex <= firstSectionCount ? first.nodes : second.nodes;
+    const sourceNodes = axialIndex <= firstSectionCount ? first.geometry.nodes : second.geometry.nodes;
     const sourceAxialIndex = axialIndex <= firstSectionCount
       ? axialIndex
       : axialIndex - firstSectionCount;
@@ -579,7 +594,7 @@ function mergeWorkpieceGeometry(
       nodes.push({
         ...source,
         axialIndex,
-        axialPosition: source.axialPosition + (sourceNodes === second.nodes ? secondAxialOffset : 0),
+        axialPosition: source.axialPosition + (sourceNodes === second.geometry.nodes ? secondAxialOffset : 0),
       });
     }
   }
@@ -587,7 +602,15 @@ function mergeWorkpieceGeometry(
     ...localizeSections(first.sections, nodes, grid, 0),
     ...localizeSections(second.sections, nodes, grid, firstSectionCount, secondAxialOffset),
   ];
-  return { nodes, sections };
+  return {
+    geometry: createStructuredWorkpieceGeometry(
+      first.id,
+      grid,
+      nodes,
+      firstSectionCount + secondSectionCount,
+    ),
+    sections,
+  };
 }
 
 function localizeSections(
@@ -661,7 +684,7 @@ function evolveThermalState(
 ): ForgeState {
   if (elapsedMs === 0) return state;
   const physicalSeconds = elapsedMs / 1000 * FORGE_RULES.thermalTimeScale;
-  const surfaceAreaM2 = workpieceSurfaceAreaM2(state.workpiece.nodes, state.workpiece.grid);
+  const surfaceAreaM2 = workpieceSurfaceAreaM2(state.workpiece.geometry.nodes, state.workpiece.geometry.grid);
   const massKg = totalVolume(state) * 1e-9 * state.workpiece.material.densityKgPerM3;
   let temperatureC = averageWorkpieceTemperature(state);
   let peakTemperatureC = state.workpiece.thermal.peakTemperatureC;
@@ -733,7 +756,12 @@ function evolveThermalState(
         overheated: block.overheated || thermalDamage > 0,
       };
     });
-    return summarizeSection({ ...section, blocks }, sectionIndex, state.workpiece.nodes, state.workpiece.grid);
+    return summarizeSection(
+      { ...section, blocks },
+      sectionIndex,
+      state.workpiece.geometry.nodes,
+      state.workpiece.geometry.grid,
+    );
   });
   return {
     ...state,
@@ -842,7 +870,7 @@ export function createHammerInfluencePreview(
   const contactTarget = contactTargetFor(targetSection, face, target.faceBias ?? 0.5);
   const samples = snapshot.sections.flatMap((section, sectionIndex) => section.blocks
     .filter((block) => (
-      isSurfaceBlock(block, face, snapshot.grid) && footprintWeight(section, block, contactTarget, face) > 0
+      isSurfaceBlock(block, face, snapshot.geometry.grid) && footprintWeight(section, block, contactTarget, face) > 0
     ))
     .map((block) => ({
       sectionIndex,
@@ -864,19 +892,24 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
   const targetSection = state.workpiece.sections[operation.sectionIndex];
   if (!targetSection) throw new Error("Missing hammer target section.");
   const target = contactTargetFor(targetSection, face, operation.faceBias ?? 0.5);
-  const contactCells = findContactCells(state.workpiece.sections, target, face, state.workpiece.grid);
+  const contactCells = findContactCells(state.workpiece.sections, target, face, state.workpiece.geometry.grid);
   if (contactCells.length === 0) return state;
-  const supportRatio = hammerSupportRatio(targetSection, state.workpiece.feedOffset, state.workpiece.nodes);
+  const supportRatio = hammerSupportRatio(targetSection, state.workpiece.feedOffset, state.workpiece.geometry.nodes);
 
   const plasticity = contactCells.reduce((sum, item) => (
     sum + (state.workpiece.sections[item.sectionIndex]?.blocks.find(
       (block) => block.widthIndex === item.widthIndex && block.heightIndex === item.heightIndex,
     )?.plasticity ?? 0)
   ), 0) / contactCells.length;
-  const activeBounds = activeBoundsFor(contactCells, face, state.workpiece.sections.length, state.workpiece.grid);
+  const activeBounds = activeBoundsFor(
+    contactCells,
+    face,
+    state.workpiece.sections.length,
+    state.workpiece.geometry.grid,
+  );
   const nodes = solveHammerContact(
-    state.workpiece.nodes,
-    state.workpiece.grid,
+    state.workpiece.geometry.nodes,
+    state.workpiece.geometry.grid,
     activeBounds,
     target,
     face,
@@ -892,7 +925,7 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
       block,
       sectionIndex,
       nodes,
-      state.workpiece.grid,
+      state.workpiece.geometry.grid,
     ));
     const updatedBlocks = geometricBlocks.map((geometry, blockIndex) => {
       const before = section.blocks[blockIndex];
@@ -909,12 +942,26 @@ function applyHammer(state: ForgeState, operation: HammerOperation): ForgeState 
         )
         : geometry;
     });
-    return summarizeSection({ ...section, blocks: updatedBlocks }, sectionIndex, nodes, state.workpiece.grid);
+    return summarizeSection(
+      { ...section, blocks: updatedBlocks },
+      sectionIndex,
+      nodes,
+      state.workpiece.geometry.grid,
+    );
   });
 
   return {
     ...state,
-    workpiece: { ...state.workpiece, nodes, sections },
+    workpiece: {
+      ...state.workpiece,
+      geometry: createStructuredWorkpieceGeometry(
+        state.workpiece.id,
+        state.workpiece.geometry.grid,
+        nodes,
+        state.workpiece.sections.length,
+      ),
+      sections,
+    },
   };
 }
 
@@ -1311,7 +1358,7 @@ function findContactCells(
     .map((block) => ({ sectionIndex, widthIndex: block.widthIndex, heightIndex: block.heightIndex })));
 }
 
-function createWorkpieceNodes(sectionCount: number, grid: WorkpieceGrid): readonly WorkpieceNode[] {
+function createWorkpieceNodes(workpieceId: string, sectionCount: number, grid: WorkpieceGrid): readonly WorkpieceNode[] {
   const width = FORGE_RULES.initialSectionWidth / grid.widthBlocks;
   const height = FORGE_RULES.initialSectionThickness / grid.heightBlocks;
   const nodes: WorkpieceNode[] = [];
@@ -1319,6 +1366,7 @@ function createWorkpieceNodes(sectionCount: number, grid: WorkpieceGrid): readon
     for (let heightIndex = 0; heightIndex <= grid.heightBlocks; heightIndex += 1) {
       for (let widthIndex = 0; widthIndex <= grid.widthBlocks; widthIndex += 1) {
         nodes.push({
+          id: `${workpieceId}:node:${axialIndex}:${widthIndex}:${heightIndex}`,
           axialIndex,
           widthIndex,
           heightIndex,
@@ -1343,6 +1391,7 @@ function createSection(
     const widthIndex = blockIndex % grid.widthBlocks;
     const heightIndex = Math.floor(blockIndex / grid.widthBlocks);
     const initial: BladeBlock = {
+      id: `${materialRegionId}:cell:${sectionIndex}:${widthIndex}:${heightIndex}`,
       materialId,
       materialRegionId,
       widthIndex,
@@ -1559,6 +1608,9 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
     groundAmount: section.groundAmount,
     removedVolume: section.removedVolume,
     blocks: section.blocks.map((block): ForgeSnapshotBlock => ({
+      id: block.id,
+      materialId: block.materialId,
+      materialRegionId: block.materialRegionId,
       widthIndex: block.widthIndex,
       heightIndex: block.heightIndex,
       length: block.length,
@@ -1589,8 +1641,7 @@ function cloneStateWithoutOperations(state: ForgeState): ForgeState {
   const cloneWorkpiece = (workpiece: WorkpieceState): WorkpieceState => ({
     ...workpiece,
     material: { ...workpiece.material },
-    grid: { ...workpiece.grid },
-    nodes: workpiece.nodes.map((node) => ({ ...node })),
+    geometry: cloneWorkpieceGeometry(workpiece.geometry),
     sections: workpiece.sections.map((section) => ({
       ...section,
       blocks: section.blocks.map((block) => ({ ...block })),

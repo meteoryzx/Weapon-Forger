@@ -42,7 +42,7 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await page.locator("#material-return").click();
   await expect(page.locator("body")).toHaveAttribute("data-current-workpiece-location", "rack");
   await expect(page.locator("#workpiece-travel")).toBeDisabled();
-  await page.locator("#game").click({ position: materialPoint("rack", [-174, 288, -112]) });
+  await page.locator("#game").click({ position: materialPoint("table", [-174, 74, 48]) });
   await expect(page.locator("body")).toHaveAttribute("data-current-workpiece-location", "table");
   await expect(page.locator("#workpiece-travel")).toBeEnabled();
   await expect(page.locator("body")).toHaveAttribute("data-carbon", "0.900000");
