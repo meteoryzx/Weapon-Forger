@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    "docs/OPENCODE_HANDOFF.md"
+  ],
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  "share": "manual"
+}
