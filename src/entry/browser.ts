@@ -732,8 +732,10 @@ function finishQuench(): void {
   if (quenchDrag === null || !view) return;
   const station = activeStation as QuenchStation;
   const offset = view.quenchOffsetFor(station);
-  const immersion = Math.min(1, Math.max(0, (Math.max(0, -offset.z) + 12) / 92));
-  if (quenchDrag.distance > 8 && immersion > 0.05) {
+  // The near side of the basin is still outside the liquid. Releasing there
+  // cancels the gesture; only a clear crossing of the liquid surface commits.
+  const immersion = Math.min(1, Math.max(0, (-offset.z - 18) / 72));
+  if (quenchDrag.distance > 12 && immersion > 0.08) {
     application.applyIntent({
       kind: "quench",
       medium: station === "quench-water" ? "water" : "oil",
