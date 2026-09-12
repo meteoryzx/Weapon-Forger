@@ -10,6 +10,17 @@ import {
 } from "../../src/forge/index.ts";
 
 describe("quench and grind", () => {
+  it("records interaction facts and preserves partial cooling for a shallow moving quench", () => {
+    let state = applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "heat", temperatureC: 900 });
+    state = applyForgeOperation(state, {
+      kind: "quench", medium: "oil", immersion: 0.35, movement: 0.2, dwellMs: 120, exitTemperatureC: 610,
+    });
+    const event = state.workpiece.heatTreatments.at(-1);
+    expect(event).toMatchObject({ kind: "quench", medium: "oil", immersion: 0.35, movement: 0.2, dwellMs: 120, exitTemperatureC: 610 });
+    expect(event?.kind === "quench" ? event.endTemperatureC : 0).toBeGreaterThan(40);
+    expect(event?.kind === "quench" ? event.endTemperatureC : 0).toBeLessThan(900);
+  });
+
   it("quench records its medium and start temperature, then cools to ambient", () => {
     let state = createForgeState();
     state = applyForgeOperation(state, { kind: "heat", temperatureC: 900 });

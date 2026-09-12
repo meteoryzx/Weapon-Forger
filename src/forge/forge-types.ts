@@ -157,6 +157,10 @@ export interface QuenchEvent {
   readonly medium: QuenchMedium;
   readonly startTemperatureC: number;
   readonly endTemperatureC: number;
+  readonly immersion?: number;
+  readonly movement?: number;
+  readonly dwellMs?: number;
+  readonly exitTemperatureC?: number;
 }
 
 export interface TemperEvent {
@@ -248,6 +252,11 @@ export interface SurfaceHammerOperation {
 export interface QuenchOperation {
   readonly kind: "quench";
   readonly medium: QuenchMedium;
+  /** Normalized interaction facts. Optional for legacy replays. */
+  readonly immersion?: number;
+  readonly movement?: number;
+  readonly dwellMs?: number;
+  readonly exitTemperatureC?: number;
 }
 
 export interface GrindOperation {
@@ -332,6 +341,10 @@ export interface MoveBilletIntent {
 export interface QuenchIntent {
   readonly kind: "quench";
   readonly medium: QuenchMedium;
+  readonly immersion?: number;
+  readonly movement?: number;
+  readonly dwellMs?: number;
+  readonly exitTemperatureC?: number;
 }
 
 export interface GrindIntent {

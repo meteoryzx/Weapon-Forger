@@ -332,6 +332,7 @@ const heatToggle = document.querySelector<HTMLButtonElement>("#heat-toggle")!;
 const heatStatus = document.querySelector<HTMLElement>("#heat-status")!;
 let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
+let quenchDrag: { readonly startedAtMs: number; readonly startPoint: { x: number; z: number }; distance: number } | null = null;
 let gesture: {
   readonly kind: "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
@@ -348,8 +349,8 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
-  "quench-water": { title: "水槽 · 淬火", hint: "把钢坯拖进水面，松开完成水淬。" },
-  "quench-oil": { title: "油槽 · 淬火", hint: "把钢坯拖进油面，松开完成油淬。" },
+  "quench-water": { title: "水槽 · 淬火", hint: "按住钢坯拖入水面，在槽内移动或停留，松开后才完成水淬。" },
+  "quench-oil": { title: "油槽 · 淬火", hint: "按住钢坯拖入油面，在槽内移动或停留，松开后才完成油淬。" },
   temper: { title: "回火炉 · 回火", hint: "拖动温度控制，松开把当前温度写入工件。" },
   grind: { title: "磨石 · 研磨", hint: "沿刃口连续拖动，拖动长度决定这一道研磨量。" },
 };
@@ -727,6 +728,25 @@ function finishTemper(): void {
   updateView();
 }
 
+function finishQuench(): void {
+  if (quenchDrag === null || !view) return;
+  const station = activeStation as QuenchStation;
+  const offset = view.quenchOffsetFor(station);
+  const immersion = Math.min(1, Math.max(0, (Math.max(0, -offset.z) + 12) / 92));
+  if (quenchDrag.distance > 8 && immersion > 0.05) {
+    application.applyIntent({
+      kind: "quench",
+      medium: station === "quench-water" ? "water" : "oil",
+      immersion,
+      movement: Math.min(1, quenchDrag.distance / 260),
+      dwellMs: performance.now() - quenchDrag.startedAtMs,
+      exitTemperatureC: latestSnapshot.averageTemperatureC,
+    });
+  }
+  quenchDrag = null;
+  updateView();
+}
+
 document.body.classList.toggle("cut-view",acceptanceStation==="cut");
 view = new ForgeBilletView(canvas, viewport());
 view.setStation(acceptanceStation ?? "overview");
@@ -821,14 +841,9 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
   if ((activeStation === "quench-water" || activeStation === "quench-oil") && target) {
-    gesture = {
-      kind: "quench",
-      target,
-      weldBenchIndex: null,
-      startedAtMs: performance.now(),
-      startX: x,
-      startY: y,
-    };
+    const point = view.quenchTablePoint(x, y);
+    if (!point) return;
+    quenchDrag = { startedAtMs: performance.now(), startPoint: point, distance: 0 };
     return;
   }
   if (activeStation === "temper" && view.pickTemperControl(x, y)) {
@@ -857,6 +872,15 @@ canvas.addEventListener("pointermove", (event) => {
     }
     return;
   }
+  if (quenchDrag !== null && view && (activeStation === "quench-water" || activeStation === "quench-oil")) {
+    const bounds = canvas.getBoundingClientRect();
+    const point = view.quenchTablePoint(event.clientX - bounds.left, event.clientY - bounds.top);
+    if (point) {
+      quenchDrag.distance += Math.hypot(point.x - quenchDrag.startPoint.x, point.z - quenchDrag.startPoint.z);
+      view.updateQuenchPosition(point, activeStation);
+    }
+    return;
+  }
   if (temperDrag === null) return;
   const bounds = canvas.getBoundingClientRect();
   updateTemperPreview(event.clientY - bounds.top);
@@ -870,6 +894,7 @@ canvas.addEventListener("pointerup", (event) => {
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
   if (temperDrag !== null) finishTemper();
+  else if (quenchDrag !== null) finishQuench();
   else if (gesture !== null) finishGesture(x, y);
 });
 
@@ -878,6 +903,7 @@ canvas.addEventListener("pointercancel", () => {
   cutDrag=null;
   temperDrag = null;
   temperPreviewC = null;
+  quenchDrag = null;
   gesture = null;
   updateView();
 });

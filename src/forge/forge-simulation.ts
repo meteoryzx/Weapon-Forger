@@ -349,11 +349,20 @@ function applyMoveBillet(state: ForgeState, operation: MoveBilletOperation): For
 function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState {
   assertQuenchMedium(operation.medium);
   const startTemperatureC = roundThermal(averageWorkpieceTemperature(state));
+  const hasInteractionFacts = operation.immersion !== undefined || operation.movement !== undefined || operation.dwellMs !== undefined;
+  const immersion = clamp(operation.immersion ?? 1, 0, 1);
+  const movement = clamp(operation.movement ?? 0.5, 0, 1);
+  const dwellMs = Math.max(0, Math.min(30_000, operation.dwellMs ?? 1_000));
+  const mediumRate = operation.medium === "water" ? 1.2 : 0.72;
+  const coolingExponent = mediumRate * (1.6 * immersion + 0.7 * movement + dwellMs / 900);
+  const endTemperatureC = hasInteractionFacts
+    ? roundThermal(FORGE_RULES.ambientTemperatureC + (startTemperatureC - FORGE_RULES.ambientTemperatureC) * Math.exp(-coolingExponent))
+    : FORGE_RULES.ambientTemperatureC;
   const sections = state.workpiece.sections.map((section, sectionIndex) => {
     const blocks = section.blocks.map((block) => ({
       ...block,
-      temperatureC: FORGE_RULES.ambientTemperatureC,
-      plasticity: calculatePlasticity(FORGE_RULES.ambientTemperatureC, state.workpiece.material),
+      temperatureC: endTemperatureC,
+      plasticity: calculatePlasticity(endTemperatureC, state.workpiece.material),
     }));
     return summarizeSection(
       { ...section, blocks },
@@ -372,7 +381,8 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
         operationIndex: state.operations.length,
         medium: operation.medium,
         startTemperatureC,
-        endTemperatureC: FORGE_RULES.ambientTemperatureC,
+        endTemperatureC,
+        ...(hasInteractionFacts ? { immersion, movement, dwellMs, exitTemperatureC: operation.exitTemperatureC ?? endTemperatureC } : {}),
       }],
     },
   }, operation);

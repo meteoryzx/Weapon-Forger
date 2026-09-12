@@ -176,6 +176,7 @@ export class ForgeBilletView {
   private transitionStartedAtMs = 0;
   private isTransitioning = false;
   private temperPreviewC: number | null = null;
+  private quenchOffset = new Vector3();
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -300,6 +301,12 @@ export class ForgeBilletView {
       this.billetHitTarget.geometry=new BoxGeometry(size.x*BILLET_AXIAL_SCALE,Math.max(size.y,12),size.z);
       this.billetHitTarget.position.set(snapshot.feedOffset*BILLET_AXIAL_SCALE,size.y/2,0);
     }
+    if (activeStation === "quench-water" || activeStation === "quench-oil") {
+      this.billetRig.position.x += this.quenchOffset.x;
+      this.billetRig.position.z += this.quenchOffset.z;
+    } else {
+      this.quenchOffset.set(0, 0, 0);
+    }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
     if(activeStation==="cut") this.sawView.update(snapshot,this.cutPose,this.cutValid);
@@ -308,6 +315,7 @@ export class ForgeBilletView {
 
   setStation(station: ForgeStation, nowMs = performance.now()): void {
     if (station === this.station && !this.isTransitioning) return;
+    if (station === "quench-water" || station === "quench-oil") this.quenchOffset.set(0, 0, 0);
     this.station = station;
     this.cameraFromPosition.copy(this.camera.position);
     this.cameraFromTarget.copy(this.cameraTarget);
@@ -467,6 +475,27 @@ export class ForgeBilletView {
   pickQuenchBasin(viewportX: number, viewportY: number, station: QuenchStation): boolean {
     const basin = this.quenchTargets.get(station);
     return basin ? this.pickObject(viewportX, viewportY, [basin], false) !== null : false;
+  }
+
+  quenchTablePoint(x: number, y: number): { x: number; z: number } | null {
+    this.pointer.set(x / this.viewport.width * 2 - 1, 1 - y / this.viewport.height * 2);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const point = this.raycaster.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), -48), new Vector3());
+    return point ? { x: point.x, z: point.z } : null;
+  }
+
+  updateQuenchPosition(point: { x: number; z: number }, station: QuenchStation): void {
+    const anchor = BILLET_ANCHORS[station];
+    this.quenchOffset.set(
+      Math.max(-70, Math.min(70, point.x - anchor[0])),
+      0,
+      Math.max(-95, Math.min(85, point.z - anchor[2])),
+    );
+    if (this.snapshot) this.update(this.snapshot, null, station, this.temperPreviewC);
+  }
+
+  quenchOffsetFor(_station: QuenchStation): { x: number; z: number } {
+    return { x: this.quenchOffset.x, z: this.quenchOffset.z };
   }
 
   pickTemperControl(viewportX: number, viewportY: number): boolean {
@@ -708,11 +737,22 @@ export class ForgeBilletView {
     this.addStationObject("grind", grindHub);
 
     for (const [station, color] of [["quench-water", "#6da9c3"], ["quench-oil", "#b28a4d"]] as const) {
+      const anchor = STATION_ANCHORS[station];
+      const rim = new MeshStandardMaterial({ color: "#3e4547", metalness: 0.65, roughness: 0.72 });
+      for (const [size, position] of [
+        [[82, 10, 8], [anchor[0], 52, anchor[2] - 30]],
+        [[82, 10, 8], [anchor[0], 52, anchor[2] + 30]],
+        [[8, 10, 52], [anchor[0] - 37, 52, anchor[2]]],
+        [[8, 10, 52], [anchor[0] + 37, 52, anchor[2]]],
+      ] as const) {
+        const rail = new Mesh(new BoxGeometry(...size), rim);
+        rail.position.set(...position);
+        this.addStationObject(station, rail);
+      }
       const basin = new Mesh(
         new BoxGeometry(70, 8, 52),
         new MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.9 }),
       );
-      const anchor = STATION_ANCHORS[station];
       basin.position.set(anchor[0], anchor[1], anchor[2]);
       this.quenchTargets.set(station, basin);
       this.addStationObject(station, basin);
