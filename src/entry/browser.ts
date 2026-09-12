@@ -333,6 +333,8 @@ const heatStatus = document.querySelector<HTMLElement>("#heat-status")!;
 let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
 let quenchDrag: { readonly startedAtMs: number; readonly startPoint: { x: number; z: number }; distance: number } | null = null;
+let quenchContacted = false;
+let quenchLastTick: number | null = null;
 let gesture: {
   readonly kind: "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
@@ -349,8 +351,8 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
-  "quench-water": { title: "水槽 · 淬火", hint: "按住钢坯拖入水面，在槽内移动或停留，松开后才完成水淬。" },
-  "quench-oil": { title: "油槽 · 淬火", hint: "按住钢坯拖入油面，在槽内移动或停留，松开后才完成油淬。" },
+  "quench-water": { title: "水槽 · 淬火", hint: "滚轮在 Y‑Z 平面旋转；W/S 上下移动；A/D 在 X‑Z 平面翻转。钢坯触液后开始冷却。" },
+  "quench-oil": { title: "油槽 · 淬火", hint: "滚轮在 Y‑Z 平面旋转；W/S 上下移动；A/D 在 X‑Z 平面翻转。钢坯触液后开始冷却。" },
   temper: { title: "回火炉 · 回火", hint: "拖动温度控制，松开把当前温度写入工件。" },
   grind: { title: "磨石 · 研磨", hint: "沿刃口连续拖动，拖动长度决定这一道研磨量。" },
 };
@@ -746,6 +748,8 @@ function finishQuench(): void {
     });
   }
   quenchDrag = null;
+  quenchContacted = false;
+  quenchLastTick = null;
   updateView();
 }
 
@@ -881,6 +885,7 @@ canvas.addEventListener("pointermove", (event) => {
       quenchDrag.distance += Math.hypot(point.x - quenchDrag.startPoint.x, point.z - quenchDrag.startPoint.z);
       view.updateQuenchPosition(point, activeStation);
     }
+    quenchContacted = view.quenchPose().vertical <= -22;
     return;
   }
   if (temperDrag === null) return;
@@ -938,6 +943,20 @@ window.addEventListener("keydown", (event) => {
     setStation("overview");
     return;
   }
+  if (activeStation === "quench-water" || activeStation === "quench-oil") {
+    const pose = view?.quenchPose();
+    if (!pose) return;
+    const step = Math.PI / 24;
+    switch (event.key.toLowerCase()) {
+      case "w": view?.setQuenchPose({ vertical: pose.vertical + 8 }); break;
+      case "s": view?.setQuenchPose({ vertical: pose.vertical - 8 }); break;
+      case "a": view?.setQuenchPose({ flip: pose.flip - step }); break;
+      case "d": view?.setQuenchPose({ flip: pose.flip + step }); break;
+      default: return;
+    }
+    event.preventDefault();
+    return;
+  }
   if (activeStation !== "anvil") return;
   const step=Math.PI/36,wrap=(n:number)=>Math.atan2(Math.sin(n),Math.cos(n));
   switch (event.key.toLowerCase()) {
@@ -955,6 +974,12 @@ window.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("wheel",event=>{
+  if (activeStation === "quench-water" || activeStation === "quench-oil") {
+    event.preventDefault();
+    const pose = view?.quenchPose();
+    if (pose) view?.setQuenchPose({ tilt: pose.tilt + (event.deltaY < 0 ? 1 : -1) * Math.PI / 36 });
+    return;
+  }
   if(activeStation!=="anvil")return;event.preventDefault();
   hammerEnergy=Math.round(Math.max(0.1,Math.min(1,hammerEnergy+(event.deltaY<0?0.05:-0.05)))*100)/100;
   refreshHammerInterface();aimHammer(hammerAim);
@@ -962,6 +987,15 @@ canvas.addEventListener("wheel",event=>{
 
 const renderFrame = (nowMs: number): void => {
   tickFurnace(nowMs);
+  if ((activeStation === "quench-water" || activeStation === "quench-oil") && quenchContacted && document.hasFocus()) {
+    if (quenchLastTick === null) quenchLastTick = nowMs;
+    const elapsedMs = nowMs - quenchLastTick;
+    if (elapsedMs >= 250) {
+      quenchLastTick = nowMs;
+      application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: Math.min(elapsedMs, 1000) });
+      updateView();
+    }
+  } else quenchLastTick = null;
   view?.tick(nowMs);
   if (view) document.body.dataset.cameraState = view.isCameraTransitioning() ? "moving" : "settled";
   if(activeStation==="cut" && cutReady && !cutting)cutConfirm.disabled=view?.isCameraTransitioning()??true;

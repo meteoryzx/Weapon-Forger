@@ -177,6 +177,9 @@ export class ForgeBilletView {
   private isTransitioning = false;
   private temperPreviewC: number | null = null;
   private quenchOffset = new Vector3();
+  private quenchVertical = 70;
+  private quenchTilt = 0;
+  private quenchFlip = 0;
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -304,6 +307,9 @@ export class ForgeBilletView {
     if (activeStation === "quench-water" || activeStation === "quench-oil") {
       this.billetRig.position.x += this.quenchOffset.x;
       this.billetRig.position.z += this.quenchOffset.z;
+      this.billetRig.position.y += this.quenchVertical;
+      this.billet.rotation.x = this.quenchTilt;
+      this.billet.rotation.z = this.quenchFlip;
     } else {
       this.quenchOffset.set(0, 0, 0);
     }
@@ -315,7 +321,12 @@ export class ForgeBilletView {
 
   setStation(station: ForgeStation, nowMs = performance.now()): void {
     if (station === this.station && !this.isTransitioning) return;
-    if (station === "quench-water" || station === "quench-oil") this.quenchOffset.set(0, 0, 0);
+    if (station === "quench-water" || station === "quench-oil") {
+      this.quenchOffset.set(0, 0, 0);
+      this.quenchVertical = 70;
+      this.quenchTilt = 0;
+      this.quenchFlip = 0;
+    }
     this.station = station;
     this.cameraFromPosition.copy(this.camera.position);
     this.cameraFromTarget.copy(this.cameraTarget);
@@ -496,6 +507,17 @@ export class ForgeBilletView {
 
   quenchOffsetFor(_station: QuenchStation): { x: number; z: number } {
     return { x: this.quenchOffset.x, z: this.quenchOffset.z };
+  }
+
+  setQuenchPose(pose: { vertical?: number; tilt?: number; flip?: number }): void {
+    if (pose.vertical !== undefined) this.quenchVertical = Math.max(-70, Math.min(120, pose.vertical));
+    if (pose.tilt !== undefined) this.quenchTilt = pose.tilt;
+    if (pose.flip !== undefined) this.quenchFlip = pose.flip;
+    if (this.snapshot && (this.station === "quench-water" || this.station === "quench-oil")) this.update(this.snapshot, null, this.station, this.temperPreviewC);
+  }
+
+  quenchPose(): { vertical: number; tilt: number; flip: number } {
+    return { vertical: this.quenchVertical, tilt: this.quenchTilt, flip: this.quenchFlip };
   }
 
   pickTemperControl(viewportX: number, viewportY: number): boolean {
