@@ -3,7 +3,7 @@ import { BoxGeometry, BufferGeometry, CylinderGeometry, DoubleSide, Group, Line,
 import type { ForgeSnapshot, ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { CUT_TABLE, SAW_PATH, cutBounds, type CutPose } from "../app/cut-placement.ts";
 
-export const SAW_ORIGIN = new Vector3(-420, 0, 360);
+export const SAW_ORIGIN = new Vector3(-500, 0, 420);
 export function sawCameraFrame(aspect: number) {
   const target = new Vector3(0, 103, 8).add(SAW_ORIGIN);
   const position = new Vector3(16, 244, 366).add(SAW_ORIGIN);
@@ -30,6 +30,8 @@ export class SawStationView {
 
   constructor(private readonly geometryOf: (piece: ForgeSnapshotWorkpiece) => BufferGeometry) {
     this.group.position.copy(SAW_ORIGIN);
+    this.group.rotation.y = Math.PI / 2;
+    this.group.scale.set(0.82, 1, 0.82);
     this.table = this.box([204.2, 16, 250], [-102.9, 63, 0], this.wood);
     this.box([204.2,16,250],[102.9,63,0],this.wood);
     this.table.userData.station = "cut";
@@ -86,9 +88,7 @@ export class SawStationView {
     this.group.updateMatrixWorld(true);
     for(let i=0;i<=40;i++) {
       const z=SAW_PATH.startZ+(SAW_PATH.endZ-SAW_PATH.startZ)*i/40;
-      ray.set(new Vector3(SAW_ORIGIN.x,400,SAW_ORIGIN.z+z),new Vector3(0,-1,0));
-      const hit=ray.intersectObject(this.item,false)[0];
-      points.push(new Vector3(0,(hit?.point.y ?? CUT_TABLE.surface)+0.55,z));
+      points.push(new Vector3(0,CUT_TABLE.surface+0.55,z));
     }
     this.guide.geometry=new BufferGeometry().setFromPoints(points);
     this.guide.computeLineDistances();

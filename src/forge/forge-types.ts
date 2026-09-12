@@ -230,6 +230,21 @@ export interface HammerOperation {
   readonly faceBias?: number;
 }
 
+/** Millimetres on the anvil; yaw around world up, roll around the billet's long axis. */
+export interface HammerPose {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly roll: number;
+}
+
+export interface SurfaceHammerOperation {
+  readonly kind: "surface-hammer";
+  readonly pose: HammerPose;
+  readonly target: { readonly x: number; readonly z: number };
+  readonly energy: number;
+}
+
 export interface QuenchOperation {
   readonly kind: "quench";
   readonly medium: QuenchMedium;
@@ -274,6 +289,7 @@ export type ForgeOperation =
   | RotateOperation
   | FeedOperation
   | HammerOperation
+  | SurfaceHammerOperation
   | QuenchOperation
   | GrindOperation
   | CutOperation
@@ -340,6 +356,7 @@ export type ForgeIntent =
   | SelectMaterialIntent
   | SelectWorkpieceIntent
   | HammerIntent
+  | SurfaceHammerOperation
   | RotateIntent
   | FeedIntent
   | MoveBilletIntent

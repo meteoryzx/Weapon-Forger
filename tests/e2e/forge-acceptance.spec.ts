@@ -22,7 +22,7 @@ for (const [verb, station, title] of acceptanceSlices) {
     await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
 
     await page.keyboard.press("Escape");
-    await expect(page.locator("body")).toHaveAttribute("data-active-station", verb==="cut" || verb==="heat" ? "overview" : station);
+    await expect(page.locator("body")).toHaveAttribute("data-active-station", ["cut","heat","hammer"].includes(verb) ? "overview" : station);
   });
 }
 
@@ -39,7 +39,8 @@ test("the acceptance console switches between all eight isolated slices", async 
 test("the acceptance console resets the current sample", async ({ page }) => {
   await page.goto("/?accept=hammer");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.locator("#game").click({ position: { x: 640, y: 330 } });
+  const canvas=await page.locator("#game").boundingBox();
+  await page.locator("#game").click({ position: { x: canvas!.width/2, y: canvas!.height/2 } });
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "1");
   await page.locator("#acceptance-reset").click();
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
@@ -53,6 +54,37 @@ test("weld acceptance starts with one selectable bench workpiece", async ({ page
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-setup-operations", "6");
   const temperatureC = Number(await page.locator("body").getAttribute("data-temperature-c"));
   expect(temperatureC).toBeGreaterThan(700);
+});
+
+test("hammer force, free placement, continuous roll and click deformation preserve the workpiece",async({page})=>{
+  const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+  await page.goto("/?accept=hammer");const body=page.locator("body"),canvas=page.locator("#game");
+  await expect(body).toHaveAttribute("data-camera-state","settled");
+  const initialVolume=await body.getAttribute("data-total-material-volume"),temperature=await body.getAttribute("data-temperature-c");
+  const bounds=(await canvas.boundingBox())!,point={x:bounds.x+bounds.width/2,y:bounds.y+bounds.height/2};
+  await page.mouse.move(point.x,point.y);await page.mouse.wheel(0,-100);
+  await expect(body).toHaveAttribute("data-hammer-energy","0.6");
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","0");
+  await page.mouse.dblclick(point.x,point.y);
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","1");
+  await expect.poll(async()=>Number(await body.getAttribute("data-hammer-minimum-thickness"))).toBeLessThan(8);
+  await page.waitForTimeout(260);
+  await canvas.focus();await page.keyboard.press("d");await page.keyboard.press("e");
+  expect(Number(await body.getAttribute("data-hammer-roll"))).toBeCloseTo(Math.PI/36,12);
+  expect(Number(await body.getAttribute("data-hammer-yaw"))).toBeCloseTo(Math.PI/36,12);
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","1");
+  await page.mouse.click(point.x,point.y);
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","2");
+  await page.waitForTimeout(260);
+  await page.keyboard.down("Shift");await page.mouse.move(point.x,point.y);await page.mouse.down();
+  await page.mouse.move(point.x+25,point.y,{steps:5});await page.mouse.up();await page.keyboard.up("Shift");
+  await expect.poll(async()=>Number(await body.getAttribute("data-hammer-x"))).toBeGreaterThan(5);
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","2");
+  await expect(body).toHaveAttribute("data-total-material-volume",initialVolume!);
+  await expect(body).toHaveAttribute("data-temperature-c",temperature!);
+  await page.getByRole("button",{name:"工坊总览"}).click();await expect(body).toHaveAttribute("data-active-station","overview");
+  await expect(body).toHaveAttribute("data-workpiece-id","workpiece-0");
+  expect(errors).toEqual([]);
 });
 
 test("weld acceptance joins the visible current and bench workpieces", async ({ page }) => {

@@ -25,7 +25,7 @@ describe("saw station spatial relationships",()=>{
     view.group.updateMatrixWorld(true);
     const size=new Box3().setFromObject(view.group.getObjectByName("saw-blade")!).getSize(new Vector3());
     // Hub is wider than the cutting disk, but the full assembly remains edge-on.
-    expect(size.x).toBeLessThan(size.z/3);expect(size.y).toBeGreaterThan(100);
+    expect(size.z).toBeLessThan(size.x/3);expect(size.y).toBeGreaterThan(100);
     const guide=view.group.getObjectByName("finite-cut-guide")! as unknown as {geometry:BufferGeometry};
     const positions=guide.geometry.getAttribute("position");
     expect(positions.getZ(0)).toBeCloseTo(SAW_PATH.startZ,5);

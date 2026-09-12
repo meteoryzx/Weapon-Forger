@@ -5,7 +5,7 @@ import { thermalSteelAppearance } from "./thermal-color.ts";
 import { WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 
 // Same workshop, behind the quench area on the right. Local +Z faces the worker.
-export const FURNACE_ORIGIN = new Vector3(380, 0, -300);
+export const FURNACE_ORIGIN = new Vector3(320, 0, -230);
 export const FURNACE = { floor: -30, hearth: 72, front: 75, rear: -75, halfOpening: 44, ceiling: 124, scale: WORKSHOP_UNITS_PER_MM } as const;
 
 export function furnaceCameraFrame(aspect: number) {

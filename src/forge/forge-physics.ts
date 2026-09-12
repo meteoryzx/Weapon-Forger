@@ -21,6 +21,8 @@ export interface MechanicalState {
 }
 
 export interface MechanicalLoad {
+  /** New surface solver supplies resolved strain; no legacy per-contact cold drive. */
+  readonly strainDriven?: boolean;
   /** Fraction of the tool load carried by this cell. */
   readonly impactWeight: number;
   /** Difference between this cell's accumulated strain and its neighbours. */
@@ -89,9 +91,10 @@ export function integrateMechanicalResponse(
 
   // Residual stress is stored as a normalized state value. Exponential
   // accumulation prevents repeated blows from becoming a linear hit counter.
+  const coldContactDrive=load.strainDriven?0:(1-flowBlend)*impactWeight*FORGE_RULES.coldDamageStressContribution;
   const stressDrive = (elasticStrainIncrement / FORGE_RULES.elasticStrainReference)
     * (1 + (1 - flowBlend) * 0.5)
-    + (1 - flowBlend) * impactWeight * FORGE_RULES.coldDamageStressContribution;
+    + coldContactDrive;
   const stress = clamp(
     1 - (1 - before.stress) * Math.exp(-stressDrive * FORGE_RULES.stressAccumulationScale),
     0,
@@ -110,7 +113,7 @@ export function integrateMechanicalResponse(
   const coldFlowRisk = 0.01 + 0.99 * (1 - flowBlend) ** 2.5;
   const hardeningRisk = 1 + Math.min(before.plasticStrain / FORGE_RULES.hardeningReferenceStrain, 4) * 0.25;
   const damageDriver = (equivalentStrainIncrement / FORGE_RULES.elasticStrainReference)
-    + (1 - flowBlend) * impactWeight * FORGE_RULES.coldDamageStressContribution;
+    + coldContactDrive;
   const damageExponent = FORGE_RULES.damageAccumulationScale
     * damageDriver
     * Math.pow(triaxiality, FORGE_RULES.damageTriaxialityExponent)

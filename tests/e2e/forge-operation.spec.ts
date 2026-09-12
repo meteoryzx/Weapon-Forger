@@ -34,7 +34,8 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await expect(page.locator("#hud-title")).toHaveText("铁砧 · 锤击");
   const initialOperations = await page.locator("body").getAttribute("data-operation-count");
-  await page.locator("#game").click({ position: { x: 640, y: 330 } });
+  const hammerCanvas=await page.locator("#game").boundingBox();
+  await page.locator("#game").click({ position: { x: hammerCanvas!.width/2, y: hammerCanvas!.height/2 } });
   await expect(page.locator("body")).not.toHaveAttribute("data-operation-count", initialOperations ?? "");
 
   await page.keyboard.press("Escape");
@@ -97,7 +98,7 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.locator("#game").click({ position: overviewPoint([250,32,-4]) });
+  await page.locator("#game").click({ position: overviewPoint([520,30,-250]) });
   await expect(page.locator("#hud-title")).toHaveText("水槽 · 淬火");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await page.mouse.move(413, 236);
@@ -108,7 +109,7 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.locator("#game").click({ position: overviewPoint([180,44,-190]) });
+  await page.locator("#game").click({ position: overviewPoint([520,44,-145]) });
   await expect(page.locator("#hud-title")).toHaveText("回火炉 · 回火");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await page.mouse.move(640, 310);
@@ -119,7 +120,7 @@ test("each forge verb has a station camera and a continuous input", async ({ pag
 
   await page.keyboard.press("Escape");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.locator("#game").click({ position: overviewPoint([-150,48,260]) });
+  await page.locator("#game").click({ position: overviewPoint([500,48,285]) });
   await expect(page.locator("#hud-title")).toHaveText("磨石 · 研磨");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   await page.mouse.move(450, 380);

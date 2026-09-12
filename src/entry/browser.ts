@@ -2,7 +2,6 @@ import {
   HIGH_CARBON_STEEL,
   SPRING_STEEL,
   FORGE_RULES,
-  createHammerInfluencePreview,
   type ForgeSnapshot,
   type ForgeState,
   type CutOperation,
@@ -10,8 +9,9 @@ import {
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
 import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
-import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
+import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint, type HammerPose, type SurfaceHammerOperation } from "../forge/index.ts";
 import { CUT_HOME, cutBounds, cutOperationFor, tablePoint, validCutPose, type CutPose } from "../app/cut-placement.ts";
+import { solidBounds } from "../forge/solid-geometry.ts";
 import {
   ForgeBilletView,
   type ForgeMaterialPick,
@@ -48,9 +48,9 @@ const acceptanceStation: ForgeStation | null = acceptanceVerb === "materials" ? 
   : acceptanceVerb === "grind" ? "grind"
   : null;
 
-function prepareHotWorkpiece(target: GameApplication): void {
+function prepareHotWorkpiece(target: GameApplication, elapsedMs=20_000): void {
   target.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
-  target.getSnapshot(20_000);
+  target.getSnapshot(elapsedMs);
   target.commitPreview();
   target.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
 }
@@ -63,7 +63,7 @@ function createApplication(): GameApplication {
     next.applyIntent({ kind: "select-workpiece", benchIndex: 0 });
     prepareHotWorkpiece(next);
   } else if (acceptanceVerb === "hammer" || acceptanceVerb === "quench") {
-    prepareHotWorkpiece(next);
+    prepareHotWorkpiece(next,acceptanceVerb==="hammer"?30_000:20_000);
   } else if (acceptanceVerb === "temper") {
     prepareHotWorkpiece(next);
     next.applyIntent({ kind: "quench", medium: "water" });
@@ -94,6 +94,108 @@ const acceptanceSetupOperationCount = acceptanceStation ? application.getState()
 let view: ForgeBilletView | null = null;
 let latestSnapshot: ForgeSnapshot = application.getSnapshot();
 let activeStation: ForgeStation = "overview";
+let hammerPose:HammerPose={...HAMMER_HOME},hammerEnergy:number=HAMMER_RULES.defaultEnergy;
+let hammerPlacing=false,hammerAim:{x:number;z:number}|null=null;
+let hammerDrag:{point:{x:number;z:number};pose:HammerPose}|null=null;
+let hammerPieceId=latestSnapshot.workpieceId;
+let hammerPending=false;
+let hammerWorker:Worker|null=null;
+function evaluateHammer(state:ForgeState,operation:SurfaceHammerOperation):Promise<ForgeState> {
+  return new Promise((resolve,reject)=>{
+    hammerWorker??=new Worker(new URL("../platform/hammer.worker.ts",import.meta.url),{type:"module"});
+    const timer=setTimeout(()=>{hammerWorker?.terminate();hammerWorker=null;reject(new Error("锤击计算超时，请重试。"));},30000);
+    hammerWorker.onmessage=(event:MessageEvent<{state?:ForgeState;error?:string}>)=>{
+      clearTimeout(timer);if(event.data.state)resolve(event.data.state);else reject(new Error(event.data.error??"锤击计算失败。"));
+    };
+    hammerWorker.onerror=()=>{clearTimeout(timer);hammerWorker?.terminate();hammerWorker=null;reject(new Error("锤击计算失败，请重试。"));};
+    hammerWorker.postMessage({state,operation});
+  });
+}
+const hammerPoses=new Map<string,HammerPose>();
+const hammerControls=document.querySelector<HTMLElement>("#hammer-controls")!;
+const hammerStatus=document.querySelector<HTMLElement>("#hammer-status")!;
+const hammerForce=document.querySelector<HTMLInputElement>("#hammer-force")!;
+const hammerYaw=document.querySelector<HTMLInputElement>("#hammer-yaw")!;
+const hammerRoll=document.querySelector<HTMLInputElement>("#hammer-roll")!;
+const hammerPieces=document.querySelector<HTMLSelectElement>("#hammer-piece")!;
+function placeHammer(pose:HammerPose):void {
+  if(hammerPending||view?.hammerView.busy)return;
+  hammerPose=pose;hammerPoses.set(latestSnapshot.workpieceId,pose);hammerAim=null;
+  view?.updateHammerPose(pose);view?.aimHammer(null,hammerEnergy);refreshHammerInterface();
+}
+function refreshHammerInterface():void {
+  hammerControls.hidden=activeStation!=="anvil";if(hammerControls.hidden)return;
+  for(const control of hammerControls.querySelectorAll<HTMLInputElement|HTMLButtonElement|HTMLSelectElement>("input,button,select"))control.disabled=hammerPending;
+  document.body.dataset.hammerPending=String(hammerPending);
+  if(hammerPieceId!==latestSnapshot.workpieceId){hammerPoses.set(hammerPieceId,hammerPose);hammerPieceId=latestSnapshot.workpieceId;hammerPose=hammerPoses.get(hammerPieceId)??{...HAMMER_HOME};view?.updateHammerPose(hammerPose);}
+  hammerForce.value=String(Math.round(hammerEnergy*100));
+  hammerYaw.value=String(Math.round(hammerPose.yaw*180/Math.PI));hammerRoll.value=String(Math.round(hammerPose.roll*180/Math.PI));
+  document.querySelector("#hammer-force-label")!.textContent=`${hammerForce.value}%`;
+  document.querySelector("#hammer-yaw-label")!.textContent=`${hammerYaw.value}°`;
+  document.querySelector("#hammer-roll-label")!.textContent=`${hammerRoll.value}°`;
+  document.querySelector("#hammer-mode")!.setAttribute("aria-pressed",String(hammerPlacing));
+  const pieces=[latestSnapshot,...latestSnapshot.bench];
+  hammerPieces.replaceChildren(...pieces.map(piece=>new Option(piece.workpieceId,piece.workpieceId)));
+  hammerPieces.value=latestSnapshot.workpieceId;
+  document.body.dataset.hammerEnergy=String(hammerEnergy);document.body.dataset.hammerYaw=String(hammerPose.yaw);
+  document.body.dataset.hammerRoll=String(hammerPose.roll);document.body.dataset.hammerX=String(hammerPose.x);document.body.dataset.hammerZ=String(hammerPose.z);
+}
+function hammerDimensions():string {
+  const {nodes,grid}=latestSnapshot.geometry;
+  if(latestSnapshot.geometry.solids){
+    const b=solidBounds(latestSnapshot.geometry.solids,latestSnapshot.geometry);
+    const length=b.maxX-b.minX,width=b.maxZ-b.minZ,height=b.maxY-b.minY;
+    delete document.body.dataset.hammerMinimumThickness;
+    document.body.dataset.hammerWidth=String(width);document.body.dataset.hammerLength=String(length);
+    return `外廓 长 ${length.toFixed(1)} · 宽 ${width.toFixed(1)} · 厚 ${height.toFixed(2)} mm`;
+  }
+  let min=Infinity;
+  const stride=grid.widthBlocks+1,ring=stride*(grid.heightBlocks+1);
+  for(let i=0;i<nodes.length;i+=ring)for(let w=0;w<=grid.widthBlocks;w++){
+    const a=nodes[i+w]!,b=nodes[i+grid.heightBlocks*stride+w]!;
+    min=Math.min(min,Math.hypot(a.axialPosition-b.axialPosition,a.verticalOffset-b.verticalOffset,a.lateralOffset-b.lateralOffset));
+  }
+  const length=Math.max(...nodes.map(n=>n.axialPosition))-Math.min(...nodes.map(n=>n.axialPosition));
+  const width=Math.max(...nodes.map(n=>n.lateralOffset))-Math.min(...nodes.map(n=>n.lateralOffset));
+  document.body.dataset.hammerMinimumThickness=String(min);
+  document.body.dataset.hammerWidth=String(width);document.body.dataset.hammerLength=String(length);
+  return `长 ${length.toFixed(1)} · 宽 ${width.toFixed(1)} · 局部最薄 ${min.toFixed(2)} mm`;
+}
+function aimHammer(point:{x:number;z:number}|null):void {
+  hammerAim=point;const hit=view?.aimHammer(point,hammerEnergy);
+  hammerStatus.textContent=hammerPlacing?"摆放模式：拖动金属，完成后再次点击“拖动摆放”返回落锤。":
+    hit ? hit.supported?`${hammerShapeHint(point!)} · 力度 ${Math.round(hammerEnergy*100)}% · 支撑 ${Math.round(hit.supportRatio*100)}%`:
+      "该落点缺少砧面支撑，请移动工件。":"瞄准金属表面 · 单击落锤 · 滚轮调力度";
+}
+function hammerShapeHint(point:{x:number;z:number}):string {
+  const values=latestSnapshot.geometry.nodes.map(n=>n.axialPosition);
+  const length=Math.max(...values)-Math.min(...values);
+  return Math.abs(point.x)>length*0.28?"端部落点：压薄并向端部延展":"中心落点：压薄并向两侧展宽";
+}
+async function strikeHammer(point:{x:number;z:number}):Promise<void> {
+  if(!view || hammerPending || view.hammerView.busy)return;
+  const contact=view.aimHammer(point,hammerEnergy);
+  if(!contact?.supported){aimHammer(point);return;}
+  const pose={...hammerPose},energy=hammerEnergy;
+  const before=hammerFrame(latestSnapshot.geometry,hammerPose);
+  hammerPending=true;view.hammerView.strike(performance.now());
+  refreshHammerInterface();
+  try{
+    await application.applySurfaceHammer({kind:"surface-hammer",pose,target:point,energy},evaluateHammer);
+    const after=hammerFrame(application.getState().workpiece.geometry,hammerPose);
+    const shift=rotateHammerPoint({x:after.center.x-before.center.x,y:0,z:after.center.z-before.center.z},hammerPose);
+    hammerPose={...hammerPose,x:hammerPose.x+shift.x,z:hammerPose.z+shift.z};hammerPoses.set(latestSnapshot.workpieceId,hammerPose);
+    updateView();view?.updateHammerPose(hammerPose);aimHammer(point);
+  }catch(error){hammerStatus.textContent=error instanceof Error?error.message:"落锤未完成，请重新瞄准。";}
+  finally{hammerPending=false;view?.hammerView.finishStrike(performance.now());refreshHammerInterface();}
+}
+hammerForce.addEventListener("input",()=>{hammerEnergy=Number(hammerForce.value)/100;refreshHammerInterface();aimHammer(hammerAim);});
+hammerYaw.addEventListener("input",()=>placeHammer({...hammerPose,yaw:Number(hammerYaw.value)*Math.PI/180}));
+hammerRoll.addEventListener("input",()=>placeHammer({...hammerPose,roll:Number(hammerRoll.value)*Math.PI/180}));
+document.querySelector("#hammer-mode")!.addEventListener("click",()=>{hammerPlacing=!hammerPlacing;refreshHammerInterface();aimHammer(null);});
+document.querySelector("#hammer-center")!.addEventListener("click",()=>placeHammer({...HAMMER_HOME}));
+document.querySelector("#hammer-overview")!.addEventListener("click",()=>setStation("overview"));
+hammerPieces.addEventListener("change",()=>{const index=latestSnapshot.bench.findIndex(p=>p.workpieceId===hammerPieces.value);if(index>=0){application.applyIntent({kind:"select-workpiece",benchIndex:index});updateView();}});
 const cutControls=document.querySelector<HTMLElement>("#cut-controls")!;
 const cutStatus=document.querySelector<HTMLElement>("#cut-status")!;
 const cutConfirm=document.querySelector<HTMLButtonElement>("#cut-confirm")!;
@@ -224,8 +326,6 @@ cutConfirm.addEventListener("click",()=>{
     // Keep the result visible; preparing the next cut requires a deliberate reposition.
   },1150);
 });
-let pressStartedAtMs: number | null = null;
-let pressTarget: HammerPickTarget | null = null;
 let furnaceLastTick: number | null = null;
 const heatControls = document.querySelector<HTMLElement>("#heat-controls")!;
 const heatToggle = document.querySelector<HTMLButtonElement>("#heat-toggle")!;
@@ -245,7 +345,7 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   overview: { title: "铁匠铺 · 总览", hint: "点击材料、工位或铁砧进入第一人称近景；Esc 返回总览。" },
   materials: { title: "选料桌 · 选料", hint: "" },
   furnace: { title: "火炉 · 加热", hint: "点击炉口把钢坯送入加热；再次点击取出，根据颜色和温度判断火候。" },
-  anvil: { title: "铁砧 · 锤击", hint: "按住钢坯落锤；A/D 转面，W/S 送料。" },
+  anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
   "quench-water": { title: "水槽 · 淬火", hint: "把钢坯拖进水面，松开完成水淬。" },
@@ -295,6 +395,7 @@ function acceptanceOperationCount(state: ForgeState): number {
   if (!acceptanceVerb) return state.operations.length;
   return state.operations.filter((operation) => (
     acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.destination === "furnace" && operation.elapsedMs === 0
+    : acceptanceVerb === "hammer" ? operation.kind === "surface-hammer" || operation.kind === "hammer"
     : operation.kind === acceptanceVerb
   )).length;
 }
@@ -331,7 +432,7 @@ function acceptanceState(state: ForgeState): readonly string[] {
       ];
     case "hammer":
       return [
-        `转面 ${latestSnapshot.orientationQuarterTurns}/4 · 送料 ${latestSnapshot.feedOffset.toFixed(0)}`,
+        `温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃（本轮冻结） · ${hammerDimensions()}`,
         `塑性应变 ${average(sections.map((section) => section.plasticStrain)).toFixed(3)} · 应力 ${average(sections.map((section) => section.stress)).toFixed(3)}`,
         `损伤 ${Math.round(average(sections.map((section) => section.damage)) * 100)}% · ${shared}`,
       ];
@@ -369,7 +470,7 @@ function renderState(): void {
     state.operations.some((operation) => operation.kind === "cut") ? "cut" : null,
     state.operations.some((operation) => operation.kind === "weld") ? "weld" : null,
     state.operations.some((operation) => operation.kind === "move-billet" && operation.destination === "furnace" && operation.elapsedMs > 0) ? "heat" : null,
-    state.operations.some((operation) => operation.kind === "hammer") ? "hammer" : null,
+    state.operations.some((operation) => operation.kind === "hammer" || operation.kind === "surface-hammer") ? "hammer" : null,
     state.operations.some((operation) => operation.kind === "quench") ? "quench" : null,
     state.operations.some((operation) => operation.kind === "temper") ? "temper" : null,
     state.operations.some((operation) => operation.kind === "grind") ? "grind" : null,
@@ -390,11 +491,11 @@ function renderState(): void {
     acceptanceStation
       ? `工作台 ${latestSnapshot.benchCount} 块 · 本次操作 ${state.operations.length - acceptanceSetupOperationCount}`
       : `工作台 ${latestSnapshot.benchCount} 块 · 操作 ${state.operations.length}`,
-    `锤击 ${operationCounts.hammer ?? 0} · 切割 ${operationCounts.cut ?? 0} · 焊合 ${operationCounts.weld ?? 0}`,
+    `锤击 ${(operationCounts.hammer ?? 0)+(operationCounts["surface-hammer"]??0)} · 切割 ${operationCounts.cut ?? 0} · 焊合 ${operationCounts.weld ?? 0}`,
     `淬火 ${latestSnapshot.quenchMedium ?? "未做"} · 回火 ${displayedTemper ?? "未做"} · 研磨 ${Math.round(latestSnapshot.edgeCoverage * 100)}%`,
     `损伤 ${Math.round(damage * 100)}% · 规则 ${latestSnapshot.parameterVersion}`,
   ];
-  hudState.textContent = (acceptanceStation ? acceptanceState(state) : overviewState).join(" · ");
+  hudState.textContent = (acceptanceStation ? acceptanceState(state) : activeStation==="anvil" ? [hammerDimensions(),...overviewState] : overviewState).join(" · ");
   document.body.dataset.stage = acceptanceStation ? "forge-acceptance" : "forge-mvp";
   document.body.dataset.acceptanceVerb = acceptanceVerb ?? "none";
   document.body.dataset.acceptanceSetupOperations = String(acceptanceSetupOperationCount);
@@ -435,12 +536,13 @@ function updateView(hammerPreview = null): void {
   view?.update(latestSnapshot, hammerPreview, activeStation, temperPreviewC);
   updateMaterialsInterface();
   refreshCutInterface();
+  refreshHammerInterface();
   renderState();
 }
 
 function setStation(station: ForgeStation): void {
-  if(cutting)return;
-  if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && !materialSession && station !== acceptanceStation) return;
+  if(cutting||hammerPending)return;
+  if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer" && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
   if (activeStation === "materials" && station !== "materials"
     && materialSelection.getPieces().length > 0
@@ -454,8 +556,6 @@ function setStation(station: ForgeStation): void {
     if (latestSnapshot.billetLocation === "furnace") stopHeating();
   }
   furnaceLastTick = null;
-  pressStartedAtMs = null;
-  pressTarget = null;
   gesture = null;
   temperDrag = null;
   temperPreviewC = null;
@@ -464,6 +564,8 @@ function setStation(station: ForgeStation): void {
   cancelCutPreview();cutDrag=null;
   document.body.classList.toggle("cut-view",station==="cut");
   document.body.classList.toggle("heat-view",station==="furnace");
+  document.body.classList.toggle("hammer-view",station==="anvil");
+  hammerDrag=null;hammerAim=null;
   view?.setStation(station);
   view?.resize(viewport());
   updateView();
@@ -579,19 +681,6 @@ document.querySelector("#heat-overview")!.addEventListener("click", () => setSta
 window.addEventListener("blur", () => { furnaceLastTick = null; });
 document.addEventListener("visibilitychange", () => { furnaceLastTick = null; });
 
-function releaseHammer(): void {
-  if (pressStartedAtMs === null || pressTarget === null) return;
-  application.applyIntent({
-    kind: "hammer",
-    sectionIndex: pressTarget.sectionIndex,
-    faceBias: pressTarget.faceBias,
-    energy: hammerEnergyForPressDuration(performance.now() - pressStartedAtMs),
-  });
-  pressStartedAtMs = null;
-  pressTarget = null;
-  updateView();
-}
-
 function finishGesture(endX: number, endY: number): void {
   if (gesture === null) return;
   const distance = Math.hypot(endX - gesture.startX, endY - gesture.startY);
@@ -643,6 +732,7 @@ view = new ForgeBilletView(canvas, viewport());
 view.setStation(acceptanceStation ?? "overview");
 activeStation = acceptanceStation ?? "overview";
 document.body.classList.toggle("heat-view", activeStation === "furnace");
+document.body.classList.toggle("hammer-view", activeStation === "anvil");
 view?.resize(viewport());
 updateView();
 if(activeStation==="cut")scheduleCutPreview();
@@ -698,17 +788,14 @@ canvas.addEventListener("pointerdown", (event) => {
     if (view.pickFurnace(x, y)) toggleHeating();
     return;
   }
-  const target = view.pickHammerTarget(x, y);
-  if (activeStation === "anvil" && target) {
-    pressStartedAtMs = performance.now();
-    pressTarget = target;
-    view.update(latestSnapshot, createHammerInfluencePreview(latestSnapshot, {
-      sectionIndex: target.sectionIndex,
-      faceBias: target.faceBias,
-      energy: 1,
-    }), activeStation, temperPreviewC);
+  if(activeStation==="anvil"){
+    const point=view.pickHammerSurface(x,y);
+    if(!point)return;
+    if(hammerPlacing||event.shiftKey){const plane=view.hammerTablePoint(x,y);if(plane)hammerDrag={point:plane,pose:{...hammerPose}};}
+    else strikeHammer(point);
     return;
   }
+  const target = view.pickHammerTarget(x, y);
   if (activeStation === "grind" && target) {
     gesture = {
       kind: activeStation,
@@ -753,6 +840,12 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if(activeStation==="anvil"&&view){
+    const bounds=canvas.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
+    if(hammerDrag){const p=view.hammerTablePoint(x,y);if(p)placeHammer({...hammerDrag.pose,x:hammerDrag.pose.x+p.x-hammerDrag.point.x,z:hammerDrag.pose.z+p.z-hammerDrag.point.z});}
+    else if(!view.hammerView.busy)aimHammer(view.pickHammerSurface(x,y));
+    return;
+  }
   if(cutDrag && !cutting){
     const bounds=canvas.getBoundingClientRect(),point=view?.cutTablePoint(event.clientX-bounds.left,event.clientY-bounds.top);
     if(point){
@@ -770,20 +863,19 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("pointerup", (event) => {
+  hammerDrag=null;
   cutDrag=null;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
-  if (pressStartedAtMs !== null) releaseHammer();
-  else if (temperDrag !== null) finishTemper();
+  if (temperDrag !== null) finishTemper();
   else if (gesture !== null) finishGesture(x, y);
 });
 
 canvas.addEventListener("pointercancel", () => {
+  hammerDrag=null;
   cutDrag=null;
-  pressStartedAtMs = null;
-  pressTarget = null;
   temperDrag = null;
   temperPreviewC = null;
   gesture = null;
@@ -813,24 +905,32 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && activeStation !== "overview") {
-    if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat") return;
+    if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer") return;
     event.preventDefault();
     setStation("overview");
     return;
   }
   if (activeStation !== "anvil") return;
-  let intent: { kind: "rotate"; quarterTurns: 1 | -1 } | { kind: "feed"; step: 1 | -1 } | null = null;
+  const step=Math.PI/36,wrap=(n:number)=>Math.atan2(Math.sin(n),Math.cos(n));
   switch (event.key.toLowerCase()) {
-    case "a": intent = { kind: "rotate", quarterTurns: -1 }; break;
-    case "d": intent = { kind: "rotate", quarterTurns: 1 }; break;
-    case "w": intent = { kind: "feed", step: 1 }; break;
-    case "s": intent = { kind: "feed", step: -1 }; break;
+    case "a": placeHammer({...hammerPose,roll:wrap(hammerPose.roll-step)}); break;
+    case "d": placeHammer({...hammerPose,roll:wrap(hammerPose.roll+step)}); break;
+    case "q": placeHammer({...hammerPose,yaw:wrap(hammerPose.yaw-step)}); break;
+    case "e": placeHammer({...hammerPose,yaw:wrap(hammerPose.yaw+step)}); break;
+    case "arrowleft": placeHammer({...hammerPose,x:hammerPose.x-4}); break;
+    case "arrowright": placeHammer({...hammerPose,x:hammerPose.x+4}); break;
+    case "arrowup": placeHammer({...hammerPose,z:hammerPose.z-4}); break;
+    case "arrowdown": placeHammer({...hammerPose,z:hammerPose.z+4}); break;
     default: return;
   }
   event.preventDefault();
-  application.applyIntent(intent);
-  updateView();
 });
+
+canvas.addEventListener("wheel",event=>{
+  if(activeStation!=="anvil")return;event.preventDefault();
+  hammerEnergy=Math.round(Math.max(0.1,Math.min(1,hammerEnergy+(event.deltaY<0?0.05:-0.05)))*100)/100;
+  refreshHammerInterface();aimHammer(hammerAim);
+},{passive:false});
 
 const renderFrame = (nowMs: number): void => {
   tickFurnace(nowMs);
@@ -843,6 +943,7 @@ requestAnimationFrame(renderFrame);
 
 window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {
+  hammerWorker?.terminate();
   cutWorker?.terminate();
   view?.dispose();
 });

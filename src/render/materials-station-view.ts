@@ -9,7 +9,7 @@ import { WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 
 // Keep the selection area's accepted local arrangement; move the whole station
 // to the workshop's back-left so its full-sized table does not envelop the forge.
-export const MATERIALS_ORIGIN = new Vector3(-600, 0, -250);
+export const MATERIALS_ORIGIN = new Vector3(-390, 0, -170);
 export const MATERIALS_FRAMES = {
   table: { position: [0, 262, 430], target: [0, 145, -28] },
   rack: { position: [0, 262, 430], target: [0, 145, -28] },
@@ -49,6 +49,7 @@ export class MaterialsStationView {
 
   constructor(private readonly geometryOf: (piece: ForgeSnapshotWorkpiece) => BufferGeometry) {
     this.group.position.copy(MATERIALS_ORIGIN);
+    this.group.scale.setScalar(0.84);
     const wood = new MeshStandardMaterial({ color: "#75533a", roughness: 0.86 });
     const edge = new MeshStandardMaterial({ color: "#47372d", roughness: 0.9 });
     const iron = new MeshStandardMaterial({ color: "#424a50", metalness: 0.65, roughness: 0.5 });

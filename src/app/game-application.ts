@@ -11,6 +11,7 @@ import {
   type ForgeSnapshot,
   type ForgeState,
   type CutOperation,
+  type SurfaceHammerOperation,
 } from "../forge/index.ts";
 
 export class GameApplication {
@@ -31,6 +32,13 @@ export class GameApplication {
   }
 
   cancelPreparedCut(): void { this.preparedCut = null; this.cutGeneration++; }
+
+  async applySurfaceHammer(operation:SurfaceHammerOperation,evaluate:(state:ForgeState,op:SurfaceHammerOperation)=>Promise<ForgeState>):Promise<ForgeSnapshot> {
+    const source=this.state,result=await evaluate(source,operation);
+    if(this.state!==source)throw new Error("工件已经改变，请重新瞄准。");
+    this.state=result;this.previewState=result;this.previewElapsedMs=0;
+    this.cancelPreparedCut();return this.getSnapshot();
+  }
 
   commitPreparedCut(operation: CutOperation): ForgeSnapshot {
     const prepared = this.preparedCut;

@@ -24,6 +24,14 @@
       #acceptance-reset { margin-top: 12px; }
       body.acceptance-mode #hud { left: 212px; }
       [hidden] { display: none !important; }
+      body.hammer-view #game {position:fixed;left:212px;top:112px;width:calc(100% - 212px);height:calc(100% - 284px);}
+      body.hammer-view #hud {left:212px;height:112px;box-sizing:border-box;overflow:auto;}
+      body.hammer-view #materials-controls {display:none;}
+      #hammer-controls {position:fixed;left:212px;right:0;bottom:0;height:172px;overflow:auto;box-sizing:border-box;padding:10px 18px;background:#202624;border-top:1px solid #59605d;color:#e5e9e7;font:14px system-ui,sans-serif;z-index:16;}
+      #hammer-controls button,#hammer-controls select {min-height:32px;padding:5px 10px;background:#333d38;color:#e5e9e7;border:1px solid #727c77;border-radius:4px;font:inherit;cursor:pointer;}
+      #hammer-controls input {width:125px;accent-color:#d5aa62;}
+      #hammer-status {color:#d6c498;font-size:13px;min-height:18px;}
+      #hammer-mode[aria-pressed="true"] {background:#6b5432;}
       body.heat-view #game {position:fixed;left:212px;top:108px;width:calc(100% - 212px);height:calc(100% - 200px);}
       body.heat-view #hud {left:212px;height:108px;box-sizing:border-box;overflow:auto;}
       body.heat-view #materials-controls {display:none;}
@@ -68,6 +76,9 @@
         #cut-controls {max-height:225px;overflow:auto;}
         body.heat-view #game {left:164px;width:calc(100% - 164px);}
         body.heat-view #hud,#heat-controls {left:164px;}
+        body.hammer-view #game {left:164px;width:calc(100% - 164px);height:calc(100% - 322px);}
+        body.hammer-view #hud,#hammer-controls {left:164px;}
+        #hammer-controls {height:210px;padding:8px;}
       }
     </style>
   </head>
@@ -142,6 +153,23 @@
       <div id="heat-status" role="status"></div>
       <button id="heat-toggle" type="button">送入加热</button>
       <button id="heat-overview" type="button">工坊总览</button>
+    </section>
+    <section id="hammer-controls" aria-label="锤击操作" hidden>
+      <div id="hammer-status" role="status">移动指针瞄准金属，单击落锤；滚轮调整力度。</div>
+      <div class="cut-row">
+        <label for="hammer-force">力度</label><input id="hammer-force" type="range" min="10" max="100" step="5" value="55" /><output id="hammer-force-label">55%</output>
+        <button id="hammer-mode" type="button" aria-pressed="false">拖动摆放</button>
+        <button id="hammer-center" type="button">重新摆正</button>
+      </div>
+      <div class="cut-row">
+        <label for="hammer-yaw">平面旋转</label><input id="hammer-yaw" type="range" min="-180" max="180" step="1" value="0" /><output id="hammer-yaw-label">0°</output>
+        <label for="hammer-roll">翻滚</label><input id="hammer-roll" type="range" min="-180" max="180" step="1" value="0" /><output id="hammer-roll-label">0°</output>
+      </div>
+      <div class="cut-row">
+        <label for="hammer-piece">加工对象</label><select id="hammer-piece"></select>
+        <button id="hammer-overview" type="button">工坊总览</button>
+        <span>Shift＋拖动摆放 · Q/E 旋转 · A/D 翻滚 · 方向键移动</span>
+      </div>
     </section>
     <script type="module" src="/src/entry/browser.ts"></script>
   </body>

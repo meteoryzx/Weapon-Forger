@@ -6,6 +6,7 @@ import {
   FORGE_STATE_VERSION,
 } from "./forge-rules.ts";
 import { integrateMechanicalResponse } from "./forge-physics.ts";
+import { cellCorners, cellStretches, deformSurfaceHammer } from "./hammer-surface.ts";
 import {
   cloneWorkpieceGeometry,
   createStructuredWorkpieceGeometry,
@@ -189,6 +190,26 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
       }, operation);
     case "hammer":
       return appendOperation(applyHammer(state, operation), operation);
+    case "surface-hammer": {
+      const before=state.workpiece;
+      const result=deformSurfaceHammer(before,operation);
+      const geometry={...createStructuredWorkpieceGeometry(before.id,before.geometry.grid,result.nodes,before.sections.length),
+        ...(before.geometry.solids?{solids:before.geometry.solids}:{})};
+      const sections=before.sections.map((section,a)=>summarizeSection({...section,blocks:section.blocks.map(block=>{
+        const shape=deriveBlockGeometry(block,a,result.nodes,geometry.grid);
+        const stretches=cellStretches(cellCorners(a,block,geometry),before.geometry.nodes,result.nodes);
+        const changed=stretches.some(s=>Math.abs(Math.log(s))>1e-7);
+        if(!changed)return shape;
+        const response=integrateMechanicalResponse(block,{length:1,width:1,thickness:1,volume:block.volume},
+          {length:stretches[0]!,width:stretches[1]!,thickness:stretches[2]!,volume:block.volume},before.material,
+          {strainDriven:true,impactWeight:1,localisation:Math.min(1,Math.max(0,block.plasticStrain-neighbourPlasticStrain(state,a,block))),
+            thinSectionRisk:Math.max(0,1-shape.thickness/FORGE_RULES.simulationCellSize),supportRatio:result.contact.supportRatio});
+        return {...shape,stress:response.stress,plasticStrain:response.plasticStrain,elasticStrain:response.elasticStrain,
+          mechanicalWorkJ:response.mechanicalWorkJ,damage:response.damage,integrity:response.integrity,
+          cracked:block.cracked||response.integrity<=FORGE_RULES.crackIntegrityThreshold};
+      })},a,result.nodes,geometry.grid));
+      return appendOperation({...state,parameterVersion:FORGE_PARAMETER_VERSION,workpiece:{...before,geometry,sections}},operation);
+    }
     case "quench":
       return applyQuench(state, operation);
     case "grind":
@@ -1757,7 +1778,7 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
 function appendOperation(state: ForgeState, operation: ForgeOperation): ForgeState {
   const copied = operation.kind === "cut" && operation.path
     ? { ...operation, path: { ...operation.path, start: { ...operation.path.start }, end: { ...operation.path.end } } }
-    : { ...operation };
+    : operation.kind === "surface-hammer" ? {...operation,pose:{...operation.pose},target:{...operation.target}} : { ...operation };
   return { ...state, workpiece: refreshSolidWorkpiece(state.workpiece), operations: [...state.operations, copied] };
 }
 

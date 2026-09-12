@@ -1,6 +1,8 @@
 import { FORGE_STATE_VERSION } from "./forge-rules.ts";
 import { assertWorkpieceOutline, createStructuredWorkpieceGeometry } from "./workpiece-geometry.ts";
 import { solidEnvelope, solidVolume } from "./solid-geometry.ts";
+import { assertHammerPose } from "./hammer-surface.ts";
+import type { HammerPose } from "./forge-types.ts";
 import type {
   ForgeState,
   HeatTreatmentEvent,
@@ -48,6 +50,13 @@ export function assertForgeState(value: unknown): asserts value is ForgeState {
   arrayValue(state.operations, "Forge operations").forEach((item, index) => {
     const operation = record(item, `Forge operation ${index}`);
     stringValue(operation.kind, `Forge operation ${index} kind`);
+    if(operation.kind === "surface-hammer") {
+      assertHammerPose(record(operation.pose,"Hammer pose") as unknown as HammerPose);
+      const target=record(operation.target,"Hammer target");
+      finiteNumber(target.x,"Hammer target x");finiteNumber(target.z,"Hammer target z");
+      finiteNumber(operation.energy,"Hammer energy");
+      if(operation.energy<0.1||operation.energy>1)throw new Error("Invalid surface hammer energy.");
+    }
   });
   if (state.cutLosses !== undefined) arrayValue(state.cutLosses, "Cut losses").forEach(value => {
     const loss = record(value, "Cut loss");
@@ -188,6 +197,7 @@ function workpiece(
 
 function migrateForgeState(value: unknown): unknown {
   const state = record(value, "Forge state");
+  if (state.stateVersion === "forge-state-4") return {...state,stateVersion:FORGE_STATE_VERSION};
   if (state.stateVersion === "forge-state-3") {
     const operations = arrayValue(state.operations, "Forge operations");
     if (operations.some(value => { const op = record(value, "Forge operation"); return op.kind === "cut" && op.path !== undefined; })) {
