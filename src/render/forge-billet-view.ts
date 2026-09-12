@@ -96,9 +96,11 @@ const STATION_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [numbe
   anvil: [0, 0, 0],
   cut: [-500, 42, 420],
   weld: [335, 42, 115],
-  "quench-water": [120, 48, -180],
-  "quench-oil": [120, 48, -270],
-  temper: [120, 56, -360],
+  // The three heat-treatment bays form one compact horizontal bench between
+  // the material rack and the furnace, matching the confirmed quench reference.
+  "quench-water": [25, 48, -255],
+  "quench-oil": [112, 48, -255],
+  temper: [199, 56, -255],
   grind: [335, 56, 300],
 };
 
@@ -108,9 +110,9 @@ const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number
   anvil: [0, 0, 0],
   cut: [-500, 42, 420],
   weld: [360, 66, 115],
-  "quench-water": [75, 76, -180],
-  "quench-oil": [75, 76, -270],
-  temper: [75, 82, -360],
+  "quench-water": [25, 76, -255],
+  "quench-oil": [112, 76, -255],
+  temper: [199, 82, -255],
   grind: [360, 96, 300],
 };
 
@@ -121,9 +123,9 @@ const CAMERA_FRAMES: Record<ForgeStation, { readonly position: readonly [number,
   furnace: { position: [300, 190, -40], target: [300, 42, -230] },
   cut: { position: [-420, 280, 790], target: [-420, 103, 368] },
   weld: { position: [280, 180, 265], target: [280, 35, 190] },
-  "quench-water": { position: [120, 190, 0], target: [120, 35, -180] },
-  "quench-oil": { position: [120, 190, -90], target: [120, 35, -270] },
-  temper: { position: [120, 180, -180], target: [120, 38, -360] },
+  "quench-water": { position: [25, 190, 35], target: [25, 35, -255] },
+  "quench-oil": { position: [112, 190, 35], target: [112, 35, -255] },
+  temper: { position: [199, 180, 35], target: [199, 38, -255] },
   grind: { position: [500, 260, 555], target: [500, 72, 285] },
 };
 
@@ -636,9 +638,9 @@ export class ForgeBilletView {
       ["materials", [-390, 65, -170], [470, 14, 260], "#4f5961"],
       ["cut", [-500, 54, 420], [205, 16, 336], "#7a7f86"],
       ["weld", [360, 14, 115], [130, 28, 82], "#53616a"],
-      ["quench-water", [120, 16, -180], [112, 32, 58], "#315d72"],
-      ["quench-oil", [120, 16, -270], [112, 32, 58], "#5a4a2f"],
-      ["temper", [120, 22, -360], [128, 44, 62], "#774a38"],
+      ["quench-water", [25, 16, -255], [82, 32, 68], "#315d72"],
+      ["quench-oil", [112, 16, -255], [82, 32, 68], "#5a4a2f"],
+      ["temper", [199, 22, -255], [82, 44, 68], "#774a38"],
       ["grind", [360, 24, 300], [112, 48, 78], "#646d77"],
     ];
     for (const [station, position, size, color] of definitions) {
@@ -707,7 +709,7 @@ export class ForgeBilletView {
 
     for (const [station, color] of [["quench-water", "#6da9c3"], ["quench-oil", "#b28a4d"]] as const) {
       const basin = new Mesh(
-        new BoxGeometry(96, 8, 46),
+        new BoxGeometry(70, 8, 52),
         new MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.9 }),
       );
       const anchor = STATION_ANCHORS[station];
@@ -716,7 +718,7 @@ export class ForgeBilletView {
       this.addStationObject(station, basin);
     }
 
-    this.temperControl.position.set(120, 70, -360);
+    this.temperControl.position.set(199, 70, -255);
     this.addStationObject("temper", this.temperControl);
 
     const materials: readonly [ForgeMaterialPick, string][] = [
