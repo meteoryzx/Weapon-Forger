@@ -440,9 +440,12 @@ function acceptanceState(state: ForgeState): readonly string[] {
         `损伤 ${Math.round(average(sections.map((section) => section.damage)) * 100)}% · ${shared}`,
       ];
     case "quench":
+      const quenchPose = view?.quenchPose();
+      const quenchState = latestSnapshot.quenched ? "冷却中/已触液" : quenchPose && quenchPose.vertical <= -22 ? "已触液，冷却启动" : "悬空，尚未触液";
       return [
         `样本介质 ${acceptanceMedium === "water" ? "水" : "油"} · 当前温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃`,
         `淬火记录 ${latestSnapshot.quenchMedium ?? "未淬火"} · 起始温度 ${latestSnapshot.quenchStartTemperatureC?.toFixed(0) ?? "未记录"}℃`,
+        `${quenchState} · 滚轮旋转 · W/S 上下 · A/D 翻转`,
         shared,
       ];
     case "temper":
