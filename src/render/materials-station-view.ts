@@ -49,7 +49,8 @@ export class MaterialsStationView {
 
   constructor(private readonly geometryOf: (piece: ForgeSnapshotWorkpiece) => BufferGeometry) {
     this.group.position.copy(MATERIALS_ORIGIN);
-    this.group.scale.setScalar(0.84);
+    // Keep the material station in the shared workshop unit scale. The former
+    // 0.84 legacy scale moved stock below the shelf and table contact planes.
     const wood = new MeshStandardMaterial({ color: "#75533a", roughness: 0.86 });
     const edge = new MeshStandardMaterial({ color: "#47372d", roughness: 0.9 });
     const iron = new MeshStandardMaterial({ color: "#424a50", metalness: 0.65, roughness: 0.5 });
