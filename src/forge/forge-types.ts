@@ -263,6 +263,8 @@ export interface GrindOperation {
   readonly kind: "grind";
   readonly sectionIndex: number;
   readonly amount: number;
+  /** Tool approach angle in radians; zero is the calibrated edge contact. */
+  readonly angle?: number;
 }
 
 // 切割：移除有限刀路扫过的锯缝；仍连通则保留当前工件，仅将新独立组件移入 bench。
@@ -351,6 +353,7 @@ export interface GrindIntent {
   readonly kind: "grind";
   readonly sectionIndex: number;
   readonly amount: number;
+  readonly angle?: number;
 }
 
 export type CutIntent = CutOperation;

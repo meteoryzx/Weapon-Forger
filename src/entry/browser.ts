@@ -715,6 +715,7 @@ function finishGesture(endX: number, endY: number): void {
       kind: "grind",
       sectionIndex: gesture.target.sectionIndex,
       amount: Math.min(1, Math.max(0.08, (distance + Math.max(0, pose.z) * 1.2 + Math.abs(pose.angle) * 16) / 260)),
+      angle: pose.angle,
     });
   } else if (gesture.kind === "weld" && latestSnapshot.benchCount > 0) {
     const pickedBenchIndex = view?.pickWeldBench(endX, endY) ?? null;

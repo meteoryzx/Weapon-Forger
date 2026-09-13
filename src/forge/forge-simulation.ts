@@ -394,12 +394,14 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
 // strokes on one spot leaves an uneven edge while spreading them stays even.
 function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
   assertGrindOperation(state, operation);
+  const approach = operation.angle ?? 0;
+  const angleEfficiency = 0.35 + 0.65 * Math.abs(Math.cos(approach));
   const fractions = new Map<string, number>();
   const sectionCount = state.workpiece.sections.length;
   const sections = state.workpiece.sections.map((section, index) => {
     const distance = Math.abs(index - operation.sectionIndex) / Math.max(1, sectionCount - 1);
     const falloff = 1 - 0.8 * distance;
-    const amount = clamp(operation.amount * falloff, 0, 1);
+    const amount = clamp(operation.amount * falloff * angleEfficiency, 0, 1);
     const groundAmount = clamp(section.groundAmount + amount, 0, 1);
     const progress = groundAmount - section.groundAmount;
     let removedVolume = 0;
