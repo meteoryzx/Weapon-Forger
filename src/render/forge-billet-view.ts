@@ -24,6 +24,7 @@ import {
   TorusGeometry,
   Plane,
   Matrix4,
+  Quaternion,
 } from "three";
 
 import {
@@ -180,6 +181,9 @@ export class ForgeBilletView {
   private quenchVertical = 70;
   private quenchTilt = 0;
   private quenchYaw = 0;
+  private readonly quenchBaseQuaternion = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2);
+  private readonly quenchXQuaternion = new Quaternion();
+  private readonly quenchYQuaternion = new Quaternion();
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -312,7 +316,11 @@ export class ForgeBilletView {
       // Player axes: x=right, y=inward (Three z), z=up (Three y).
       // The billet length is aligned with player y. Both rotations happen on
       // the centred rig: A/D around player x, wheel around player y (world z).
-      this.billetRig.rotation.set(this.quenchTilt, -Math.PI / 2, this.quenchYaw);
+      this.quenchXQuaternion.setFromAxisAngle(new Vector3(1, 0, 0), this.quenchTilt);
+      this.quenchYQuaternion.setFromAxisAngle(new Vector3(0, 0, 1), this.quenchYaw);
+      this.billetRig.quaternion.copy(this.quenchBaseQuaternion)
+        .premultiply(this.quenchXQuaternion)
+        .premultiply(this.quenchYQuaternion);
       if (!snapshot.geometry.solids) this.billet.position.x = -BILLET_CENTER_OFFSET;
     } else {
       this.quenchOffset.set(0, 0, 0);
