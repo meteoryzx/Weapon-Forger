@@ -174,6 +174,8 @@ export class ForgeBilletView {
   private quenchVertical = 0;
   private quenchTilt = 0;
   private quenchYaw = 0;
+  private grindOffset = new Vector3();
+  private grindAngle = 0;
   private readonly quenchBaseQuaternion = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2);
   private readonly quenchXQuaternion = new Quaternion();
   private readonly quenchYQuaternion = new Quaternion();
@@ -316,7 +318,11 @@ export class ForgeBilletView {
         .premultiply(this.quenchYQuaternion);
     } else {
       this.quenchOffset.set(0, 0, 0);
-      this.billetRig.rotation.set(0, BILLET_YAW, 0);
+      if (activeStation === "grind") {
+        this.billetRig.position.x += this.grindOffset.x;
+        this.billetRig.position.z += this.grindOffset.z;
+        this.billetRig.rotation.set(0, BILLET_YAW + this.grindAngle, 0);
+      } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
@@ -557,6 +563,24 @@ export class ForgeBilletView {
 
   quenchPose(): { vertical: number; tilt: number; yaw: number } {
     return { vertical: this.quenchVertical, tilt: this.quenchTilt, yaw: this.quenchYaw };
+  }
+
+  grindTablePoint(x: number, y: number): { x: number; z: number } | null {
+    this.pointer.set(x / this.viewport.width * 2 - 1, 1 - y / this.viewport.height * 2);
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const point = this.raycaster.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), -WORKSHOP_SURFACE_Y), new Vector3());
+    return point ? { x: point.x, z: point.z } : null;
+  }
+
+  setGrindPose(offset: { x?: number; z?: number; angle?: number }): void {
+    if (offset.x !== undefined) this.grindOffset.x = clamp(offset.x, -72, 72);
+    if (offset.z !== undefined) this.grindOffset.z = clamp(offset.z, -96, 96);
+    if (offset.angle !== undefined) this.grindAngle = offset.angle;
+    if (this.snapshot && this.station === "grind") this.update(this.snapshot, null, "grind", this.temperPreviewC);
+  }
+
+  grindPose(): { x: number; z: number; angle: number } {
+    return { x: this.grindOffset.x, z: this.grindOffset.z, angle: this.grindAngle };
   }
 
   quenchImmersion(): number {

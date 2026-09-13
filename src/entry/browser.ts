@@ -337,6 +337,7 @@ let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null
 let quenchContacted = false;
 let quenchStarted = false;
 let quenchLastTick: number | null = null;
+let grindDrag: { readonly point: { x: number; z: number }; readonly pose: { x: number; z: number; angle: number }; readonly rotate: boolean } | null = null;
 let gesture: {
   readonly kind: "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
@@ -704,12 +705,16 @@ function finishGesture(endX: number, endY: number): void {
     gesture = null;
     return;
   }
-
   if (gesture.kind === "grind") {
+    const pose = view?.grindPose() ?? { x: 0, z: 0, angle: 0 };
+    if (pose.z < 18) {
+      gesture = null;
+      return;
+    }
     application.applyIntent({
       kind: "grind",
       sectionIndex: gesture.target.sectionIndex,
-      amount: Math.min(1, Math.max(0.08, (distance + elapsedMs * 0.08) / 260)),
+      amount: Math.min(1, Math.max(0.08, (distance + Math.max(0, pose.z) * 1.2 + Math.abs(pose.angle) * 16) / 260)),
     });
   } else if (gesture.kind === "weld" && latestSnapshot.benchCount > 0) {
     const pickedBenchIndex = view?.pickWeldBench(endX, endY) ?? null;
@@ -812,6 +817,8 @@ canvas.addEventListener("pointerdown", (event) => {
   }
   const target = view.pickHammerTarget(x, y);
   if (activeStation === "grind" && target) {
+    const point = view.grindTablePoint(x, y);
+    if (point) grindDrag = { point, pose: view.grindPose(), rotate: event.shiftKey };
     gesture = {
       kind: activeStation,
       target,
@@ -867,6 +874,18 @@ canvas.addEventListener("pointermove", (event) => {
     }
     return;
   }
+  if (grindDrag && view) {
+    const bounds = canvas.getBoundingClientRect();
+    const point = view.grindTablePoint(event.clientX - bounds.left, event.clientY - bounds.top);
+    if (point) {
+      if (grindDrag.rotate) {
+        view.setGrindPose({ angle: grindDrag.pose.angle + Math.atan2(point.z - grindDrag.point.z, point.x - grindDrag.point.x) });
+      } else {
+        view.setGrindPose({ x: grindDrag.pose.x + point.x - grindDrag.point.x, z: grindDrag.pose.z + point.z - grindDrag.point.z });
+      }
+    }
+    return;
+  }
   if (temperDrag === null) return;
   const bounds = canvas.getBoundingClientRect();
   updateTemperPreview(event.clientY - bounds.top);
@@ -875,6 +894,7 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerup", (event) => {
   hammerDrag=null;
   cutDrag=null;
+  grindDrag=null;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
