@@ -357,7 +357,7 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   "quench-water": { title: "水槽 · 淬火", hint: "钢坯长轴沿 Y、宽轴沿 X；A/D 绕 X 轴旋转，滚轮绕 Y 轴旋转，W/S 沿 Z 轴上下。触液后开始冷却。" },
   "quench-oil": { title: "油槽 · 淬火", hint: "钢坯长轴沿 Y、宽轴沿 X；A/D 绕 X 轴旋转，滚轮绕 Y 轴旋转，W/S 沿 Z 轴上下。触液后开始冷却。" },
   temper: { title: "火炉 · 回火", hint: "拖动炉身温度控制，松开把当前温度写入工件。" },
-  grind: { title: "磨石 · 研磨", hint: "沿刃口连续拖动，拖动长度决定这一道研磨量。" },
+  grind: { title: "磨石 · 研磨", hint: "拖动金属调整位置；Shift＋拖动调整角度；Q/E 微调角度，方向键微调位置，推进到磨盘后再拖动研磨。" },
 };
 
 const materialLabels: Record<string, string> = {
@@ -923,6 +923,19 @@ window.addEventListener("keydown", (event) => {
       const nudge=workshopUnits(event.shiftKey?50:5);
       placeCut({...cutPose,x:cutPose.x+(key==="arrowleft"?-nudge:key==="arrowright"?nudge:0),z:cutPose.z+(key==="arrowup"?-nudge:key==="arrowdown"?nudge:0)});
     }
+    return;
+  }
+  if (activeStation === "grind" && ["q", "e", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key.length === 1 ? event.key.toLowerCase() : event.key)) {
+    event.preventDefault();
+    const key = event.key.toLowerCase();
+    const pose = view?.grindPose();
+    if (!pose || !view) return;
+    const step = workshopUnits(event.shiftKey ? 25 : 5);
+    if (key === "q" || key === "e") view.setGrindPose({ angle: pose.angle + (key === "q" ? -1 : 1) * Math.PI / 72 });
+    else view.setGrindPose({
+      x: pose.x + (key === "arrowleft" ? -step : key === "arrowright" ? step : 0),
+      z: pose.z + (key === "arrowup" ? -step : key === "arrowdown" ? step : 0),
+    });
     return;
   }
   if (event.key === "Escape" && activeStation === "materials") {
