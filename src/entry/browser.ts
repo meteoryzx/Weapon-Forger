@@ -351,8 +351,8 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
-  "quench-water": { title: "水槽 · 淬火", hint: "滚轮在 Y‑Z 平面旋转；W/S 上下移动；A/D 在 X‑Z 平面旋转。钢坯触液后开始冷却。" },
-  "quench-oil": { title: "油槽 · 淬火", hint: "滚轮在 Y‑Z 平面旋转；W/S 上下移动；A/D 在 X‑Z 平面旋转。钢坯触液后开始冷却。" },
+  "quench-water": { title: "水槽 · 淬火", hint: "A/D 绕材料中心轴旋转 Y‑Z 平面；滚轮改变倾角；W/S 上下移动。钢坯触液后开始冷却。" },
+  "quench-oil": { title: "油槽 · 淬火", hint: "A/D 绕材料中心轴旋转 Y‑Z 平面；滚轮改变倾角；W/S 上下移动。钢坯触液后开始冷却。" },
   temper: { title: "回火炉 · 回火", hint: "拖动温度控制，松开把当前温度写入工件。" },
   grind: { title: "磨石 · 研磨", hint: "沿刃口连续拖动，拖动长度决定这一道研磨量。" },
 };
@@ -913,8 +913,8 @@ window.addEventListener("keydown", (event) => {
     switch (event.key.toLowerCase()) {
       case "w": view?.setQuenchPose({ vertical: pose.vertical + 8 }); break;
       case "s": view?.setQuenchPose({ vertical: pose.vertical - 8 }); break;
-      case "a": view?.setQuenchPose({ yaw: pose.yaw - step }); break;
-      case "d": view?.setQuenchPose({ yaw: pose.yaw + step }); break;
+      case "a": view?.setQuenchPose({ tilt: pose.tilt - step }); break;
+      case "d": view?.setQuenchPose({ tilt: pose.tilt + step }); break;
       default: return;
     }
     if (pose.vertical <= -22 && !quenchStarted) {

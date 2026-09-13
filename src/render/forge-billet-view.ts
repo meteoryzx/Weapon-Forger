@@ -308,10 +308,11 @@ export class ForgeBilletView {
       this.billetRig.position.x += this.quenchOffset.x;
       this.billetRig.position.z += this.quenchOffset.z;
       this.billetRig.position.y += this.quenchVertical;
-      this.billet.rotation.x = this.quenchTilt;
-      this.billet.rotation.y = this.quenchYaw;
+      this.billet.rotation.set(0, 0, 0);
+      this.billetRig.rotation.set(this.quenchTilt, this.quenchYaw, 0);
     } else {
       this.quenchOffset.set(0, 0, 0);
+      this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
