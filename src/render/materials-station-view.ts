@@ -12,7 +12,7 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 // to the workshop's back-left so its full-sized table does not envelop the forge.
 export const MATERIALS_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.materials!.origin);
 export const MATERIALS_FRAMES = {
-  table: { position: [0, 78, 126], target: [0, 48, -8] },
+  table: { position: [0, 78, 276], target: [0, 48, 150] },
   rack: { position: [0, 98, 162], target: [0, 48, -8] },
 } as const;
 
