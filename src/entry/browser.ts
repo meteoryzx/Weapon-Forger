@@ -334,6 +334,7 @@ let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
 let quenchDrag: { readonly startedAtMs: number; readonly startPoint: { x: number; z: number }; distance: number } | null = null;
 let quenchContacted = false;
+let quenchStarted = false;
 let quenchLastTick: number | null = null;
 let gesture: {
   readonly kind: "grind" | "weld" | "quench";
@@ -749,6 +750,7 @@ function finishQuench(): void {
   }
   quenchDrag = null;
   quenchContacted = false;
+  quenchStarted = false;
   quenchLastTick = null;
   updateView();
 }
@@ -847,9 +849,9 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
   if ((activeStation === "quench-water" || activeStation === "quench-oil") && target) {
-    const point = view.quenchTablePoint(x, y);
-    if (!point) return;
-    quenchDrag = { startedAtMs: performance.now(), startPoint: point, distance: 0 };
+    quenchContacted = false;
+    quenchStarted = false;
+    quenchLastTick = null;
     return;
   }
   if (activeStation === "temper" && view.pickTemperControl(x, y)) {
@@ -876,16 +878,6 @@ canvas.addEventListener("pointermove", (event) => {
         placeCut({...start.pose,angle:Math.atan2(Math.sin(angle),Math.cos(angle))});
       }else placeCut({...start.pose,x:start.pose.x+point.x-start.point.x,z:start.pose.z+point.z-start.point.z});
     }
-    return;
-  }
-  if (quenchDrag !== null && view && (activeStation === "quench-water" || activeStation === "quench-oil")) {
-    const bounds = canvas.getBoundingClientRect();
-    const point = view.quenchTablePoint(event.clientX - bounds.left, event.clientY - bounds.top);
-    if (point) {
-      quenchDrag.distance += Math.hypot(point.x - quenchDrag.startPoint.x, point.z - quenchDrag.startPoint.z);
-      view.updateQuenchPosition(point, activeStation);
-    }
-    quenchContacted = view.quenchPose().vertical <= -22;
     return;
   }
   if (temperDrag === null) return;
@@ -953,6 +945,12 @@ window.addEventListener("keydown", (event) => {
       case "a": view?.setQuenchPose({ flip: pose.flip - step }); break;
       case "d": view?.setQuenchPose({ flip: pose.flip + step }); break;
       default: return;
+    }
+    if (pose.vertical <= -22 && !quenchStarted) {
+      quenchStarted = true;
+      quenchContacted = true;
+      application.applyIntent({ kind: "quench", medium: activeStation === "quench-water" ? "water" : "oil", immersion: Math.min(1, Math.max(0.08, (-pose.vertical - 22) / 48)), movement: 0, dwellMs: 0, exitTemperatureC: latestSnapshot.averageTemperatureC });
+      updateView();
     }
     event.preventDefault();
     return;
