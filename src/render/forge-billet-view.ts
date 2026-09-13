@@ -310,9 +310,10 @@ export class ForgeBilletView {
       this.billetRig.position.y += this.quenchVertical;
       this.billet.rotation.set(0, 0, 0);
       // Player axes: x=right, y=inward (Three z), z=up (Three y).
-      // The billet length is aligned with player y; wheel tilts around x and
-      // A/D rotates around player y (world z).
+      // The billet length is aligned with player y. Both rotations happen on
+      // the centred rig: A/D around player x, wheel around player y (world z).
       this.billetRig.rotation.set(this.quenchTilt, -Math.PI / 2, this.quenchYaw);
+      if (!snapshot.geometry.solids) this.billet.position.x = -BILLET_CENTER_OFFSET;
     } else {
       this.quenchOffset.set(0, 0, 0);
       this.billetRig.rotation.set(0, BILLET_YAW, 0);

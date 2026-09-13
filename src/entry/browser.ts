@@ -913,8 +913,8 @@ window.addEventListener("keydown", (event) => {
     switch (event.key.toLowerCase()) {
       case "w": view?.setQuenchPose({ vertical: pose.vertical + 8 }); break;
       case "s": view?.setQuenchPose({ vertical: pose.vertical - 8 }); break;
-      case "a": view?.setQuenchPose({ yaw: pose.yaw - step }); break;
-      case "d": view?.setQuenchPose({ yaw: pose.yaw + step }); break;
+      case "a": view?.setQuenchPose({ tilt: pose.tilt - step }); break;
+      case "d": view?.setQuenchPose({ tilt: pose.tilt + step }); break;
       default: return;
     }
     if (pose.vertical <= -22 && !quenchStarted) {
@@ -946,7 +946,7 @@ canvas.addEventListener("wheel",event=>{
   if (activeStation === "quench-water" || activeStation === "quench-oil") {
     event.preventDefault();
     const pose = view?.quenchPose();
-    if (pose) view?.setQuenchPose({ tilt: pose.tilt + (event.deltaY < 0 ? 1 : -1) * Math.PI / 36 });
+    if (pose) view?.setQuenchPose({ yaw: pose.yaw + (event.deltaY < 0 ? 1 : -1) * Math.PI / 36 });
     return;
   }
   if(activeStation!=="anvil")return;event.preventDefault();
