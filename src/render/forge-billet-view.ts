@@ -179,7 +179,7 @@ export class ForgeBilletView {
   private quenchOffset = new Vector3();
   private quenchVertical = 70;
   private quenchTilt = 0;
-  private quenchFlip = 0;
+  private quenchYaw = 0;
   private snapshot: ForgeSnapshot | null = null;
   private viewport: RenderViewport;
 
@@ -309,7 +309,7 @@ export class ForgeBilletView {
       this.billetRig.position.z += this.quenchOffset.z;
       this.billetRig.position.y += this.quenchVertical;
       this.billet.rotation.x = this.quenchTilt;
-      this.billet.rotation.z = this.quenchFlip;
+      this.billet.rotation.y = this.quenchYaw;
     } else {
       this.quenchOffset.set(0, 0, 0);
     }
@@ -325,7 +325,7 @@ export class ForgeBilletView {
       this.quenchOffset.set(0, 0, 0);
       this.quenchVertical = 70;
       this.quenchTilt = 0;
-      this.quenchFlip = 0;
+      this.quenchYaw = 0;
     }
     this.station = station;
     this.cameraFromPosition.copy(this.camera.position);
@@ -509,15 +509,15 @@ export class ForgeBilletView {
     return { x: this.quenchOffset.x, z: this.quenchOffset.z };
   }
 
-  setQuenchPose(pose: { vertical?: number; tilt?: number; flip?: number }): void {
+  setQuenchPose(pose: { vertical?: number; tilt?: number; yaw?: number }): void {
     if (pose.vertical !== undefined) this.quenchVertical = Math.max(-70, Math.min(120, pose.vertical));
     if (pose.tilt !== undefined) this.quenchTilt = pose.tilt;
-    if (pose.flip !== undefined) this.quenchFlip = pose.flip;
+    if (pose.yaw !== undefined) this.quenchYaw = pose.yaw;
     if (this.snapshot && (this.station === "quench-water" || this.station === "quench-oil")) this.update(this.snapshot, null, this.station, this.temperPreviewC);
   }
 
   quenchPose(): { vertical: number; tilt: number; flip: number } {
-    return { vertical: this.quenchVertical, tilt: this.quenchTilt, flip: this.quenchFlip };
+    return { vertical: this.quenchVertical, tilt: this.quenchTilt, yaw: this.quenchYaw };
   }
 
   pickTemperControl(viewportX: number, viewportY: number): boolean {
