@@ -332,7 +332,6 @@ const heatToggle = document.querySelector<HTMLButtonElement>("#heat-toggle")!;
 const heatStatus = document.querySelector<HTMLElement>("#heat-status")!;
 let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
-let quenchDrag: { readonly startedAtMs: number; readonly startPoint: { x: number; z: number }; distance: number } | null = null;
 let quenchContacted = false;
 let quenchStarted = false;
 let quenchLastTick: number | null = null;
@@ -706,11 +705,6 @@ function finishGesture(endX: number, endY: number): void {
       ?? pickedBenchIndex
       ?? (latestSnapshot.benchCount === 1 && distance > 110 ? 0 : null);
     if (benchIndex !== null) application.applyIntent({ kind: "weld", benchIndex });
-  } else if (gesture.kind === "quench") {
-    const station = activeStation as QuenchStation;
-    if (view?.pickQuenchBasin(endX, endY, station) || distance > 110) {
-      application.applyIntent({ kind: "quench", medium: station === "quench-water" ? "water" : "oil" });
-    }
   }
   gesture = null;
   updateView();
@@ -728,30 +722,6 @@ function finishTemper(): void {
   application.applyIntent({ kind: "temper", temperatureC: Math.round(temperPreviewC) });
   temperDrag = null;
   temperPreviewC = null;
-  updateView();
-}
-
-function finishQuench(): void {
-  if (quenchDrag === null || !view) return;
-  const station = activeStation as QuenchStation;
-  const offset = view.quenchOffsetFor(station);
-  // The near side of the basin is still outside the liquid. Releasing there
-  // cancels the gesture; only a clear crossing of the liquid surface commits.
-  const immersion = Math.min(1, Math.max(0, (-offset.z - 18) / 72));
-  if (quenchDrag.distance > 12 && immersion > 0.08) {
-    application.applyIntent({
-      kind: "quench",
-      medium: station === "quench-water" ? "water" : "oil",
-      immersion,
-      movement: Math.min(1, quenchDrag.distance / 260),
-      dwellMs: performance.now() - quenchDrag.startedAtMs,
-      exitTemperatureC: latestSnapshot.averageTemperatureC,
-    });
-  }
-  quenchDrag = null;
-  quenchContacted = false;
-  quenchStarted = false;
-  quenchLastTick = null;
   updateView();
 }
 
@@ -893,7 +863,6 @@ canvas.addEventListener("pointerup", (event) => {
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
   if (temperDrag !== null) finishTemper();
-  else if (quenchDrag !== null) finishQuench();
   else if (gesture !== null) finishGesture(x, y);
 });
 
@@ -902,7 +871,6 @@ canvas.addEventListener("pointercancel", () => {
   cutDrag=null;
   temperDrag = null;
   temperPreviewC = null;
-  quenchDrag = null;
   gesture = null;
   updateView();
 });
