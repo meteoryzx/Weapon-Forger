@@ -516,7 +516,7 @@ export class ForgeBilletView {
     if (this.snapshot && (this.station === "quench-water" || this.station === "quench-oil")) this.update(this.snapshot, null, this.station, this.temperPreviewC);
   }
 
-  quenchPose(): { vertical: number; tilt: number; flip: number } {
+  quenchPose(): { vertical: number; tilt: number; yaw: number } {
     return { vertical: this.quenchVertical, tilt: this.quenchTilt, yaw: this.quenchYaw };
   }
 
