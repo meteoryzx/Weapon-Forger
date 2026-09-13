@@ -761,6 +761,10 @@ export class ForgeBilletView {
     for (const [station, color] of [["quench-water", "#6da9c3"], ["quench-oil", "#b28a4d"]] as const) {
       const anchor = STATION_ANCHORS[station];
       const rim = new MeshStandardMaterial({ color: "#3e4547", metalness: 0.65, roughness: 0.72 });
+      const basinBody = new MeshStandardMaterial({ color: "#252b2d", metalness: 0.55, roughness: 0.82 });
+      const body = new Mesh(new BoxGeometry(82, 30, 68), basinBody);
+      body.position.set(anchor[0], 28, anchor[2]);
+      this.addStationObject(station, body);
       for (const [size, position] of [
         [[82, 10, 8], [anchor[0], 52, anchor[2] - 30]],
         [[82, 10, 8], [anchor[0], 52, anchor[2] + 30]],
@@ -772,12 +776,17 @@ export class ForgeBilletView {
         this.addStationObject(station, rail);
       }
       const basin = new Mesh(
-        new BoxGeometry(70, 8, 52),
+        new BoxGeometry(70, 5, 52),
         new MeshStandardMaterial({ color, metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.9 }),
       );
-      basin.position.set(anchor[0], anchor[1], anchor[2]);
+      basin.position.set(anchor[0], 48, anchor[2]);
       this.quenchTargets.set(station, basin);
       this.addStationObject(station, basin);
+      for (const x of [-32, 32]) {
+        const foot = new Mesh(new BoxGeometry(12, 34, 12), basinBody);
+        foot.position.set(anchor[0] + x, 2, anchor[2]);
+        this.addStationObject(station, foot);
+      }
     }
 
     this.temperControl.position.set(199, 70, -255);
