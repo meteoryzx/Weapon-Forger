@@ -837,7 +837,7 @@ export class ForgeBilletView {
     const anchor=STATION_ANCHORS[station];
     const target=new Vector3(anchor[0],WORKSHOP_SURFACE_Y+5,anchor[2]);
     const distance=Math.max(1,1.2/this.camera.aspect);
-    const offset=station==="grind"?new Vector3(-58,42,86):new Vector3(22,38,72);
+    const offset=station==="grind"?new Vector3(-92,38,0):new Vector3(22,38,72);
     return {position:offset.multiplyScalar(distance).add(target).toArray(),target:target.toArray()};
   }
 

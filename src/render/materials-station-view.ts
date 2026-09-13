@@ -133,7 +133,7 @@ export class MaterialsStationView {
       const onTable = tableIds.has(piece.workpieceId);
       const mesh = this.createWorkpieceMesh(piece, piece.workpieceId === activeWorkpieceId);
       if (onTable) {
-        mesh.position.set(-42 + tableIndex * 28, TABLE_ITEM_BASE_Y, 16);
+        mesh.position.set(-42 + tableIndex * 28, TABLE_ITEM_BASE_Y + 0.04, 150);
         mesh.quaternion.copy(orientationFor(STORED_DIRECTION));
         mesh.userData.tableSlot = tableIndex;
         this.tableItems.push(mesh);
