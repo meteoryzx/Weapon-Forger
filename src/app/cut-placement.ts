@@ -1,15 +1,17 @@
 import { FORGE_RULES, type CutOperation, type ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { solidBounds } from "../forge/solid-geometry.ts";
-import { WORKSHOP_UNITS_PER_MM } from "./workshop-scale.ts";
+import { WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM } from "./workshop-scale.ts";
 
 // Table coordinates: x right, z toward the player; y is vertical in Three.js.
 // These temporary poses never rotate/deform the persisted material geometry.
 export interface CutPose { readonly x: number; readonly z: number; readonly angle: number }
-export const CUT_TABLE = { halfWidth: 205, halfDepth: 125, surface: 72, scale: WORKSHOP_UNITS_PER_MM } as const;
-export const CUT_HOME: CutPose = { x: 0, z: -20, angle: 0 };
+export const CUT_TABLE = { halfWidth: 48, halfDepth: 32, surface: WORKSHOP_SURFACE_Y, scale: WORKSHOP_UNITS_PER_MM } as const;
+// The blade starts 90 mm before the table centre. At the shared 0.08 scene
+// scale, the billet's 48 mm width therefore stays under the finite sweep.
 // The finite sweep ends at the tabletop center, making partial cuts accessible
 // there. Rendering, animation and execution all consume these same endpoints.
 export const SAW_PATH = { x: 0, startZ: -FORGE_RULES.sawTravelLength * CUT_TABLE.scale, endZ: 0 } as const;
+export const CUT_HOME: CutPose = { x: 0, z: (SAW_PATH.startZ + SAW_PATH.endZ) / 2, angle: 0 };
 
 export function cutBounds(piece: ForgeSnapshotWorkpiece) {
   if (piece.geometry.solids) return solidBounds(piece.geometry.solids, piece.geometry);

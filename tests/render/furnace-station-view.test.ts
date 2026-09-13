@@ -6,6 +6,7 @@ import { FURNACE, FURNACE_ORIGIN, FurnaceStationView } from "../../src/render/fu
 import { MaterialsStationView } from "../../src/render/materials-station-view.ts";
 import { SawStationView } from "../../src/render/saw-station-view.ts";
 import { CUT_HOME } from "../../src/app/cut-placement.ts";
+import { WORKSHOP_LAYOUT } from "../../src/app/workshop-scale.ts";
 
 describe("front-opening forge", () => {
   it("uses the same billet dimensions at selection, cutting and heating", () => {
@@ -29,16 +30,15 @@ describe("front-opening forge", () => {
     const view = new FurnaceStationView(piece => createBilletGeometry(piece, null));
     view.group.updateMatrixWorld(true);
     expect(new Box3().setFromObject(view.body).min.y).toBeCloseTo(FURNACE.floor);
-    for (const x of [-30, 0, 30]) {
-      const ray = new Raycaster(FURNACE_ORIGIN.clone().add(new Vector3(x, 95, 400)), new Vector3(0, 0, -1));
+    for (const x of [-15, 0, 15]) {
+      const ray = new Raycaster(FURNACE_ORIGIN.clone().add(new Vector3(x, FURNACE.hearth+1, 400)), new Vector3(0, 0, -1));
       expect(ray.intersectObject(view.body, true)).toHaveLength(0);
     }
     const burners = view.body.children.filter(object => object.name === "burner");
     expect(burners).toHaveLength(3);
     expect(new Set(burners.map(object => object.position.z)).size).toBe(3);
     expect(burners.every(object => object.position.x === 0)).toBe(true);
-    expect(FURNACE_ORIGIN.x).toBeGreaterThan(300);
-    expect(FURNACE_ORIGIN.z).toBeLessThan(-200);
+    expect(FURNACE_ORIGIN.toArray()).toEqual([...WORKSHOP_LAYOUT.furnace!.origin]);
     view.dispose();
   });
 

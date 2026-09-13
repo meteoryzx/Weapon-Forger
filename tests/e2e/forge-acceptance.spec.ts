@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { dragScene } from "./scene-input.ts";
 
 const acceptanceSlices = [
   ["materials", "materials", "选料桌 · 选料"],
@@ -7,7 +8,7 @@ const acceptanceSlices = [
   ["heat", "furnace", "火炉 · 加热"],
   ["hammer", "anvil", "铁砧 · 锤击"],
   ["quench", "quench-water", "水槽 · 淬火"],
-  ["temper", "temper", "回火炉 · 回火"],
+  ["temper", "temper", "火炉 · 回火"],
   ["grind", "grind", "磨石 · 研磨"],
 ] as const;
 
@@ -90,10 +91,7 @@ test("hammer force, free placement, continuous roll and click deformation preser
 test("weld acceptance joins the visible current and bench workpieces", async ({ page }) => {
   await page.goto("/?accept=weld");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
-  await page.mouse.move(301, 446);
-  await page.mouse.down();
-  await page.mouse.move(393, 267, { steps: 5 });
-  await page.mouse.up();
+  await dragScene(page,"billet","weld:0");
 
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "1");
   await expect(page.locator("body")).toHaveAttribute("data-joint-count", "1");
@@ -117,6 +115,22 @@ test("temper acceptance starts from a quenched workpiece", async ({ page }) => {
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-setup-operations", "3");
   await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
   await expect(page.locator("body")).toHaveAttribute("data-quench-medium", "water");
+});
+
+test("heating and tempering share one furnace and retain the current workpiece",async({page})=>{
+  await page.goto("/?accept=temper");
+  const body=page.locator("body"),id=await body.getAttribute("data-workpiece-id");
+  const camera=()=>page.evaluate(()=>(window as unknown as {__forgeInspect:()=>{camera:unknown}}).__forgeInspect().camera);
+  await expect(body).toHaveAttribute("data-camera-state","settled");
+  const before=await camera();
+  await page.locator("[data-furnace-mode=furnace]").click();
+  await expect(body).toHaveAttribute("data-active-station","furnace");
+  await expect(body).toHaveAttribute("data-camera-state","settled");
+  expect(await camera()).toEqual(before);
+  await page.locator("[data-furnace-mode=temper]").click();
+  await dragScene(page,"temper",{x:0,y:-40});
+  await expect(body).toHaveAttribute("data-completed-verbs",/temper/);
+  await expect(body).toHaveAttribute("data-workpiece-id",id!);
 });
 
 test("saw preview is read-only, confirms finite cuts, and preserves independently selectable pieces", async ({page})=>{
@@ -166,16 +180,16 @@ test("stock can overhang freely and a partial notch remains until a later cut se
   await page.locator("#game").focus();
   // At the shared smaller scale the stock cannot span the blade and table edge
   // simultaneously. First verify overhang is unclamped, then return to the blade.
-  for(let i=0;i<56;i++)await page.keyboard.press("ArrowRight");
-  await expect.poll(async()=>JSON.parse((await body.getAttribute("data-cut-pose"))!).x).toBe(224);
+  for(let i=0;i<16;i++)await page.keyboard.press("Shift+ArrowRight");
+  await expect.poll(async()=>JSON.parse((await body.getAttribute("data-cut-pose"))!).x).toBe(64);
   expect(Number(await body.getAttribute("data-total-material-volume"))).toBe(original);
-  for(let i=0;i<46;i++)await page.keyboard.press("ArrowLeft");
+  for(let i=0;i<15;i++)await page.keyboard.press("Shift+ArrowLeft");
   // Center the width on the finite guide's endpoint, leaving half uncut.
-  for(let i=0;i<5;i++)await page.keyboard.press("ArrowDown");
+  for(let i=0;i<9;i++)await page.keyboard.press("ArrowDown");
   await expect(confirm).toBeEnabled({timeout:30000});
   await expect(page.locator("#cut-status")).toContainText("仍为一块");
   const pose=await body.getAttribute("data-cut-pose");
-  expect(JSON.parse(pose!).x).toBe(40);
+  expect(JSON.parse(pose!).x).toBe(4);
   expect(Number(await body.getAttribute("data-total-material-volume"))).toBe(original);
   await confirm.click();
   await expect(body).toHaveAttribute("data-acceptance-operation-count","1",{timeout:15000});
@@ -184,7 +198,7 @@ test("stock can overhang freely and a partial notch remains until a later cut se
   await expect(body).toHaveAttribute("data-cut-pose",pose!);
   expect(Number(await body.getAttribute("data-cut-loss-volume"))).toBeCloseTo(24*8,5);
   await page.locator("#game").focus();
-  for(let i=0;i<5;i++)await page.keyboard.press("ArrowUp");
+  for(let i=0;i<9;i++)await page.keyboard.press("ArrowUp");
   await expect(confirm).toBeEnabled({timeout:30000});
   await expect(page.locator("#cut-status")).toContainText("将分成 2 块");
   await confirm.click();

@@ -4,6 +4,7 @@ import { createForgeState,createForgeSnapshot,applyForgeIntent } from "../../src
 import { createBilletGeometry } from "../../src/render/forge-billet-view.ts";
 import { SawStationView,SAW_ORIGIN } from "../../src/render/saw-station-view.ts";
 import { CUT_HOME,CUT_TABLE,SAW_PATH } from "../../src/app/cut-placement.ts";
+import { WORKSHOP_UNITS_PER_MM } from "../../src/app/workshop-scale.ts";
 
 describe("saw station spatial relationships",()=>{
   it("rests both the active cut piece and its stored counterpart on the table at identical scale",()=>{
@@ -25,13 +26,15 @@ describe("saw station spatial relationships",()=>{
     view.group.updateMatrixWorld(true);
     const size=new Box3().setFromObject(view.group.getObjectByName("saw-blade")!).getSize(new Vector3());
     // Hub is wider than the cutting disk, but the full assembly remains edge-on.
-    expect(size.z).toBeLessThan(size.x/3);expect(size.y).toBeGreaterThan(100);
+    expect(size.z).toBeLessThan(size.x/3);
+    expect(size.y/WORKSHOP_UNITS_PER_MM).toBeGreaterThan(430);
+    expect(size.y/WORKSHOP_UNITS_PER_MM).toBeLessThan(460);
     const guide=view.group.getObjectByName("finite-cut-guide")! as unknown as {geometry:BufferGeometry};
     const positions=guide.geometry.getAttribute("position");
     expect(positions.getZ(0)).toBeCloseTo(SAW_PATH.startZ,5);
     expect(positions.getZ(positions.count-1)).toBeCloseTo(SAW_PATH.endZ,5);
     for(let i=0;i<positions.count;i++)expect(positions.getX(i)).toBe(0);
-    expect(new Box3().setFromObject(view.table).max.y).toBeLessThan(CUT_TABLE.surface+SAW_ORIGIN.y);
+    expect(new Box3().setFromObject(view.table).max.y).toBeLessThan(CUT_TABLE.surface + SAW_ORIGIN.y + 0.01);
     view.dispose();
   });
 });

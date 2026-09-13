@@ -2,13 +2,14 @@ import { BoxGeometry, BufferGeometry, Float32BufferAttribute, Group, Mesh, MeshS
   CylinderGeometry, Euler, Vector3, DoubleSide } from "three";
 import { HAMMER_HOME, HAMMER_RULES, hammerFrame, hammerSurface, placedHammerSurface, hammerContact, type HammerPose,
   type ForgeSnapshot, type HammerTriangle, type HammerContact } from "../forge/index.ts";
-import { WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
+import { WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
+import { WorkshopModelKit } from "./workshop-model-kit.ts";
 
-export const ANVIL = { surface:72,scale:WORKSHOP_UNITS_PER_MM } as const;
+export const ANVIL = { surface:WORKSHOP_SURFACE_Y,scale:WORKSHOP_UNITS_PER_MM } as const;
 export function hammerCameraFrame(aspect:number) {
-  const distance=aspect<1.35?245:180;
-  return {position:[0,72+distance*0.6,distance] as const,target:[0,73,0] as const};
+  const distance=70*Math.max(1,1.2/aspect);
+  return {position:[0,ANVIL.surface+distance*0.6,distance] as const,target:[0,ANVIL.surface+1,0] as const};
 }
 export class HammerStationView {
   readonly group=new Group();
@@ -22,6 +23,7 @@ export class HammerStationView {
   private strikeAt=-Infinity;
   private releaseAt=-Infinity;
   private animating=false;
+  private readonly kit=new WorkshopModelKit();
   private energy=HAMMER_RULES.defaultEnergy as number;
 
   constructor() {
@@ -35,18 +37,24 @@ export class HammerStationView {
     };
     // The anvil is grounded on a heavy stone/iron foundation; it no longer
     // reads as a tabletop prop or as wood floating above the workshop floor.
-    box(112,28,88,0,-16,0,stone);box(92,8,68,0,2,0,ironBase);box(43,31,32,0,21.5,0);box(67,20,43,0,47,0);
-    this.target=box(224*ANVIL.scale,15,104*ANVIL.scale,0,64.5,0,face);
-    this.target.userData.station="anvil";
-    for(const side of [-1,1]){
-      const horn=new Mesh(new CylinderGeometry(1,9,40,4),steel);
-      horn.rotation.z=-side*Math.PI/2;horn.position.set(side*65,62,0);this.group.add(horn);
-      for(const z of [-23,23])box(7,4,7,side*31,0,z,face);
+    const k=this.kit;
+    k.box(this.group,"foundation",[680,80,530],[0,40,0],"stone");
+    k.box(this.group,"anvil-stand",[520,470,430],[0,315,0],"endgrain");
+    for(const h of [160,470]){
+      k.box(this.group,"stand-strap",[532,36,442],[0,h,0],"iron");
+      k.box(this.group,"stand-inset",[520,38,430],[0,h,0],"endgrain");
     }
-    const head=new Mesh(new BoxGeometry(HAMMER_RULES.face*ANVIL.scale,28,HAMMER_RULES.face*ANVIL.scale),steel);
-    head.position.y=14;this.tool.add(head);
-    const handle=new Mesh(new CylinderGeometry(2.4,3,66,10),wood);
-    handle.rotation.z=-Math.PI/2+0.18;handle.position.set(35,22,0);this.tool.add(handle);
+    k.profile(this.group,"anvil-body",[[-220,0],[220,0],[180,55],[90,105],[90,210],[145,285],[112,305],[-112,305],[-145,285],[-90,210],[-90,105],[-180,55]],190,[0,550,0],"iron");
+    k.box(this.group,"face-underlay",[224,20,104],[0,857.5,0],"steel",1);
+    k.profile(this.group,"horn",[[105,0],[340,-42],[340,-52],[125,-90]],90,[0,858,0],"steel");
+    k.profile(this.group,"heel",[[-112,0],[-245,-8],[-245,-52],[-135,-74]],104,[0,858,0],"iron");
+    k.batch(this.group);
+    this.target=box(224*ANVIL.scale,15*ANVIL.scale,104*ANVIL.scale,0,ANVIL.surface-7.5*ANVIL.scale,0,face);
+    this.target.userData.station="anvil";
+    const head=new Mesh(new BoxGeometry(HAMMER_RULES.face*ANVIL.scale,7,HAMMER_RULES.face*ANVIL.scale),k.materials.steel);
+    head.position.y=3.5;this.tool.add(head);
+    const handle=new Mesh(new CylinderGeometry(0.8,1.05,27.2,12),k.materials.wood);
+    handle.rotation.z=-Math.PI/2;handle.position.set(13.6,4.5,0);this.tool.add(handle);
     this.group.add(this.item,this.tool,this.footprint);
     this.tool.visible=false;this.footprint.visible=false;
   }
@@ -102,6 +110,7 @@ export class HammerStationView {
     const geometries=new Set<BufferGeometry>(),materials=new Set<MeshStandardMaterial|MeshBasicMaterial>();
     this.group.traverse(object=>{if(object instanceof Mesh){geometries.add(object.geometry);for(const m of Array.isArray(object.material)?object.material:[object.material])materials.add(m);}});
     geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());
+    this.kit.woodTexture.dispose();this.kit.mineralTexture.dispose();
   }
   get busy():boolean {return performance.now()-this.releaseAt<150;}
   tick(now:number):boolean {

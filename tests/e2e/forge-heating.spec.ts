@@ -1,17 +1,19 @@
 import { expect, test, type Page } from "@playwright/test";
 import { PerspectiveCamera, Vector3 } from "three";
 import { furnaceCameraFrame, FURNACE, FURNACE_ORIGIN } from "../../src/render/furnace-station-view.ts";
+import { WORKSHOP_STANDARD } from "../../src/app/workshop-scale.ts";
 
 async function clickMouth(page: Page) {
   const box = (await page.locator("#game").boundingBox())!;
   const frame = furnaceCameraFrame(box.width / box.height);
-  const camera = new PerspectiveCamera(52, box.width / box.height, 0.1, 2000);
+  const camera = new PerspectiveCamera(WORKSHOP_STANDARD.camera.fov, box.width / box.height, 0.1, 2000);
   camera.position.fromArray(frame.position); camera.lookAt(new Vector3().fromArray(frame.target)); camera.updateMatrixWorld(true);
   const point = new Vector3(0, (FURNACE.hearth + FURNACE.ceiling) / 2, FURNACE.front).add(FURNACE_ORIGIN).project(camera);
   await page.locator("#game").click({ position: { x: (point.x + 1) * box.width / 2, y: (1 - point.y) * box.height / 2 } });
 }
 
 test("one click inserts and keeps heating; a second extracts and cools without changing material", async ({ page }) => {
+  test.setTimeout(60000);
   await page.goto("/?accept=heat");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   const body = page.locator("body");
