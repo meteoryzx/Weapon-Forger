@@ -40,10 +40,10 @@ export function grindingAsset(k:WorkshopModelKit):StationAsset {
   k.cylinder(root,"idler-hub",62,155,[0,430,0],"iron","x");
   // One closed abrasive loop. The front vertical run is the contact surface
   // and is intentionally exposed below the upper guard.
-  k.box(root,"belt-front",[32,760,480],[-240,810,0],"brass",2);
-  k.box(root,"belt-back",[32,760,480],[240,810,0],"brass",2);
-  k.box(root,"belt-top",[480,32,32],[0,1190,0],"brass",2);
-  k.box(root,"belt-bottom",[480,32,32],[0,430,0],"brass",2);
+  k.box(root,"belt-front",[32,760,480],[-260,810,0],"belt",2);
+  k.box(root,"belt-back",[32,760,480],[260,810,0],"belt",2);
+  k.box(root,"belt-top",[520,32,32],[0,1190,0],"belt",2);
+  k.box(root,"belt-bottom",[520,32,32],[0,430,0],"belt",2);
   k.box(root,"upper-guard",[190,180,300],[0,1375,0],"iron",2);
   k.box(root,"lower-guard",[190,120,300],[0,285,0],"iron",2);
   k.box(root,"contact-rest",[560,38,190],[0,760,300],"steel",0);
