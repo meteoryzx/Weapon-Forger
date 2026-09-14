@@ -118,7 +118,7 @@ const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number
   "quench-water": [WORKSHOP_LAYOUT.quench!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT.quench!.origin[2]],
   "quench-oil": [WORKSHOP_LAYOUT["quench-oil"]!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT["quench-oil"]!.origin[2]],
   temper: [WORKSHOP_LAYOUT.furnace!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.furnace!.origin[2]+FURNACE.front],
-  grind: [WORKSHOP_LAYOUT.grind!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.grind!.origin[2]+25],
+  grind: [WORKSHOP_LAYOUT.grind!.origin[0] - 22, WORKSHOP_SURFACE_Y + 30, WORKSHOP_LAYOUT.grind!.origin[2]],
 };
 
 export const CAMERA_FRAMES = {
@@ -321,7 +321,7 @@ export class ForgeBilletView {
       if (activeStation === "grind") {
         this.billetRig.position.x += this.grindOffset.x;
         this.billetRig.position.z += this.grindOffset.z;
-        this.billetRig.rotation.set(0, BILLET_YAW + this.grindAngle, 0);
+        this.billetRig.rotation.set(0, this.grindAngle, Math.PI / 2);
       } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
@@ -784,7 +784,7 @@ export class ForgeBilletView {
     for(const [station,asset] of assets){
       asset.root.position.set(STATION_ANCHORS[station][0],station==="grind"?0:STATION_ANCHORS[station][1],STATION_ANCHORS[station][2]);
       if(station==="quench-water"||station==="quench-oil")asset.root.position.y=-30*(1-0.55);
-      if(station==="grind")asset.root.rotation.y=-Math.PI/2;
+      // The grinder face is authored on local -X and points at the operator.
       this.scene.add(asset.root);
       this.stationRoots.set(station,asset.root);
       if(asset.contact)this.quenchTargets.set(station as QuenchStation,asset.contact);
