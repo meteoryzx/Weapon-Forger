@@ -11,7 +11,7 @@ import {
   cloneWorkpieceGeometry,
   createStructuredWorkpieceGeometry,
 } from "./workpiece-geometry.ts";
-import { grindSolids, partitionSolids, solidBounds, solidEnvelope, solidVolumesByBlock, solidSurfaceArea, workpieceSolids } from "./solid-geometry.ts";
+import { grindSolids, grindSolidsContact, partitionSolids, solidBounds, solidEnvelope, solidVolumesByBlock, solidSurfaceArea, solidVolume, solidPoint, workpieceGrindingSolids, workpieceSolids } from "./solid-geometry.ts";
 import type {
   BladeBlock,
   BladeSection,
@@ -268,9 +268,38 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
     heatTreatmentCount: state.workpiece.heatTreatments.length,
     materialRegionCount: workpiece.materialRegionCount,
     removedVolume: state.workpiece.sections.reduce((sum, section) => sum + section.removedVolume, 0),
+    grindMetrics: deriveGrindMetrics(state.workpiece, state.operations),
     benchCount: state.bench.length,
     bench: state.bench.map(snapshotWorkpiece),
     sections: workpiece.sections,
+  };
+}
+
+function deriveGrindMetrics(workpiece: WorkpieceState, operations: readonly ForgeOperation[]) {
+  const solids = workpiece.geometry.solids ?? [];
+  if (!solids.length) return { bladeAngleDeg: 0, edgeThicknessMm: Math.min(...workpiece.sections.map(section => section.thickness)), roughness: 0, symmetry: 1 };
+  const bounds = solidBounds(solids, workpiece.geometry);
+  const volume = solids.reduce((sum, solid) => sum + solidVolume(solid, workpiece.geometry), 0);
+  const boxArea = 2 * ((bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY)
+    + (bounds.maxX - bounds.minX) * (bounds.maxZ - bounds.minZ)
+    + (bounds.maxY - bounds.minY) * (bounds.maxZ - bounds.minZ));
+  const surface = solidSurfaceArea(workpiece.geometry);
+  const midpoint = (bounds.minZ + bounds.maxZ) / 2;
+  let negative = 0, positive = 0;
+  for (const solid of solids) {
+    const volumeOfSolid = solidVolume(solid, workpiece.geometry);
+    const center = solid.vertices.map(vertex => solidPoint(vertex, workpiece.geometry))
+      .reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y, z: sum.z + point.z }), { x: 0, y: 0, z: 0 });
+    const count = solid.vertices.length || 1;
+    if (center.z / count < midpoint) negative += volumeOfSolid; else positive += volumeOfSolid;
+  }
+  const contact = [...operations].reverse().find((operation): operation is GrindOperation => operation.kind === "grind" && operation.contact !== undefined);
+  const angle = contact?.contact?.angle ?? 0;
+  return {
+    bladeAngleDeg: Math.min(90, Math.abs(Math.atan(Math.tan(angle))) * 2 * 180 / Math.PI),
+    edgeThicknessMm: volume / Math.max((bounds.maxX - bounds.minX) * Math.max(bounds.maxZ - bounds.minZ, 1e-9), 1e-9),
+    roughness: Math.max(0, Math.min(1, (surface - boxArea) / Math.max(boxArea, 1e-9))),
+    symmetry: 1 - Math.min(1, Math.abs(negative - positive) / Math.max(negative + positive, 1e-9)),
   };
 }
 
@@ -394,6 +423,9 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
 // strokes on one spot leaves an uneven edge while spreading them stays even.
 function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
   assertGrindOperation(state, operation);
+  if (operation.contact) {
+    return applyPlasticGrind(state, operation);
+  }
   const approach = operation.angle ?? 0;
   const angleEfficiency = 0.35 + 0.65 * Math.abs(Math.cos(approach));
   const fractions = new Map<string, number>();
@@ -428,6 +460,64 @@ function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
       ? { ...state.workpiece.geometry, solids: grindSolids(state.workpiece.geometry, fractions) }
       : state.workpiece.geometry },
   }, operation);
+}
+
+// Grinding is a plastic surface operation, like the hammer flow. It edits the
+// deformation lattice directly instead of repeatedly splitting solid faces.
+// The positive lateral edge is the belt-facing edge in the calibrated billet
+// frame; the contact angle tilts the removal threshold through thickness.
+function applyPlasticGrind(state: ForgeState, operation: GrindOperation): ForgeState {
+  const contact = operation.contact!;
+  const geometry = state.workpiece.geometry;
+  const nodes = geometry.nodes;
+  const axialHalf = Math.max(1, contact.axialWidth / 2);
+  const maxLateral = Math.max(...nodes.map(node => node.lateralOffset));
+  const minVertical = Math.min(...nodes.map(node => node.verticalOffset));
+  const maxVertical = Math.max(...nodes.map(node => node.verticalOffset));
+  const verticalHalf = Math.max(1, contact.verticalHeight / 2);
+  const angle = contact.angle ?? 0;
+  const depth = contact.depth * Math.min(1, operation.amount);
+  const updatedNodes = nodes.map(node => {
+    const axialDistance = Math.abs(node.axialPosition - contact.axialPosition);
+    if (axialDistance > axialHalf) return node;
+    const axialFalloff = Math.cos((axialDistance / axialHalf) * Math.PI / 2) ** 2;
+    const verticalDistance = node.verticalOffset - contact.verticalOffset;
+    if (Math.abs(verticalDistance) > verticalHalf) return node;
+    const verticalFalloff = Math.cos((verticalDistance / verticalHalf) * Math.PI / 2) ** 2;
+    if (node.heightIndex !== geometry.grid.heightBlocks) return node;
+    const edgeDistance = maxLateral - node.lateralOffset;
+    if (edgeDistance < -1e-6) return node;
+    const bevelSlope = Math.max(0.2, Math.abs(Math.tan(angle)));
+    // A shallow angle produces a broad bevel; a steep angle produces a short
+    // bevel. The operation changes top thickness as a function of distance
+    // from the belt-facing edge, which is the visible knife cross-section.
+    const bevelReach = Math.max(2, depth / bevelSlope);
+    if (edgeDistance > bevelReach) return node;
+    const localDepth = depth * axialFalloff * verticalFalloff;
+    const edgeWeight = Math.max(0, 1 - edgeDistance / bevelReach);
+    const bevelDepth = localDepth * edgeWeight;
+    return bevelDepth <= 1e-6 ? node : { ...node, verticalOffset: node.verticalOffset - bevelDepth };
+  });
+  const nextGeometry = createStructuredWorkpieceGeometry(state.workpiece.id, geometry.grid, updatedNodes, state.workpiece.sections.length);
+  const sections = state.workpiece.sections.map((section, index) => {
+    const axialDistance = Math.abs(section.position - contact.axialPosition);
+    if (axialDistance > axialHalf) return section;
+    const falloff = Math.cos((axialDistance / axialHalf) * Math.PI / 2) ** 2;
+    const removed = Math.min(
+      section.length * section.thickness * depth * falloff,
+      section.blocks.reduce((sum, block) => sum + block.volume, 0) * 0.35,
+    );
+    const blocks = section.blocks.map(block => block.widthIndex === geometry.grid.widthBlocks - 1
+      ? { ...block, volume: Math.max(0, block.volume - removed) }
+      : block);
+    return summarizeSection({
+      ...section,
+      groundAmount: clamp(section.groundAmount + operation.amount * falloff, 0, 1),
+      removedVolume: section.removedVolume + removed,
+      blocks,
+    }, index, nextGeometry.nodes, nextGeometry.grid);
+  });
+  return appendOperation({ ...state, workpiece: { ...state.workpiece, sections, geometry: nextGeometry } }, operation);
 }
 
 // 选料：往 bench 增加一块指定材料的新钢坯，保留独立材料来源供后续组合。

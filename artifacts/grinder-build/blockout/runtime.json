@@ -1,0 +1,27 @@
+{
+  "errors": [],
+  "parts": [
+    {
+      "name": "base",
+      "vertices": 150
+    },
+    {
+      "name": "spine",
+      "vertices": 150
+    },
+    {
+      "name": "abrasive-loop",
+      "vertices": 1584
+    },
+    {
+      "name": "work-rest",
+      "vertices": 150
+    },
+    {
+      "name": "drive-wheel",
+      "vertices": 323
+    }
+  ],
+  "calls": 5,
+  "triangles": 1536
+}

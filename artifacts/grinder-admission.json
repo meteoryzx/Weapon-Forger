@@ -1,16 +1,14 @@
 {
-  "admitted": false,
-  "reasons": [
-    "mask coherence: largest connected blob is 0.36 of foreground < 0.6 (fragmented/scattered subject — ambiguous)"
-  ],
+  "admitted": true,
+  "reasons": [],
   "provenance": {
     "viewpoint": "reference",
-    "sourcePath": "C:\\Users\\30949\\Desktop\\参考图\\打磨.png",
-    "width": 1536,
-    "height": 1024,
-    "foregroundCoverage": 0.3402,
-    "largestComponentFraction": 0.3582,
-    "pHash": 15796572752851013870,
+    "sourcePath": "D:\\打了个铁\\Weapon-Forger-hammer\\artifacts\\grinder-reference\\hero.png",
+    "width": 518,
+    "height": 870,
+    "foregroundCoverage": 0.4387,
+    "largestComponentFraction": 1.0,
+    "pHash": 17266376568182300825,
     "duplicateOfHash": null
   }
 }

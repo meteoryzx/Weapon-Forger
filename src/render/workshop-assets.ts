@@ -1,6 +1,7 @@
 import { BufferGeometry, Group, Mesh, MeshStandardMaterial, PlaneGeometry } from "three";
 import { QUENCH_BODY_SCALE_Y, QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_LAYOUT, WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
+import { GrinderModel } from "./grinder-model.ts";
 
 export interface StationAsset { root:Group; contact?:Mesh<BufferGeometry,MeshStandardMaterial>; control?:Mesh<BufferGeometry,MeshStandardMaterial> }
 export function basinAsset(k:WorkshopModelKit,oil:boolean):StationAsset {
@@ -25,35 +26,8 @@ export function basinAsset(k:WorkshopModelKit,oil:boolean):StationAsset {
   const contact=new Mesh(new PlaneGeometry(700*WORKSHOP_UNITS_PER_MM,800*WORKSHOP_UNITS_PER_MM),water);contact.rotation.x=-Math.PI/2;contact.position.y=(QUENCH_SURFACE_Y-root.position.y)/root.scale.y;contact.name="liquid-surface";root.add(contact);
   return {root,contact};
 }
-export function grindingAsset(k:WorkshopModelKit):StationAsset {
-  const root=new Group();root.name="belt-grinder";
-  // Low welded base: the work zone remains reachable at standing height.
-  k.box(root,"base",[1080,100,900],[0,50,0],"iron");
-  k.box(root,"base-top",[960,35,760],[0,117.5,0],"steel");
-  for(const z of [-285,285]){
-    k.box(root,"side-upright",[150,1120,110],[0,700,z],"iron",3);
-    k.box(root,"side-foot",[260,90,220],[0,120,z],"iron",3);
-  }
-  const upper=k.cylinder(root,"drive-pulley",215,135,[0,1190,0],"steel","x",64);upper.userData.keepMesh=true;
-  const lower=k.cylinder(root,"idler-pulley",215,135,[0,430,0],"steel","x",64);lower.userData.keepMesh=true;
-  k.cylinder(root,"drive-hub",62,155,[0,1190,0],"iron","x");
-  k.cylinder(root,"idler-hub",62,155,[0,430,0],"iron","x");
-  // One closed abrasive loop. The front vertical run is the contact surface
-  // and is intentionally exposed below the upper guard.
-  k.box(root,"belt-front",[32,760,480],[-260,810,0],"belt",2);
-  k.box(root,"belt-back",[32,760,480],[260,810,0],"belt",2);
-  k.box(root,"belt-top",[520,32,32],[0,1190,0],"belt",2);
-  k.box(root,"belt-bottom",[520,32,32],[0,430,0],"belt",2);
-  k.box(root,"upper-guard",[80,110,180],[0,1375,0],"iron",2);
-  k.box(root,"lower-guard",[80,90,180],[0,285,0],"iron",2);
-  k.box(root,"contact-rest",[560,38,190],[0,760,300],"steel",0);
-  k.box(root,"rest-bracket",[90,380,70],[0,575,285],"iron",2);
-  // Period-appropriate manual drive: a treadle and handwheel replace a motor.
-  k.ring(root,"handwheel",125,18,[360,680,90],"steel","x");
-  k.box(root,"handwheel-handle",[24,250,24],[360,680,90],"brass");
-  k.box(root,"treadle",[230,32,250],[300,145,260],"wood");
-  k.beam(root,"treadle-link",[300,160,260],[300,650,90],20,24,"iron");
-  k.batch(root);return {root};
+export function grindingAsset(_k:WorkshopModelKit):StationAsset {
+  return {root:new GrinderModel().root};
 }
 export function powerHammerAsset(k:WorkshopModelKit):StationAsset {
   const root=new Group();root.name="power-hammer-reserved";

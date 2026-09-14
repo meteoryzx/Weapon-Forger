@@ -37,6 +37,26 @@ export function workpieceSolids(piece: WorkpieceState): readonly WorkpieceSolid[
   }));
 }
 
+// Grinding only needs convex cell boundaries. Keeping one cube per material
+// cell preserves volume and contact faces while avoiding six tetrahedra per
+// cell during the first abrasive pass.
+export function workpieceGrindingSolids(piece: WorkpieceState): readonly WorkpieceSolid[] {
+  if (piece.geometry.solids) return piece.geometry.solids;
+  const grid = piece.geometry.grid;
+  const index = (a: number, w: number, h: number) => a * (grid.widthBlocks + 1) * (grid.heightBlocks + 1)
+    + h * (grid.widthBlocks + 1) + w;
+  return piece.sections.flatMap((section, a) => section.blocks.map(block => {
+    const w = block.widthIndex, h = block.heightIndex;
+    const corners = [index(a,w,h), index(a+1,w,h), index(a,w+1,h), index(a+1,w+1,h),
+      index(a,w,h+1), index(a+1,w,h+1), index(a,w+1,h+1), index(a+1,w+1,h+1)];
+    return {
+      id: `${block.id}:grind-cell`, blockId: block.id,
+      vertices: corners.map(nodeIndex => ({ weights: [{ nodeIndex, weight: 1 }] })),
+      faces: [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]],
+    };
+  }));
+}
+
 export function solidVolume(solid: WorkpieceSolid, geometry: WorkpieceGeometry): number {
   const points = solid.vertices.map(vertex => solidPoint(vertex, geometry));
   const center = mean(points);
@@ -97,6 +117,49 @@ export function grindSolids(geometry: WorkpieceGeometry, fractions: ReadonlyMap<
     }
     return at((lo + hi) / 2);
   });
+}
+
+/** Remove one finite abrasive contact patch from the positive lateral edge. */
+export function grindSolidsContact(
+  geometry: WorkpieceGeometry,
+  contact: { readonly axialPosition: number; readonly verticalOffset: number; readonly axialWidth: number; readonly verticalHeight: number; readonly depth: number; readonly angle?: number },
+): { readonly solids: readonly WorkpieceSolid[]; readonly removedByBlock: ReadonlyMap<string, number> } {
+  const source = geometry.solids ?? [];
+  if (contact.axialWidth <= 0 || contact.verticalHeight <= 0 || contact.depth <= 0) {
+    return { solids: source, removedByBlock: new Map() };
+  }
+  const bounds = solidBounds(source, geometry);
+  const halfX = contact.axialWidth / 2;
+  const halfY = contact.verticalHeight / 2;
+  const angle = contact.angle ?? 0;
+  // The billet's axial direction is X. Its thickness is Y and the edge
+  // direction is Z, so the abrasive bevel must be solved in the Y/Z section.
+  // The contact width remains finite along X; rotating the tool changes the
+  // bevel slope through the actual thickness, rather than skewing the blade
+  // along its length.
+  const localU = (p: SolidPoint) => p.y - contact.verticalOffset;
+  const z0 = bounds.maxZ - contact.depth;
+  const slope = Math.tan(angle);
+  const remaining: WorkpieceSolid[] = [];
+  const removedByBlock = new Map<string, number>();
+  for (const solid of source) {
+    const before = solidVolume(solid, geometry);
+    const points = solid.vertices.map(vertex => solidPoint(vertex, geometry));
+    const overlapsAxial = points.some(point => Math.abs(point.x - contact.axialPosition) <= halfX + EPS);
+    const overlapsThickness = points.some(point => Math.abs(localU(point)) <= halfY + EPS);
+    if (!overlapsAxial || !overlapsThickness || points.every(point => point.z < z0 - EPS)) {
+      remaining.push(solid);
+      continue;
+    }
+    // The axial and thickness bounds are broad-phase contact limits. The
+    // retained material needs only one half-space clip, which preserves the
+    // real bevel while preventing repeated multi-plane fragment explosion.
+    const clipped = clipSolid(solid, geometry, point => z0 + slope * localU(point) - point.z, "contact:bevel");
+    if (clipped) remaining.push(clipped);
+    const after = clipped ? solidVolume(clipped, geometry) : 0;
+    removedByBlock.set(solid.blockId, (removedByBlock.get(solid.blockId) ?? 0) + Math.max(0, before - after));
+  }
+  return { solids: remaining, removedByBlock };
 }
 
 function interpolate(a: SolidVertex, b: SolidVertex, t: number): SolidVertex {

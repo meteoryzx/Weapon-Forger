@@ -21,6 +21,8 @@ Confirmed: 1750 mm human, 1600 mm eye, 875 mm work surface, 800 mm bench depth, 
 
 Current implementation: scene authoring has been replaced with a millimetre-authored workshop kit. The room is one continuous space with persistent station bodies, measured footprints, grounded bases, shared 0.08 units/mm scale, visible reference rulers and camera diagnostics. The independent tempering furnace was removed; tempering now uses the large furnace body and its mode controls. Welding remains deferred as a future selection-table operation, and the power hammer is visual reservation only.
 
+Grinding consensus update: the player positions the billet in XYZ, rotates it around local X/Y/Z, feeds it to the belt with W/S, and holds contact for fixed-timestep material removal. The current input mapping is wheel=X, A/D=Y, Q/E=Z, Shift-drag=horizontal translation. The HUD derives blade angle, edge thickness, roughness, symmetry and removed volume from the existing forge snapshot; it does not create a parallel value-card simulation.
+
 Evidence this pass: 20 render/unit test files and 114 tests pass; Web and WeChat production builds pass; model-boundary tests pass; 19 browser acceptance paths pass under Edge/NVIDIA RTX 4060. The authored continuous-workflow path still has one timeout when switching the live furnace mode during the long path, so it is not claimed green. Existing screenshot captures are available under `artifacts/` and the local preview is `http://127.0.0.1:4183/`.
 
 Next: author should inspect the preview at overview, furnace heat, furnace temper, hammer, quench and grind; report visual defects by station. After that feedback, continue the next focused graphics/gameplay pass without reopening the scale contract.

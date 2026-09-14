@@ -1,0 +1,245 @@
+{
+  "url": "http://127.0.0.1:4199/",
+  "mode": "desktop",
+  "state": null,
+  "requestedState": null,
+  "appliedState": null,
+  "runId": "reconstruction-r2-shared-furnace",
+  "seed": null,
+  "screenshotPath": "artifacts\\reconstruction-r2\\desktop-overview\\desktop.png",
+  "gpu": {
+    "renderer": "ANGLE (NVIDIA, NVIDIA GeForce RTX 4060 (0x00002882) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+    "vendor": "Google Inc. (NVIDIA)",
+    "softwareRendered": false
+  },
+  "result": {
+    "ok": true,
+    "reason": "nonblank",
+    "rect": {
+      "x": 212,
+      "y": 112,
+      "width": 1228,
+      "height": 788
+    },
+    "drawingBuffer": {
+      "width": 1228,
+      "height": 788
+    },
+    "alphaPixels": 4101,
+    "variance": 214,
+    "colorBuckets": 73,
+    "metrics": {
+      "colorBuckets": 104,
+      "colorEntropyBits": 2.39,
+      "edgeDensity": 0.166,
+      "luminance": {
+        "mean": 79.6,
+        "p5": 54.9,
+        "p95": 169.5,
+        "contrast": 114.6
+      },
+      "dominantColorShare": 0.665,
+      "nonBackgroundShare": 0.335
+    },
+    "renderBudget": {
+      "tier": "desktop",
+      "note": "starting-point budget; adjust per game and document overrides",
+      "rows": [
+        {
+          "metric": "calls",
+          "actual": 128,
+          "limit": 300,
+          "ok": true
+        },
+        {
+          "metric": "triangles",
+          "actual": 161888,
+          "limit": 750000,
+          "ok": true
+        },
+        {
+          "metric": "geometries",
+          "actual": 77,
+          "limit": 300,
+          "ok": true
+        },
+        {
+          "metric": "textures",
+          "actual": 13,
+          "limit": 60,
+          "ok": true
+        }
+      ],
+      "withinBudget": true
+    },
+    "diagnostics": {
+      "station": "overview",
+      "transitioning": false,
+      "points": {
+        "billet": {
+          "x": 614,
+          "y": 429.40434808520826,
+          "world": [
+            0,
+            0,
+            0
+          ]
+        },
+        "hammer": {
+          "x": 614,
+          "y": 390.5078999524077,
+          "world": [
+            0,
+            40.32,
+            0
+          ]
+        },
+        "temper": {
+          "x": 728.3412418685274,
+          "y": 321.8975320436025,
+          "world": [
+            101.344,
+            34.896,
+            -105.72
+          ]
+        },
+        "station:materials": {
+          "x": 453.923250101067,
+          "y": 336.41425935287884,
+          "world": [
+            -145,
+            15,
+            -112
+          ]
+        },
+        "station:cut": {
+          "x": 419.1722242033369,
+          "y": 475.2217254567401,
+          "world": [
+            -145,
+            15,
+            70
+          ]
+        },
+        "station:weld": {
+          "x": 453.923250101067,
+          "y": 336.41425935287884,
+          "world": [
+            -145,
+            15,
+            -112
+          ]
+        },
+        "station:quench-water": {
+          "x": 561.281126698333,
+          "y": 307.68688583961455,
+          "world": [
+            -50,
+            15,
+            -160
+          ]
+        },
+        "station:quench-oil": {
+          "x": 629.8156619905001,
+          "y": 307.68688583961455,
+          "world": [
+            15,
+            15,
+            -160
+          ]
+        },
+        "station:grind": {
+          "x": 724.2716170092273,
+          "y": 537.3691338439426,
+          "world": [
+            76,
+            15,
+            132
+          ]
+        },
+        "station:furnace": {
+          "x": 697.8441224170574,
+          "y": 278.39450305106595,
+          "world": [
+            76,
+            56,
+            -145
+          ]
+        },
+        "station:anvil": {
+          "x": 614,
+          "y": 391.4263931900192,
+          "world": [
+            0,
+            39.4,
+            0
+          ]
+        },
+        "material:mild-steel": {
+          "x": 411.11359550560127,
+          "y": 250.17152211278554,
+          "world": [
+            -181,
+            82.32,
+            -149.6
+          ]
+        },
+        "material:high-carbon-steel": {
+          "x": 451.4666925321115,
+          "y": 250.17152211278554,
+          "world": [
+            -145,
+            82.32,
+            -149.6
+          ]
+        },
+        "material:spring-steel": {
+          "x": 491.8197895586218,
+          "y": 250.17152211278554,
+          "world": [
+            -109,
+            82.32,
+            -149.6
+          ]
+        }
+      },
+      "camera": {
+        "position": [
+          0,
+          470,
+          550
+        ],
+        "target": [
+          0,
+          25,
+          -15
+        ],
+        "fov": 48
+      },
+      "renderer": {
+        "calls": 128,
+        "triangles": 161888,
+        "geometries": 77,
+        "textures": 13
+      },
+      "immersion": 0
+    }
+  },
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "pageErrors": [],
+  "expectedStation": "overview",
+  "actualStation": "overview",
+  "layout": {
+    "canvas": {
+      "x": 212,
+      "y": 112,
+      "width": 1228,
+      "height": 788,
+      "bottom": 900,
+      "right": 1440
+    },
+    "controls": []
+  }
+}

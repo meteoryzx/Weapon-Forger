@@ -1,10 +1,10 @@
 {
-  "path": "C:\\Users\\30949\\Desktop\\参考图\\打磨.png",
+  "path": "D:\\打了个铁\\Weapon-Forger-hammer\\artifacts\\grinder-reference\\hero.png",
   "type": "png",
-  "bytes": 1809761,
-  "width": 1536,
-  "height": 1024,
-  "aspectRatio": 1.5,
+  "bytes": 659021,
+  "width": 518,
+  "height": 870,
+  "aspectRatio": 0.5954022988505747,
   "technicalSuitability": "pass",
   "warnings": [],
   "note": "This is only technical image probing. Semantic object suitability still requires visual inspection."

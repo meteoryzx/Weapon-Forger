@@ -265,6 +265,15 @@ export interface GrindOperation {
   readonly amount: number;
   /** Tool approach angle in radians; zero is the calibrated edge contact. */
   readonly angle?: number;
+  /** Finite local contact patch for physical grinding. Omitted by legacy replays. */
+  readonly contact?: {
+    readonly axialPosition: number;
+    readonly verticalOffset: number;
+    readonly axialWidth: number;
+    readonly verticalHeight: number;
+    readonly depth: number;
+    readonly angle?: number;
+  };
 }
 
 // 切割：移除有限刀路扫过的锯缝；仍连通则保留当前工件，仅将新独立组件移入 bench。
@@ -354,6 +363,7 @@ export interface GrindIntent {
   readonly sectionIndex: number;
   readonly amount: number;
   readonly angle?: number;
+  readonly contact?: NonNullable<GrindOperation["contact"]>;
 }
 
 export type CutIntent = CutOperation;
@@ -477,8 +487,17 @@ export interface ForgeSnapshot {
   readonly heatTreatmentCount: number;
   readonly materialRegionCount: number;
   readonly removedVolume: number;
+  readonly grindMetrics: GrindMetrics;
   readonly benchCount: number;
   readonly bench: readonly ForgeSnapshotWorkpiece[];
+}
+
+export interface GrindMetrics {
+  readonly bladeAngleDeg: number;
+  readonly edgeThicknessMm: number;
+  /** Normalized geometric surface irregularity, derived from occupied solids. */
+  readonly roughness: number;
+  readonly symmetry: number;
 }
 
 export interface HammerInfluenceSample {

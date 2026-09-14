@@ -3,35 +3,52 @@
   "sourceImage": "C:\\Users\\30949\\Desktop\\参考图\\打磨.png",
   "preSpecAssessment": {
     "objectClass": {
-      "primaryType": "unassessed",
-      "primaryDomain": "unassessed",
-      "formLanguage": [],
-      "structureKind": [],
-      "motionPotential": [],
-      "materialFamilies": [],
-      "notes": "Fill from direct visual inspection before writing the final spec. Do not use fixed domain profiles. Set primaryDomain to object, character, or hybrid."
+      "primaryType": "manual vertical abrasive belt grinder",
+      "primaryDomain": "object",
+      "formLanguage": [
+        "hard-surface",
+        "faceted cast frame",
+        "narrow upright abrasive loop"
+      ],
+      "structureKind": [
+        "assembled frame",
+        "rotating pulleys",
+        "continuous flexible belt"
+      ],
+      "motionPotential": [
+        "pulley rotation",
+        "downward front belt travel",
+        "manual transmission"
+      ],
+      "materialFamilies": [
+        "oxidized iron",
+        "worn steel",
+        "abrasive cloth"
+      ],
+      "notes": "Reference sheet determines structure and finish; approved 875mm work rest determines scale. Hidden bearing construction is inferred."
     },
     "complexity": {
       "tier": "complex",
       "scores": {
-        "silhouetteComplexity": 0,
-        "componentCount": 0,
-        "hierarchyDepth": 0,
-        "repetitionDensity": 0,
-        "materialLayerCount": 0,
-        "localDetailDensity": 0,
-        "occlusionRisk": 0,
-        "actionReadinessNeed": 0
+        "silhouetteComplexity": 2,
+        "componentCount": 3,
+        "hierarchyDepth": 2,
+        "repetitionDensity": 1,
+        "materialLayerCount": 2,
+        "localDetailDensity": 2,
+        "occlusionRisk": 1,
+        "actionReadinessNeed": 2
       },
       "estimatedCounts": {
-        "macroComponents": 1,
-        "mesoComponents": 0,
-        "microFeatureGroups": 0,
-        "materialLayers": 1,
-        "repetitionSystems": 0
+        "macroComponents": 5,
+        "mesoComponents": 18,
+        "microFeatureGroups": 12,
+        "materialLayers": 3,
+        "repetitionSystems": 1
       },
       "reasoning": [
-        "Assess 'manual vertical belt grinder' from the image before finalizing componentTree/materials."
+        "Belt, frame, base, work rest and side drive define the machine.",
+        "Repeated hex fasteners, concentric wheel rims, chamfers and tensioning brackets require separate geometry."
       ]
     },
     "specDepthDecision": {
@@ -45,41 +62,161 @@
       "needsMaterialLocalOverrides": true,
       "needsMultipleReviewViews": true,
       "needsActionReadyHierarchy": true,
-      "rationale": "Choose simple/moderate/complex/ultra-complex from observed structure, not from a hardcoded domain."
+      "rationale": "Three view sheet resolves the exposed working face, wheel axes and side transmission. Named pivots preserve motion."
     },
     "unknownsToResolveBeforeImplementation": [],
     "detailInventory": {
       "scanMethod": "component-zones",
-      "targetMinDetails": 10,
-      "note": "Enumerate every identity-defining small detail before authoring the spec. Each detail must map to a component.localFeatures entry or material.localOverrides entry, never prose only. Use forge/stage1_intake/build_detail_inventory.py to scan zones.",
-      "details": []
+      "targetMinDetails": 12,
+      "details": [
+        {
+          "id": "belt-joint",
+          "kind": "seam",
+          "description": "oblique joining seam on loop",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "abrasive-loop/belt-joint"
+          }
+        },
+        {
+          "id": "belt-grit",
+          "kind": "ridge",
+          "description": "fine abrasive grains on front and wraps",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "abrasive-loop/belt-grit"
+          }
+        },
+        {
+          "id": "rest-bevel",
+          "kind": "bevel",
+          "description": "2mm exposed leading edge chamfer",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "work-rest/rest-bevel"
+          }
+        },
+        {
+          "id": "working-scratches",
+          "kind": "scratch",
+          "description": "directional metal contact scratches",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "work-rest/working-scratches"
+          }
+        },
+        {
+          "id": "wheel-rim",
+          "kind": "ridge",
+          "description": "concentric flange proud of the hub",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "upper-wheel/wheel-rim"
+          }
+        },
+        {
+          "id": "lower-rim",
+          "kind": "ridge",
+          "description": "concentric lower wheel flange",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "lower-wheel/lower-rim"
+          }
+        },
+        {
+          "id": "frame-chamfer",
+          "kind": "bevel",
+          "description": "faceted outer plate corners",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "cheek--1/frame-chamfer"
+          }
+        },
+        {
+          "id": "frame-bevel",
+          "kind": "bevel",
+          "description": "mirrored cheek edge bevel",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "cheek-1/frame-bevel"
+          }
+        },
+        {
+          "id": "anchor-bolts",
+          "kind": "fastener",
+          "description": "four hex anchoring heads",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "base/anchor-bolts"
+          }
+        },
+        {
+          "id": "drive-rim",
+          "kind": "ridge",
+          "description": "raised side transmission rim",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "drive-wheel/drive-rim"
+          }
+        },
+        {
+          "id": "guard-wear",
+          "kind": "chip",
+          "description": "small exposed worn corners",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "upper-guard/guard-wear"
+          }
+        },
+        {
+          "id": "tension-slot",
+          "kind": "groove",
+          "description": "recessed vertical adjustment slot",
+          "confidence": 0.8,
+          "evidenceRef": "hero",
+          "mapsTo": {
+            "ref": "spine/tension-slot"
+          }
+        }
+      ]
     },
     "anatomy": {
       "applies": false,
-      "styleHeads": 0.0,
+      "styleHeads": 0,
       "proportions": {
-        "headUnit": 0.0,
-        "torso": 0.0,
-        "legs": 0.0,
-        "shoulderWidth": 0.0,
-        "hipWidth": 0.0
+        "headUnit": 0,
+        "torso": 0,
+        "legs": 0,
+        "shoulderWidth": 0,
+        "hipWidth": 0
       },
       "pose": {
         "type": "unassessed",
         "jointAngles": {}
       },
       "faceLandmarks": {
-        "eyeLine": 0.0,
-        "eyeSpacing": 0.0,
-        "noseBase": 0.0,
-        "mouthLine": 0.0,
-        "hairline": 0.0
+        "eyeLine": 0,
+        "eyeSpacing": 0,
+        "noseBase": 0,
+        "mouthLine": 0,
+        "hairline": 0
       },
       "features": [],
-      "confidence": 0.0,
+      "confidence": 0,
       "note": "Only meaningful when objectClass.primaryDomain is character or hybrid. Set applies=true and fill from forge/stage1_intake/extract_landmarks.py. See grimoire/character/reconstruction.md and grimoire/character/likeness_maximization.md."
     },
-    "sourceImage": "C:\\Users\\30949\\Desktop\\参考图\\打磨.png"
+    "sourceImage": "artifacts/grinder-reference/hero.png"
   },
   "qualityContract": {
     "qualityBar": "complex",

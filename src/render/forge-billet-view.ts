@@ -30,7 +30,8 @@ import {
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { QuenchEffects } from "./quench-effects.ts";
-import { basinAsset, grindingAsset, powerHammerAsset, roomAsset, type StationAsset } from "./workshop-assets.ts";
+import { basinAsset, powerHammerAsset, roomAsset, type StationAsset } from "./workshop-assets.ts";
+import { GRINDER, GrinderModel } from "./grinder-model.ts";
 
 import {
   FORGE_RULES,
@@ -92,6 +93,7 @@ export type ForgeStation =
   | "quench-oil"
   | "temper"
   | "grind";
+export type InspectionView = "default" | "front" | "side" | "top";
 
 export type ForgeMaterialPick = "mild-steel" | "high-carbon-steel" | "spring-steel";
 
@@ -118,12 +120,22 @@ const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number
   "quench-water": [WORKSHOP_LAYOUT.quench!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT.quench!.origin[2]],
   "quench-oil": [WORKSHOP_LAYOUT["quench-oil"]!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT["quench-oil"]!.origin[2]],
   temper: [WORKSHOP_LAYOUT.furnace!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.furnace!.origin[2]+FURNACE.front],
-  grind: [WORKSHOP_LAYOUT.grind!.origin[0] - 22, WORKSHOP_SURFACE_Y + 30, WORKSHOP_LAYOUT.grind!.origin[2]],
+  grind: [WORKSHOP_LAYOUT.grind!.origin[0] + workshopUnits(GRINDER.frontX), WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.restY), WORKSHOP_LAYOUT.grind!.origin[2]],
 };
 
 export const CAMERA_FRAMES = {
   overview: { position: [0, 470, 550], target: [0, 25, -15] },
 } as const;
+
+function inspectionCameraFrame(target: Vector3, view: InspectionView, distance: number): { readonly position: readonly number[]; readonly target: readonly number[] } {
+  const span = workshopUnits(360) * distance;
+  const position = view === "front"
+    ? target.clone().add(new Vector3(-span, 0, 0))
+    : view === "side"
+      ? target.clone().add(new Vector3(0, 0, span))
+      : target.clone().add(new Vector3(0, span, 0));
+  return { position: position.toArray(), target: target.toArray() };
+}
 
 export class ForgeBilletView {
   private readonly renderer: WebGLRenderer;
@@ -176,6 +188,10 @@ export class ForgeBilletView {
   private quenchYaw = 0;
   private grindOffset = new Vector3();
   private grindAngle = 0;
+  private grindYaw = 0;
+  private grindRoll = 0;
+  private grindFeed = 0;
+  private inspectionView: InspectionView = "default";
   private readonly quenchBaseQuaternion = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2);
   private readonly quenchXQuaternion = new Quaternion();
   private readonly quenchYQuaternion = new Quaternion();
@@ -183,6 +199,7 @@ export class ForgeBilletView {
   private readonly assetKit=new WorkshopModelKit();
   private readonly quenchEffects=new QuenchEffects();
   private readonly stationRoots=new Map<string,Group>();
+  private readonly grinderModel = new GrinderModel("material");
   private viewport: RenderViewport;
 
   constructor(private readonly canvas: RenderCanvas, viewport: RenderViewport) {
@@ -319,9 +336,21 @@ export class ForgeBilletView {
     } else {
       this.quenchOffset.set(0, 0, 0);
       if (activeStation === "grind") {
-        this.billetRig.position.y += this.grindOffset.x;
         this.billetRig.position.z += this.grindOffset.z;
-        this.billetRig.rotation.set(0, this.grindAngle, Math.PI / 2);
+        // Apply the three controls around the billet's local axes. Adding the
+        // angles to a 90-degree Y Euler pose collapses X/Z at gimbal lock.
+        this.billetRig.rotation.set(0, Math.PI / 2, 0);
+        this.billetRig.rotateX(this.grindAngle);
+        this.billetRig.rotateY(this.grindYaw);
+        this.billetRig.rotateZ(this.grindRoll);
+        // Rotate around the actual billet centre, then seat it on the rest and
+        // keep its leading edge at the belt plane without changing its scale.
+        this.billet.position.y = -center.y * BILLET_SCALE;
+        this.billetHitTarget.position.y = 0;
+        this.billetRig.updateMatrixWorld(true);
+        const seated = new Box3().setFromObject(this.billet);
+        this.billetRig.position.y += anchor[1] - seated.min.y + this.grindOffset.x;
+        this.billetRig.position.x += anchor[0] - seated.max.x + this.grindFeed;
       } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
@@ -381,10 +410,11 @@ export class ForgeBilletView {
     const sawMoved=this.sawView.tick(nowMs);
     const furnaceMoved = this.furnaceView.tick(nowMs);
     const hammerMoved=this.hammerView.tick(nowMs);
+    this.grinderModel.tick(nowMs / 1000);
     const inQuench=this.station==="quench-water"||this.station==="quench-oil";
     const quenchMoved=inQuench?this.quenchEffects.update(nowMs,this.billetRig.position,this.quenchImmersion(),this.snapshot?.averageTemperatureC??20):this.quenchEffects.hide();
     if (!this.isTransitioning) {
-      if (materialMoved || sawMoved || furnaceMoved || hammerMoved || quenchMoved) this.render();
+      if (materialMoved || sawMoved || furnaceMoved || hammerMoved || quenchMoved || this.station === "grind") this.render();
       return;
     }
     const amount = clamp((nowMs - this.transitionStartedAtMs) / 420, 0, 1);
@@ -568,20 +598,87 @@ export class ForgeBilletView {
   grindTablePoint(x: number, y: number): { x: number; z: number } | null {
     this.pointer.set(x / this.viewport.width * 2 - 1, 1 - y / this.viewport.height * 2);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const faceX = WORKSHOP_LAYOUT.grind!.origin[0] - 21;
+    const faceX = BILLET_ANCHORS.grind[0];
     const point = this.raycaster.ray.intersectPlane(new Plane(new Vector3(1, 0, 0), -faceX), new Vector3());
     return point ? { x: point.y, z: point.z } : null;
   }
 
-  setGrindPose(offset: { x?: number; z?: number; angle?: number }): void {
-    if (offset.x !== undefined) this.grindOffset.x = clamp(offset.x, -72, 72);
-    if (offset.z !== undefined) this.grindOffset.z = clamp(offset.z, -96, 96);
-    if (offset.angle !== undefined) this.grindAngle = offset.angle;
-    if (this.snapshot && this.station === "grind") this.update(this.snapshot, null, "grind", this.temperPreviewC);
+  setInspectionView(view: InspectionView): void {
+    this.inspectionView = view;
+    this.applyCameraFrame(this.station);
   }
 
-  grindPose(): { x: number; z: number; angle: number } {
-    return { x: this.grindOffset.x, z: this.grindOffset.z, angle: this.grindAngle };
+  inspectionViewMode(): InspectionView { return this.inspectionView; }
+
+  setGrindPose(offset: { x?: number; z?: number; angle?: number; yaw?: number; roll?: number; feed?: number }): void {
+    if (offset.x !== undefined) this.grindOffset.x = clamp(offset.x, 0, workshopUnits(200));
+    if (offset.z !== undefined) this.grindOffset.z = clamp(offset.z, -workshopUnits(350), workshopUnits(350));
+    if (offset.angle !== undefined) this.grindAngle = Math.atan2(Math.sin(offset.angle), Math.cos(offset.angle));
+    if (offset.yaw !== undefined) this.grindYaw = Math.atan2(Math.sin(offset.yaw), Math.cos(offset.yaw));
+    if (offset.roll !== undefined) this.grindRoll = Math.atan2(Math.sin(offset.roll), Math.cos(offset.roll));
+    if (offset.feed !== undefined) this.grindFeed = clamp(offset.feed, -workshopUnits(120), 0);
+    if (this.snapshot && this.station === "grind") {
+      this.applyGrindTransform();
+      this.render();
+    }
+  }
+
+  private applyGrindTransform(): void {
+    const anchor = BILLET_ANCHORS.grind;
+    this.billetRig.position.set(...anchor);
+    this.billetRig.position.z += this.grindOffset.z;
+    this.billetRig.rotation.set(0, Math.PI / 2, 0);
+    this.billetRig.rotateX(this.grindAngle);
+    this.billetRig.rotateY(this.grindYaw);
+    this.billetRig.rotateZ(this.grindRoll);
+    this.billetRig.updateMatrixWorld(true);
+    const seated = new Box3().setFromObject(this.billet);
+    this.billetRig.position.y += anchor[1] - seated.min.y + this.grindOffset.x;
+    this.billetRig.position.x += anchor[0] - seated.max.x + this.grindFeed;
+  }
+
+  grindPose(): { x: number; z: number; angle: number; yaw: number; roll: number; feed: number } {
+    return { x: this.grindOffset.x, z: this.grindOffset.z, angle: this.grindAngle, yaw: this.grindYaw, roll: this.grindRoll, feed: this.grindFeed };
+  }
+
+  grindContactTarget(): HammerPickTarget | null {
+    if (this.station !== "grind" || !this.snapshot || this.grindFeed < -workshopUnits(0.25)) return null;
+    this.billet.updateWorldMatrix(true, false);
+    const positions = this.billet.geometry.getAttribute("position");
+    const point = new Vector3();
+    const origin = STATION_ANCHORS.grind;
+    let section: number | null = null, nearest = Infinity;
+    for (let i = 0; i < positions.count; i++) {
+      point.fromBufferAttribute(positions, i).applyMatrix4(this.billet.matrixWorld);
+      if (Math.abs(point.x - BILLET_ANCHORS.grind[0]) > workshopUnits(0.3)) continue;
+      if (point.y < WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.lowerY) || point.y > WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.upperY)) continue;
+      const lateral = Math.abs(point.z - origin[2]);
+      if (lateral > workshopUnits(GRINDER.beltWidth / 2) || lateral >= nearest) continue;
+      const index = sectionIndexAt(positions.getX(i), this.snapshot.sections);
+      if (index !== null) { nearest = lateral; section = index; }
+    }
+    return section === null ? null : { sectionIndex: section, faceBias: 1 };
+  }
+
+  grindContactPatch(): { readonly axialPosition: number; readonly verticalOffset: number; readonly axialWidth: number; readonly verticalHeight: number; readonly depth: number; readonly angle: number } | null {
+    if (this.station !== "grind" || !this.snapshot || this.grindFeed < -workshopUnits(0.25)) return null;
+    this.billet.updateWorldMatrix(true, false);
+    const positions = this.billet.geometry.getAttribute("position");
+    const origin = STATION_ANCHORS.grind;
+    const point = new Vector3();
+    let best = Infinity, axial = 0, vertical = 0;
+    for (let i = 0; i < positions.count; i++) {
+      point.fromBufferAttribute(positions, i).applyMatrix4(this.billet.matrixWorld);
+      const lateral = Math.abs(point.z - origin[2]);
+      if (Math.abs(point.x - BILLET_ANCHORS.grind[0]) > workshopUnits(0.3)
+        || point.y < WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.lowerY)
+        || point.y > WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.upperY)
+        || lateral > workshopUnits(GRINDER.beltWidth / 2) || lateral >= best) continue;
+      best = lateral;
+      axial = positions.getX(i);
+      vertical = positions.getY(i);
+    }
+    return best === Infinity ? null : { axialPosition: axial, verticalOffset: vertical, axialWidth: 48, verticalHeight: 28, depth: 4, angle: this.grindAngle };
   }
 
   quenchImmersion(): number {
@@ -608,7 +705,8 @@ export class ForgeBilletView {
     this.weldBenchBillets.forEach((m,i)=>points["weld:"+i]=project(m));
     return {station:this.station,transitioning:this.isTransitioning,points,camera:{position:this.camera.position.toArray(),target:this.cameraTarget.toArray(),fov:this.camera.fov},
       renderer:{calls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures},
-      immersion:this.quenchImmersion()};
+      immersion:this.quenchImmersion(),
+      grind:this.station==="grind"?{pose:this.grindPose(),contact:this.grindContactTarget(),billetBounds:new Box3().setFromObject(this.billet),restY:BILLET_ANCHORS.grind[1],frontX:BILLET_ANCHORS.grind[0],model:this.grinderModel.root.name,solids:this.snapshot?.geometry.solids?.length ?? 0,grid:this.snapshot?.geometry.grid,vertices:this.billet.geometry.getAttribute("position").count}:null};
   }
 
   pickTemperControl(viewportX: number, viewportY: number): boolean {
@@ -670,6 +768,7 @@ export class ForgeBilletView {
     this.furnaceView.dispose();
     this.sawView.dispose();
     this.materialsView?.dispose();
+    this.grinderModel.dispose();
     this.billet.geometry.dispose();
     this.weldBenchBillets.forEach((billet) => billet.geometry.dispose());
     this.weldBenchItemTargets.forEach((target) => {
@@ -780,7 +879,7 @@ export class ForgeBilletView {
     const k=this.assetKit;
     const assets: [Exclude<ForgeStation,"overview">,StationAsset][]=[
       ["quench-water",basinAsset(k,false)],["quench-oil",basinAsset(k,true)],
-      ["grind",grindingAsset(k)],
+      ["grind",{root:this.grinderModel.root}],
     ];
     for(const [station,asset] of assets){
       asset.root.position.set(STATION_ANCHORS[station][0],station==="grind"?0:STATION_ANCHORS[station][1],STATION_ANCHORS[station][2]);
@@ -829,6 +928,12 @@ export class ForgeBilletView {
     if(station==="cut")return sawCameraFrame(this.camera.aspect);
     if (station === "materials") return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
     if (station === "weld") return weldCameraFrame(this.camera.aspect);
+    if (station === "grind") {
+      const target = new Vector3(BILLET_ANCHORS.grind[0], BILLET_ANCHORS.grind[1] + workshopUnits(38), BILLET_ANCHORS.grind[2]);
+      const distance = Math.max(1, 0.46 / this.camera.aspect);
+      if (this.inspectionView !== "default") return inspectionCameraFrame(target, this.inspectionView, distance);
+      return {position:target.clone().add(new Vector3(-workshopUnits(350), workshopUnits(92), 0).multiplyScalar(distance)).toArray(),target:target.toArray()};
+    }
     if (station === "overview") {
       const frame=CAMERA_FRAMES.overview;
       const target=new Vector3(...frame.target);
@@ -836,9 +941,13 @@ export class ForgeBilletView {
       return {position:position.toArray(),target:frame.target};
     }
     const anchor=STATION_ANCHORS[station];
-    const target=new Vector3(anchor[0],station==="grind"?WORKSHOP_SURFACE_Y+30:WORKSHOP_SURFACE_Y+5,anchor[2]);
+    const target=new Vector3(anchor[0],WORKSHOP_SURFACE_Y+5,anchor[2]);
     const distance=Math.max(1,1.2/this.camera.aspect);
-    const offset=station==="grind"?new Vector3(-120,24,0):new Vector3(22,38,72);
+    if (this.inspectionView !== "default") {
+      const billetAnchor = BILLET_ANCHORS[station];
+      return inspectionCameraFrame(new Vector3(billetAnchor[0], billetAnchor[1] + workshopUnits(24), billetAnchor[2]), this.inspectionView, distance);
+    }
+    const offset=new Vector3(22,38,72);
     return {position:offset.multiplyScalar(distance).add(target).toArray(),target:target.toArray()};
   }
 
@@ -964,10 +1073,7 @@ function groundedNode(
   heightIndex: number,
 ): WorkpieceNode {
   const node = workpieceNodeAt(snapshot, axialIndex, widthIndex, heightIndex);
-  if (heightIndex !== snapshot.geometry.grid.heightBlocks) return node;
-  const sectionIndex = Math.min(axialIndex, snapshot.sections.length - 1);
-  const groundAmount = snapshot.sections[sectionIndex]?.groundAmount ?? 0;
-  return { ...node, verticalOffset: node.verticalOffset - groundAmount * 1.6 };
+  return node;
 }
 
 function workpieceNodeAt(

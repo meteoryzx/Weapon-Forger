@@ -17,6 +17,7 @@ import {
   ForgeBilletView,
   type ForgeMaterialPick,
   type ForgeStation,
+  type InspectionView,
   type HammerPickTarget,
   type QuenchStation,
 } from "../render/forge-billet-view.ts";
@@ -29,6 +30,7 @@ const acceptanceConsole = document.querySelector<HTMLElement>("#acceptance-conso
 const acceptanceButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-acceptance-target]")];
 const acceptanceQuenchMedium = document.querySelector<HTMLSelectElement>("#acceptance-quench-medium")!;
 const acceptanceReset = document.querySelector<HTMLButtonElement>("#acceptance-reset")!;
+const inspectionButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-inspection-view]")];
 
 // The browser entry translates continuous pointer input into the public forge intents.
 const ACCEPTANCE_VERBS = ["materials", "cut", "weld", "heat", "hammer", "quench", "temper", "grind"] as const;
@@ -337,7 +339,9 @@ let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null
 let quenchContacted = false;
 let quenchStarted = false;
 let quenchLastTick: number | null = null;
-let grindDrag: { readonly point: { x: number; z: number }; readonly pose: { x: number; z: number; angle: number }; readonly rotate: boolean } | null = null;
+let grindDrag: { readonly point: { x: number; z: number }; readonly pose: ReturnType<ForgeBilletView["grindPose"]>; readonly translate: boolean } | null = null;
+let grindHolding = false;
+let grindLastTick: number | null = null;
 let gesture: {
   readonly kind: "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
@@ -357,7 +361,7 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   "quench-water": { title: "水槽 · 淬火", hint: "钢坯长轴沿 Y、宽轴沿 X；A/D 绕 X 轴旋转，滚轮绕 Y 轴旋转，W/S 沿 Z 轴上下。触液后开始冷却。" },
   "quench-oil": { title: "油槽 · 淬火", hint: "钢坯长轴沿 Y、宽轴沿 X；A/D 绕 X 轴旋转，滚轮绕 Y 轴旋转，W/S 沿 Z 轴上下。触液后开始冷却。" },
   temper: { title: "火炉 · 回火", hint: "拖动炉身温度控制，松开把当前温度写入工件。" },
-  grind: { title: "磨石 · 研磨", hint: "拖动金属调整位置；Shift＋拖动调整角度；Q/E 微调角度，方向键微调位置，推进到磨盘后再拖动研磨。" },
+  grind: { title: "砂带 · 研磨", hint: "拖动调整 XYZ；滚轮绕 X，A/D 绕 Y，Q/E 绕 Z；Shift＋拖动水平移动；W 贴近后按住持续研磨，S 远离停止。" },
 };
 
 const materialLabels: Record<string, string> = {
@@ -458,8 +462,9 @@ function acceptanceState(state: ForgeState): readonly string[] {
       ];
     case "grind":
       return [
-        `刃口覆盖 ${Math.round(latestSnapshot.edgeCoverage * 100)}% · 均匀度 ${Math.round(latestSnapshot.edgeEvenness * 100)}%`,
-        `平均研磨 ${Math.round(average(sections.map((section) => section.groundAmount)) * 100)}% · ${shared}`,
+        `刃角 ${latestSnapshot.grindMetrics.bladeAngleDeg.toFixed(1)}° · 刃口厚度 ${latestSnapshot.grindMetrics.edgeThicknessMm.toFixed(2)}mm`,
+        `粗糙度 ${(latestSnapshot.grindMetrics.roughness * 100).toFixed(1)}% · 对称性 ${(latestSnapshot.grindMetrics.symmetry * 100).toFixed(1)}%`,
+        `去料 ${latestSnapshot.removedVolume.toFixed(2)}mm³ · 接触覆盖 ${Math.round(latestSnapshot.edgeCoverage * 100)}%`,
       ];
     default:
       return [];
@@ -706,17 +711,8 @@ function finishGesture(endX: number, endY: number): void {
     return;
   }
   if (gesture.kind === "grind") {
-    const pose = view?.grindPose() ?? { x: 0, z: 0, angle: 0 };
-    if (pose.z < 18) {
-      gesture = null;
-      return;
-    }
-    application.applyIntent({
-      kind: "grind",
-      sectionIndex: gesture.target.sectionIndex,
-      amount: Math.min(1, Math.max(0.08, (distance + Math.max(0, pose.z) * 1.2 + Math.abs(pose.angle) * 16) / 260)),
-      angle: pose.angle,
-    });
+    // Grinding is committed by the fixed-timestep contact loop while held.
+    // Releasing only stops material removal; it never adds a hidden stroke.
   } else if (gesture.kind === "weld" && latestSnapshot.benchCount > 0) {
     const pickedBenchIndex = view?.pickWeldBench(endX, endY) ?? null;
     const benchIndex = gesture.weldBenchIndex
@@ -746,6 +742,11 @@ function finishTemper(): void {
 document.body.classList.toggle("cut-view",acceptanceStation==="cut");
 view = new ForgeBilletView(canvas, viewport());
 view.setStation(acceptanceStation ?? "overview");
+inspectionButtons.forEach(button => button.addEventListener("click", () => {
+  const mode = button.dataset.inspectionView as InspectionView;
+  view?.setInspectionView(mode);
+  inspectionButtons.forEach(candidate => candidate.setAttribute("aria-pressed", candidate === button ? "true" : "false"));
+}));
 if (["127.0.0.1","localhost","::1"].includes(window.location.hostname)) {
   (window as unknown as {__forgeInspect:()=>unknown}).__forgeInspect=()=>view?.inspectScene();
   Object.defineProperty(window,"__THREE_GAME_DIAGNOSTICS__",{get:()=>view?.inspectScene()});
@@ -819,7 +820,9 @@ canvas.addEventListener("pointerdown", (event) => {
   const target = view.pickHammerTarget(x, y);
   if (activeStation === "grind" && target) {
     const point = view.grindTablePoint(x, y);
-    if (point) grindDrag = { point, pose: view.grindPose(), rotate: event.shiftKey };
+    if (point) grindDrag = { point, pose: view.grindPose(), translate: event.shiftKey };
+    grindHolding = true;
+    grindLastTick = performance.now();
     gesture = {
       kind: activeStation,
       target,
@@ -879,10 +882,10 @@ canvas.addEventListener("pointermove", (event) => {
     const bounds = canvas.getBoundingClientRect();
     const point = view.grindTablePoint(event.clientX - bounds.left, event.clientY - bounds.top);
     if (point) {
-      if (grindDrag.rotate) {
-        view.setGrindPose({ angle: grindDrag.pose.angle + Math.atan2(point.z - grindDrag.point.z, point.x - grindDrag.point.x) });
+      if (grindDrag.translate) {
+        view.setGrindPose({ z: grindDrag.pose.z + point.z - grindDrag.point.z });
       } else {
-        view.setGrindPose({ x: grindDrag.pose.x + point.x - grindDrag.point.x, z: grindDrag.pose.z + point.z - grindDrag.point.z });
+        view.setGrindPose({ x: grindDrag.pose.x + point.x - grindDrag.point.x });
       }
     }
     return;
@@ -895,7 +898,10 @@ canvas.addEventListener("pointermove", (event) => {
 canvas.addEventListener("pointerup", (event) => {
   hammerDrag=null;
   cutDrag=null;
+  if (grindDrag?.translate) gesture = null;
   grindDrag=null;
+  grindHolding = false;
+  grindLastTick = null;
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
@@ -907,6 +913,9 @@ canvas.addEventListener("pointerup", (event) => {
 canvas.addEventListener("pointercancel", () => {
   hammerDrag=null;
   cutDrag=null;
+  grindDrag=null;
+  grindHolding = false;
+  grindLastTick = null;
   temperDrag = null;
   temperPreviewC = null;
   gesture = null;
@@ -926,16 +935,18 @@ window.addEventListener("keydown", (event) => {
     }
     return;
   }
-  if (activeStation === "grind" && ["q", "e", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key.length === 1 ? event.key.toLowerCase() : event.key)) {
+  if (activeStation === "grind" && ["q", "e", "a", "d", "w", "s", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key.length === 1 ? event.key.toLowerCase() : event.key)) {
     event.preventDefault();
     const key = event.key.toLowerCase();
     const pose = view?.grindPose();
     if (!pose || !view) return;
     const step = workshopUnits(event.shiftKey ? 25 : 5);
-    if (key === "q" || key === "e") view.setGrindPose({ angle: pose.angle + (key === "q" ? -1 : 1) * Math.PI / 72 });
+    if (key === "q" || key === "e") view.setGrindPose({ roll: pose.roll + (key === "q" ? -1 : 1) * Math.PI / 72 });
+    else if (key === "a" || key === "d") view.setGrindPose({ yaw: pose.yaw + (key === "a" ? -1 : 1) * Math.PI / 72 });
+    else if (key === "w" || key === "s") view.setGrindPose({ feed: pose.feed + (key === "w" ? 1 : -1) * step });
     else view.setGrindPose({
-      x: pose.x + (key === "arrowleft" ? -step : key === "arrowright" ? step : 0),
-      z: pose.z + (key === "arrowup" ? -step : key === "arrowdown" ? step : 0),
+      x: pose.x + (key === "arrowup" ? step : key === "arrowdown" ? -step : 0),
+      z: pose.z + (key === "arrowleft" ? -step : key === "arrowright" ? step : 0),
     });
     return;
   }
@@ -995,6 +1006,12 @@ window.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("wheel",event=>{
+  if (activeStation === "grind") {
+    event.preventDefault();
+    const pose = view?.grindPose();
+    if (pose) view?.setGrindPose({ angle: pose.angle + (event.deltaY < 0 ? 1 : -1) * Math.PI / 72 });
+    return;
+  }
   if (activeStation === "quench-water" || activeStation === "quench-oil") {
     event.preventDefault();
     const pose = view?.quenchPose();
@@ -1017,6 +1034,19 @@ const renderFrame = (nowMs: number): void => {
       updateView();
     }
   } else quenchLastTick = null;
+  if (activeStation === "grind" && grindHolding && !grindDrag?.translate && view && document.hasFocus()) {
+    if (grindLastTick === null) grindLastTick = nowMs;
+    const elapsedMs = Math.min(160, Math.max(0, nowMs - grindLastTick));
+    if (elapsedMs >= 160) {
+      grindLastTick = nowMs;
+      const contact = view.grindContactTarget();
+      const patch = view.grindContactPatch();
+      if (contact && patch) {
+        application.applyIntent({ kind: "grind", sectionIndex: contact.sectionIndex, amount: Math.min(0.2, elapsedMs / 3500), angle: view.grindPose().angle, contact: patch });
+        updateView();
+      }
+    }
+  } else if (!grindHolding) grindLastTick = null;
   view?.tick(nowMs);
   if (view) document.body.dataset.cameraState = view.isCameraTransitioning() ? "moving" : "settled";
   if(activeStation==="cut" && cutReady && !cutting)cutConfirm.disabled=view?.isCameraTransitioning()??true;

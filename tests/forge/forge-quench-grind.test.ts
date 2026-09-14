@@ -60,6 +60,19 @@ describe("quench and grind", () => {
     )).toBeCloseTo(beforeVolume, 8);
   });
 
+  it("removes only the finite rotated contact patch and conserves solid volume", () => {
+    let state = createForgeState({ sectionCount: 8 });
+    const before = state.workpiece.geometry.nodes.map(node => node.verticalOffset);
+    state = applyForgeOperation(state, {
+      kind: "grind", sectionIndex: 3, amount: 1,
+      contact: { axialPosition: 7, verticalOffset: 0, axialWidth: 4, verticalHeight: 28, depth: 2, angle: Math.PI / 6 },
+    });
+    expect(state.workpiece.sections[0]?.removedVolume).toBe(0);
+    expect(state.workpiece.sections.some(section => section.removedVolume > 0)).toBe(true);
+    expect(state.workpiece.geometry.solids).toBeUndefined();
+    expect(state.workpiece.geometry.nodes.some((node, index) => node.verticalOffset < before[index]!)).toBe(true);
+  });
+
   it("retains repeated quench and temper events in order", () => {
     let state = createForgeState({ sectionCount: 8 });
     state = applyForgeOperation(state, { kind: "heat", temperatureC: 900 });

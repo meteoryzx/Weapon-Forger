@@ -3,7 +3,7 @@
   "status": "active",
   "profile": "generic",
   "currentStep": "spec-authoring",
-  "currentPass": "",
+  "currentPass": "blockout",
   "checklist": [
     {
       "id": "image-analysis",

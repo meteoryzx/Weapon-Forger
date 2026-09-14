@@ -1,0 +1,85 @@
+{
+  "ok": true,
+  "verdict": "pass",
+  "confidence": 0.849,
+  "estimatedFidelity": 0.849,
+  "targetThreshold": 0.7,
+  "materialId": "iron",
+  "sourceImage": "D:\\打了个铁\\Weapon-Forger-hammer\\artifacts\\grinder-reference\\iron.png",
+  "outDir": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\iron",
+  "palette": [
+    "#4B413C",
+    "#39312E",
+    "#5F524D",
+    "#161413",
+    "#BDAFA7"
+  ],
+  "maps": {
+    "albedo": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\iron\\iron_albedo.png",
+      "url": "iron_albedo.png",
+      "channel": "albedo",
+      "source": "reference-pixel-extraction"
+    },
+    "roughness": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\iron\\iron_roughness.png",
+      "url": "iron_roughness.png",
+      "channel": "roughness",
+      "source": "reference-pixel-extraction"
+    },
+    "height": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\iron\\iron_height.png",
+      "url": "iron_height.png",
+      "channel": "height",
+      "source": "reference-pixel-extraction"
+    },
+    "normal": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\iron\\iron_normal.png",
+      "url": "iron_normal.png",
+      "channel": "normal",
+      "source": "reference-pixel-extraction"
+    },
+    "ao": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\iron\\iron_ao.png",
+      "url": "iron_ao.png",
+      "channel": "ao",
+      "source": "reference-pixel-extraction"
+    }
+  },
+  "diagnostics": {
+    "sourceWidth": 33,
+    "sourceHeight": 167,
+    "mapSize": 1024,
+    "cropBBoxPixels": {
+      "x": 0,
+      "y": 1,
+      "width": 33,
+      "height": 166
+    },
+    "mask": {
+      "backgroundColor": "#4A403E",
+      "backgroundNoise": 7.348,
+      "transparentPixelFraction": 0.0,
+      "foregroundCoverage": 0.4721
+    },
+    "mapStats": {
+      "valueRange": 0.2382,
+      "heightP90Gradient": 0.03733,
+      "roughnessBase": 0.691,
+      "roughnessVariation": 0.063,
+      "normalStrength": 0.2,
+      "blurRadius": 21
+    },
+    "palette": [
+      "#4B413C",
+      "#39312E",
+      "#5F524D",
+      "#161413",
+      "#BDAFA7"
+    ]
+  },
+  "warnings": [
+    "low value range weakens height/roughness inference"
+  ],
+  "limitation": "single-image PBR extraction is an estimate; 70%+ extraction confidence still needs render screenshot review"
+}
