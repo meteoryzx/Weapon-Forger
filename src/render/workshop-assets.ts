@@ -30,9 +30,9 @@ export function grindingAsset(k:WorkshopModelKit):StationAsset {
   // Low welded base: the work zone remains reachable at standing height.
   k.box(root,"base",[1080,100,900],[0,50,0],"iron");
   k.box(root,"base-top",[960,35,760],[0,117.5,0],"steel");
-  for(const x of [-285,285]){
-    k.profile(root,"side-cheek",[[-230,0],[230,0],[180,140],[135,1180],[-135,1180],[-180,140]],90,[x,135,0],"iron").rotation.y=Math.PI/2;
-    k.box(root,"cheek-crossbar",[90,70,620],[x,735,0],"iron");
+  for(const z of [-285,285]){
+    k.box(root,"side-upright",[150,1120,110],[0,700,z],"iron",3);
+    k.box(root,"side-foot",[260,90,220],[0,120,z],"iron",3);
   }
   const upper=k.cylinder(root,"drive-pulley",215,135,[0,1190,0],"steel","x",64);upper.userData.keepMesh=true;
   const lower=k.cylinder(root,"idler-pulley",215,135,[0,430,0],"steel","x",64);lower.userData.keepMesh=true;
@@ -44,8 +44,8 @@ export function grindingAsset(k:WorkshopModelKit):StationAsset {
   k.box(root,"belt-back",[32,760,480],[260,810,0],"belt",2);
   k.box(root,"belt-top",[520,32,32],[0,1190,0],"belt",2);
   k.box(root,"belt-bottom",[520,32,32],[0,430,0],"belt",2);
-  k.box(root,"upper-guard",[190,180,300],[0,1375,0],"iron",2);
-  k.box(root,"lower-guard",[190,120,300],[0,285,0],"iron",2);
+  k.box(root,"upper-guard",[80,110,180],[0,1375,0],"iron",2);
+  k.box(root,"lower-guard",[80,90,180],[0,285,0],"iron",2);
   k.box(root,"contact-rest",[560,38,190],[0,760,300],"steel",0);
   k.box(root,"rest-bracket",[90,380,70],[0,575,285],"iron",2);
   // Period-appropriate manual drive: a treadle and handwheel replace a motor.
