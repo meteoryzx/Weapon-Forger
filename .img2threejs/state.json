@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "status": "active",
   "profile": "generic",
-  "currentStep": "reference-admission",
+  "currentStep": "local-spec-search",
   "currentPass": "",
   "checklist": [
     {
@@ -28,9 +28,11 @@
     {
       "id": "reference-admission",
       "scope": "setup",
-      "status": "pending",
-      "evidence": [],
-      "reason": "",
+      "status": "done",
+      "evidence": [
+        "artifacts/grinder-admission.json"
+      ],
+      "reason": "Conditional concept-sheet admission: multiple orthographic views are used for structure, not projection.",
       "command": "python3 forge/stage1_intake/check_reference_admission.py {reference} --out admission.json --probe-out probe.json"
     },
     {
