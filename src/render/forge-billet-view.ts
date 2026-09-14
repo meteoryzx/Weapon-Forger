@@ -319,7 +319,7 @@ export class ForgeBilletView {
     } else {
       this.quenchOffset.set(0, 0, 0);
       if (activeStation === "grind") {
-        this.billetRig.position.x += this.grindOffset.x;
+        this.billetRig.position.y += this.grindOffset.x;
         this.billetRig.position.z += this.grindOffset.z;
         this.billetRig.rotation.set(0, this.grindAngle, Math.PI / 2);
       } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
@@ -568,8 +568,9 @@ export class ForgeBilletView {
   grindTablePoint(x: number, y: number): { x: number; z: number } | null {
     this.pointer.set(x / this.viewport.width * 2 - 1, 1 - y / this.viewport.height * 2);
     this.raycaster.setFromCamera(this.pointer, this.camera);
-    const point = this.raycaster.ray.intersectPlane(new Plane(new Vector3(0, 1, 0), -WORKSHOP_SURFACE_Y), new Vector3());
-    return point ? { x: point.x, z: point.z } : null;
+    const faceX = WORKSHOP_LAYOUT.grind!.origin[0] - 21;
+    const point = this.raycaster.ray.intersectPlane(new Plane(new Vector3(1, 0, 0), -faceX), new Vector3());
+    return point ? { x: point.y, z: point.z } : null;
   }
 
   setGrindPose(offset: { x?: number; z?: number; angle?: number }): void {
@@ -837,7 +838,7 @@ export class ForgeBilletView {
     const anchor=STATION_ANCHORS[station];
     const target=new Vector3(anchor[0],WORKSHOP_SURFACE_Y+5,anchor[2]);
     const distance=Math.max(1,1.2/this.camera.aspect);
-    const offset=station==="grind"?new Vector3(-92,38,0):new Vector3(22,38,72);
+    const offset=station==="grind"?new Vector3(-120,24,0):new Vector3(22,38,72);
     return {position:offset.multiplyScalar(distance).add(target).toArray(),target:target.toArray()};
   }
 
