@@ -48,12 +48,11 @@ export function grindingAsset(k:WorkshopModelKit):StationAsset {
   k.box(root,"lower-guard",[190,120,300],[0,285,0],"iron",2);
   k.box(root,"contact-rest",[560,38,190],[0,760,300],"steel",0);
   k.box(root,"rest-bracket",[90,380,70],[0,575,285],"iron",2);
-  // Compact side motor and exposed auxiliary belt, matching the reference silhouette.
-  k.box(root,"motor",[360,280,330],[430,260,-40],"iron",3);
-  k.cylinder(root,"motor-pulley",110,70,[250,360,-40],"steel","z",40);
-  k.beam(root,"motor-link",[250,360,-40],[0,430,0],26,34,"dark");
-  k.ring(root,"handwheel",165,18,[470,720,100],"steel","x");
-  k.box(root,"handwheel-handle",[28,330,28],[470,720,100],"brass");
+  // Period-appropriate manual drive: a treadle and handwheel replace a motor.
+  k.ring(root,"handwheel",125,18,[360,680,90],"steel","x");
+  k.box(root,"handwheel-handle",[24,250,24],[360,680,90],"brass");
+  k.box(root,"treadle",[230,32,250],[300,145,260],"wood");
+  k.beam(root,"treadle-link",[300,160,260],[300,650,90],20,24,"iron");
   k.batch(root);return {root};
 }
 export function powerHammerAsset(k:WorkshopModelKit):StationAsset {
