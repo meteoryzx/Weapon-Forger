@@ -2,22 +2,26 @@
   "schemaVersion": 1,
   "status": "active",
   "profile": "generic",
-  "currentStep": "image-analysis",
+  "currentStep": "reference-admission",
   "currentPass": "",
   "checklist": [
     {
       "id": "image-analysis",
       "scope": "setup",
-      "status": "pending",
-      "evidence": [],
+      "status": "done",
+      "evidence": [
+        "artifacts/grinder-image-analysis.md"
+      ],
       "reason": "",
       "command": "Read grimoire/intake/image_analysis.md and analyze {reference}"
     },
     {
       "id": "reference-suitability",
       "scope": "setup",
-      "status": "pending",
-      "evidence": [],
+      "status": "done",
+      "evidence": [
+        "artifacts/grinder-admission.json"
+      ],
       "reason": "",
       "command": "Read grimoire/intake/validation_rubric.md and record a pass, conditional, or reject verdict for {reference}"
     },
