@@ -29,23 +29,23 @@ export function grindingAsset(k:WorkshopModelKit):StationAsset {
   const root=new Group();root.name="belt-grinder";
   k.box(root,"base",[1050,85,950],[0,42.5,0],"endgrain");
   for(const x of [-230,230]){
-    k.profile(root,"belt-frame",[[-210,0],[210,0],[125,210],[65,1550],[-65,1550],[-125,210]],75,[x,85,0],"iron").rotation.y=Math.PI/2;
-    k.cylinder(root,"upper-bearing",60,90,[x,1500,0],"iron","x");
-    k.cylinder(root,"lower-bearing",60,90,[x,460,0],"iron","x");
+    k.profile(root,"belt-frame",[[-210,0],[210,0],[125,180],[65,1230],[-65,1230],[-125,180]],75,[x,85,0],"iron").rotation.y=Math.PI/2;
+    k.cylinder(root,"upper-bearing",60,90,[x,1200,0],"iron","x");
+    k.cylinder(root,"lower-bearing",60,90,[x,430,0],"iron","x");
   }
-  const upper=k.cylinder(root,"upper-drive-wheel",255,120,[0,1500,0],"steel","x",64);upper.userData.keepMesh=true;
-  const lower=k.cylinder(root,"lower-idler-wheel",255,120,[0,460,0],"steel","x",64);lower.userData.keepMesh=true;
-  k.cylinder(root,"upper-hub",70,145,[0,1500,0],"iron","x");
-  k.cylinder(root,"lower-hub",70,145,[0,460,0],"iron","x");
+  const upper=k.cylinder(root,"upper-drive-wheel",220,120,[0,1200,0],"steel","x",64);upper.userData.keepMesh=true;
+  const lower=k.cylinder(root,"lower-idler-wheel",220,120,[0,430,0],"steel","x",64);lower.userData.keepMesh=true;
+  k.cylinder(root,"upper-hub",70,145,[0,1200,0],"iron","x");
+  k.cylinder(root,"lower-hub",70,145,[0,430,0],"iron","x");
   // The abrasive belt is a vertical loop in the Y-Z plane. The front run is
   // the player's working face and moves downward between the pulleys.
-  k.box(root,"abrasive-belt-front",[92,1040,34],[0,980,255],"dark",2);
-  k.box(root,"abrasive-belt-back",[92,1040,34],[0,980,-255],"dark",2);
-  k.box(root,"abrasive-belt-top",[92,34,510],[0,1760,0],"dark",2);
-  k.box(root,"abrasive-belt-bottom",[92,34,510],[0,200,0],"dark",2);
-  k.box(root,"workpiece-rest",[520,35,180],[0,780,330],"steel",0);
-  k.box(root,"contact-guard",[110,620,42],[0,980,292],"iron",2);
-  for(const x of [-185,185])k.box(root,"rest-leg",[36,835,36],[x,417.5,345],"iron");
+  k.box(root,"abrasive-belt-front",[92,770,34],[0,815,255],"brass",2);
+  k.box(root,"abrasive-belt-back",[92,770,34],[0,815,-255],"brass",2);
+  k.box(root,"abrasive-belt-top",[92,34,510],[0,1200,0],"brass",2);
+  k.box(root,"abrasive-belt-bottom",[92,34,510],[0,430,0],"brass",2);
+  k.box(root,"workpiece-rest",[520,35,180],[0,760,330],"steel",0);
+  k.box(root,"contact-guard",[110,470,42],[0,815,292],"iron",2);
+  for(const x of [-185,185])k.box(root,"rest-leg",[36,700,36],[x,350,345],"iron");
   k.box(root,"tool-rest",[680,35,150],[0,857.5,345],"steel",0);
   // Fixed flywheel and treadle reserve the transmission without inventing an input mode.
   k.ring(root,"flywheel",165,15,[390,780,0],"iron","x");

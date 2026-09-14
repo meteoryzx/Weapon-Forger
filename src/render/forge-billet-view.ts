@@ -42,7 +42,7 @@ import {
   type WorkpieceNode,
 } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
-import { MaterialsStationView, materialsCameraFrame } from "./materials-station-view.ts";
+import { MaterialsStationView, materialsCameraFrame, weldCameraFrame } from "./materials-station-view.ts";
 import { SawStationView, SAW_ORIGIN, sawCameraFrame } from "./saw-station-view.ts";
 import { CUT_HOME, CUT_TABLE, type CutPose } from "../app/cut-placement.ts";
 import { FurnaceStationView, furnaceCameraFrame, FURNACE_ORIGIN, FURNACE } from "./furnace-station-view.ts";
@@ -827,7 +827,7 @@ export class ForgeBilletView {
     if (station === "furnace" || station === "temper") return furnaceCameraFrame(this.camera.aspect);
     if(station==="cut")return sawCameraFrame(this.camera.aspect);
     if (station === "materials") return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
-    if (station === "weld") return materialsCameraFrame("table", this.camera.aspect);
+    if (station === "weld") return weldCameraFrame(this.camera.aspect);
     if (station === "overview") {
       const frame=CAMERA_FRAMES.overview;
       const target=new Vector3(...frame.target);

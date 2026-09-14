@@ -40,6 +40,13 @@ export function materialsCameraFrame(_focus: "table" | "rack", aspect: number) {
   return { position: position.toArray(), target: target.toArray() };
 }
 
+export function weldCameraFrame(aspect: number) {
+  const target = new Vector3(-20, TABLE_SURFACE_Y + 12, 166).add(MATERIALS_ORIGIN);
+  const position = new Vector3(-20, 78, 330).add(MATERIALS_ORIGIN);
+  position.sub(target).multiplyScalar(Math.max(1, 1.15 / aspect)).add(target);
+  return { position: position.toArray(), target: target.toArray() };
+}
+
 export class MaterialsStationView {
   readonly group = new Group();
   readonly candidates: Mesh[] = [];
