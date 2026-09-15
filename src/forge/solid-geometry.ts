@@ -183,6 +183,7 @@ export function clipSolid(
   const vertices: SolidVertex[] = [];
   const coordinates: SolidPoint[] = [];
   const faces: number[][] = [];
+  const groundFaces: number[] = [];
   const cap = new Set<number>();
   const addVertex = (vertex: SolidVertex): number => {
     const point = solidPoint(vertex, geometry);
@@ -191,7 +192,7 @@ export function clipSolid(
     if (Math.abs(distance(point)) <= EPS) cap.add(index);
     return index;
   };
-  for (const face of solid.faces) {
+  for (const [faceIndex, face] of solid.faces.entries()) {
     const output: number[] = [];
     for (let i = 0; i < face.length; i++) {
       const a = face[i]!, b = face[(i+1)%face.length]!;
@@ -202,7 +203,10 @@ export function clipSolid(
       }
     }
     const unique = [...new Set(output)];
-    if (unique.length >= 3) faces.push(unique);
+    if (unique.length >= 3) {
+      if (solid.groundFaces?.includes(faceIndex)) groundFaces.push(faces.length);
+      faces.push(unique);
+    }
   }
   if (cap.size >= 3) {
     const indices = [...cap];
@@ -218,9 +222,11 @@ export function clipSolid(
       const pa = sub(coordinates[a]!,center), pb = sub(coordinates[b]!,center);
       return Math.atan2(dot(pa,v),dot(pa,u)) - Math.atan2(dot(pb,v),dot(pb,u));
     });
+    if (suffix === "abrasive") groundFaces.push(faces.length);
     faces.push(indices);
   }
-  const result = { id: `${solid.id}:${suffix}`, blockId: solid.blockId, vertices, faces };
+  const result = { id: suffix === "abrasive" ? solid.id : `${solid.id}:${suffix}`, blockId: solid.blockId, vertices, faces,
+    ...(groundFaces.length ? { groundFaces } : {}) };
   return solidVolume(result, geometry) > EPS ? result : null;
 }
 
@@ -331,25 +337,33 @@ export function solidComponents(solids: readonly WorkpieceSolid[], geometry: Wor
   return [...groups.values()];
 }
 
+const faceCache = new WeakMap<WorkpieceGeometry["nodes"], WeakMap<WorkpieceSolid, {key:string;points:readonly SolidPoint[]}[]>>();
+function cachedFaces(solid:WorkpieceSolid, geometry:WorkpieceGeometry){
+  let cache=faceCache.get(geometry.nodes);
+  if(!cache){cache=new WeakMap();faceCache.set(geometry.nodes,cache);}
+  let result=cache.get(solid);
+  if(!result){
+    const points=solid.vertices.map(v=>solidPoint(v,geometry)),center=mean(points);
+    result=solid.faces.map(face=>{
+      const polygon=face.map(i=>points[i]!);
+      const key=polygon.map(pointKey).sort().join(";");
+      if(dot(faceNormal(polygon),sub(mean(polygon),center))<0)polygon.reverse();
+      return {key,points:polygon};
+    });cache.set(solid,result);
+  }
+  return result;
+}
 function scanSolidFaces(solids: readonly WorkpieceSolid[], geometry: WorkpieceGeometry,
   onContact: (a: number, b: number) => void, surface: boolean): SolidFace[] {
-  const faces = new Map<string, SolidFace & {center: SolidPoint}>();
+  const faces = new Map<string, SolidFace>();
   solids.forEach((solid, index) => {
-    const points = solid.vertices.map(vertex => solidPoint(vertex, geometry));
-    const center = mean(points);
-    for (const face of solid.faces) {
-      const polygon = face.map(vertex => points[vertex]!);
-      const key = polygon.map(pointKey).sort().join(";");
+    for (const {key,points} of cachedFaces(solid,geometry)) {
       const other = faces.get(key);
-      if (other === undefined) faces.set(key, {owner:index,blockId:solid.blockId,points:polygon,center});
+      if (other === undefined) faces.set(key, {owner:index,blockId:solid.blockId,points});
       else { onContact(index, other.owner); faces.delete(key); }
     }
   });
-  const unmatched = [...faces.values()].map(face => {
-    const points = [...face.points];
-    if (dot(faceNormal(points), sub(mean(points), face.center)) < 0) points.reverse();
-    return { owner:face.owner, blockId:face.blockId, points };
-  });
+  const unmatched = [...faces.values()];
   return matchPartialFaces(unmatched, onContact, surface);
 }
 

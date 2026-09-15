@@ -58,12 +58,28 @@ describe("front-opening forge", () => {
       const inside = new Box3().setFromObject(view.item);
       expect(inside.min.y).toBeCloseTo(FURNACE.hearth);
       expect(inside.max.y).toBeLessThan(FURNACE.ceiling);
-      expect(inside.min.z).toBeLessThan(FURNACE_ORIGIN.z + FURNACE.front);
-      expect(inside.max.z).toBeGreaterThan(FURNACE_ORIGIN.z + FURNACE.front);
+      expect(inside.min.z).toBeGreaterThan(FURNACE_ORIGIN.z + FURNACE.rear);
+      expect(inside.max.z).toBeLessThan(FURNACE_ORIGIN.z + FURNACE.front);
       expect(inside.min.x).toBeGreaterThan(FURNACE_ORIGIN.x - FURNACE.halfOpening);
       expect(inside.max.x).toBeLessThan(FURNACE_ORIGIN.x + FURNACE.halfOpening);
       expect(view.itemRig.quaternion.equals(rotation)).toBe(true);
       view.dispose();
     }
+  });
+
+  it("does not rebuild billet geometry for thermal-only updates", () => {
+    let builds=0;
+    const view = new FurnaceStationView(piece => {
+      builds += 1;
+      return createBilletGeometry(piece, null);
+    });
+    const cold=createForgeState();
+    view.update(createForgeSnapshot(cold));
+    const hot=applyForgeIntent(cold,{kind:"move-billet",destination:"furnace",elapsedMs:0});
+    view.update(createForgeSnapshot(hot));
+    const heated=applyForgeIntent(hot,{kind:"move-billet",destination:"furnace",elapsedMs:5_000});
+    view.update(createForgeSnapshot(heated));
+    expect(builds).toBe(1);
+    view.dispose();
   });
 });

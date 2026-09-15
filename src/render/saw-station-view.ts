@@ -1,4 +1,4 @@
-import { BoxGeometry, BufferGeometry, CylinderGeometry, DoubleSide, Group, Line, LineDashedMaterial,
+import { BoxGeometry, BufferGeometry, CylinderGeometry, DoubleSide, Group, Line, LineBasicMaterial,
   Mesh, MeshStandardMaterial, Raycaster, Vector3 } from "three";
 import type { ForgeSnapshot, ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { CUT_TABLE, SAW_PATH, cutBounds, type CutPose } from "../app/cut-placement.ts";
@@ -8,8 +8,8 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 export const SAW_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.cut!.origin);
 export function sawCameraFrame(aspect: number) {
   const target = new Vector3(0, WORKSHOP_SURFACE_Y + 4, 0).add(SAW_ORIGIN);
-  const position = new Vector3(104, 72, 0).add(SAW_ORIGIN);
-  position.sub(target).multiplyScalar(Math.max(1, 1.35 / aspect)).add(target);
+  const position = new Vector3(92, 100, 0).add(SAW_ORIGIN);
+  position.sub(target).multiplyScalar(Math.max(1, 1.05 / aspect)).add(target);
   return { position: position.toArray(), target: target.toArray() };
 }
 
@@ -21,7 +21,7 @@ export class SawStationView {
   readonly tray = new Group();
   private readonly head = new Group();
   private readonly blade = new Group();
-  private readonly guide = new Line(new BufferGeometry(), new LineDashedMaterial({ color: "#bddfcb", dashSize: 4, gapSize: 3, depthTest: true }));
+  private readonly guide = new Line(new BufferGeometry(), new LineBasicMaterial({ color: "#bddfcb", depthTest: true }));
   private snapshot: ForgeSnapshot | null = null;
   private trayPieces: readonly ForgeSnapshotWorkpiece[] | null = null;
   private trayPage = -1;
@@ -94,8 +94,7 @@ export class SawStationView {
       points.push(new Vector3(0,(hit?.point.y??CUT_TABLE.surface)+0.08,z));
     }
     this.guide.geometry=new BufferGeometry().setFromPoints(points);
-    this.guide.computeLineDistances();
-    (this.guide.material as LineDashedMaterial).color.set(valid===true?"#b8efcb":valid===false?"#ed8668":"#d8c997");
+    (this.guide.material as LineBasicMaterial).color.set(valid===true?"#b8efcb":valid===false?"#ed8668":"#d8c997");
     this.guide.visible=this.active && this.animationStart===null;
   }
 
@@ -132,7 +131,7 @@ export class SawStationView {
   get busy(): boolean {return this.animationStart!==null;}
 
   dispose(): void {
-    const geometries=new Set<BufferGeometry>(), materials=new Set<MeshStandardMaterial|LineDashedMaterial>();
+    const geometries=new Set<BufferGeometry>(), materials=new Set<MeshStandardMaterial|LineBasicMaterial>();
     this.group.traverse(object=>{if(object instanceof Mesh || object instanceof Line){geometries.add(object.geometry);if(!Array.isArray(object.material))materials.add(object.material as MeshStandardMaterial);}});
     geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());
     this.kit.woodTexture.dispose();this.kit.mineralTexture.dispose();

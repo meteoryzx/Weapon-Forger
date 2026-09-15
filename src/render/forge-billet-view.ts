@@ -38,6 +38,7 @@ import {
   type ForgeSnapshot,
   type ForgeSnapshotSection,
   type ForgeSnapshotWorkpiece,
+  type GrindOperation,
   type HammerInfluencePreview,
   type WorkpieceGrid,
   type WorkpieceNode,
@@ -190,7 +191,26 @@ export class ForgeBilletView {
   private grindAngle = 0;
   private grindYaw = 0;
   private grindRoll = 0;
-  private grindFeed = 0;
+  // Start clear of the belt. Positive feed moves the workpiece toward the
+  // calibrated belt plane; W advances it and S retracts it.
+  private grindFeed = -workshopUnits(40);
+  private grindWorkpieceId: string | null = null;
+  private readonly grindCenter = new Vector3();
+  private preparedGrindMesh: BufferGeometry | null = null;
+
+  prepareGrindMesh(positions:Float32Array,colors:Float32Array):void {
+    this.preparedGrindMesh?.dispose();
+    const mesh=new BufferGeometry();
+    mesh.setAttribute("position",new BufferAttribute(positions,3));mesh.setAttribute("color",new BufferAttribute(colors,3));
+    mesh.computeVertexNormals();this.preparedGrindMesh=mesh;
+  }
+  private quenchPoseDirty = false;
+  private lastQuenchRenderMs = 0;
+  private lastQuenchEffectRenderMs = 0;
+  private quenchImmersionCache = 0;
+  private quenchImmersionCacheMs = -Infinity;
+  private grindPoseDirty = false;
+  private lastGrindRenderMs = 0;
   private inspectionView: InspectionView = "default";
   private readonly quenchBaseQuaternion = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), -Math.PI / 2);
   private readonly quenchXQuaternion = new Quaternion();
@@ -235,10 +255,11 @@ export class ForgeBilletView {
     this.scene.add(this.camera);
     this.createStationModels();
     this.createScaleReference();
-    this.furnaceView = new FurnaceStationView(piece => createBilletGeometry(piece, null));
+    this.furnaceView = new FurnaceStationView(piece => createBilletGeometry(piece, null), FURNACE_ORIGIN, "heating-station");
     this.temperControl=this.furnaceView.temperControl;
     this.scene.add(this.furnaceView.group);
     this.stationMeshes.set("furnace", this.furnaceView.target);
+    this.stationMeshes.set("temper", this.furnaceView.target);
     this.sawView=new SawStationView(piece=>createBilletGeometry(piece,null));
     this.scene.add(this.sawView.group);
     this.materialsView=new MaterialsStationView(piece=>createBilletGeometry(piece,null));
@@ -289,10 +310,10 @@ export class ForgeBilletView {
     // The active station gets its moving workpiece; overview keeps the room
     // readable without duplicating the operation item.
     this.furnaceView.itemRig.visible = activeStation === "furnace";
-    this.furnaceView.body.visible = activeStation === "furnace" || activeStation === "overview";
+    this.furnaceView.body.visible = true;
     this.hammerView.setActive(activeStation==="anvil"||activeStation==="overview");
     if(activeStation==="anvil"||activeStation==="overview"){
-      this.hammerView.update(snapshot,this.hammerPose);
+      if (activeStation === "anvil") this.hammerView.update(snapshot,this.hammerPose);
       this.hammerView.tool.visible=activeStation==="anvil";
       this.updateStationEmphasis(activeStation);this.render();return;
     }
@@ -310,7 +331,8 @@ export class ForgeBilletView {
     const anchor = BILLET_ANCHORS[activeStation];
     this.billetRig.position.set(...anchor);
     this.temperControl.rotation.z = ((this.temperPreviewC ?? 220) - 220) / 160;
-    const nextGeometry = createBilletGeometry(snapshot, hammerPreview);
+    const nextGeometry = this.preparedGrindMesh ?? createBilletGeometry(snapshot, hammerPreview);
+    this.preparedGrindMesh=null;
     this.billet.geometry.dispose();
     this.billet.geometry = nextGeometry;
     nextGeometry.computeBoundingBox();
@@ -322,40 +344,31 @@ export class ForgeBilletView {
     this.billetHitTarget.geometry=new BoxGeometry(size.x*BILLET_SCALE,Math.max(size.y * BILLET_SCALE,12 * BILLET_SCALE),size.z * BILLET_SCALE);
     this.billetHitTarget.position.set(0,size.y*BILLET_SCALE/2,0);
     if (activeStation === "quench-water" || activeStation === "quench-oil") {
-      this.billetRig.position.x += this.quenchOffset.x;
-      this.billetRig.position.z += this.quenchOffset.z;
-      this.billetRig.position.y += this.quenchVertical;
-      // Player axes: x=right, y=inward (Three z), z=up (Three y).
-      // The billet length is aligned with player y. Both rotations happen on
-      // the centred rig: A/D around player x, wheel around player y (world z).
-      this.quenchXQuaternion.setFromAxisAngle(new Vector3(1, 0, 0), this.quenchTilt);
-      this.quenchYQuaternion.setFromAxisAngle(new Vector3(0, 0, 1), this.quenchYaw);
-      this.billetRig.quaternion.copy(this.quenchBaseQuaternion)
-        .premultiply(this.quenchXQuaternion)
-        .premultiply(this.quenchYQuaternion);
+      this.applyQuenchPose();
     } else {
       this.quenchOffset.set(0, 0, 0);
       if (activeStation === "grind") {
-        this.billetRig.position.z += this.grindOffset.z;
-        // Apply the three controls around the billet's local axes. Adding the
-        // angles to a 90-degree Y Euler pose collapses X/Z at gimbal lock.
-        this.billetRig.rotation.set(0, Math.PI / 2, 0);
-        this.billetRig.rotateX(this.grindAngle);
-        this.billetRig.rotateY(this.grindYaw);
-        this.billetRig.rotateZ(this.grindRoll);
-        // Rotate around the actual billet centre, then seat it on the rest and
-        // keep its leading edge at the belt plane without changing its scale.
-        this.billet.position.y = -center.y * BILLET_SCALE;
+        if (this.grindWorkpieceId !== snapshot.workpieceId) {
+          this.grindWorkpieceId = snapshot.workpieceId;
+          this.grindCenter.copy(center);
+        }
+        this.billet.position.copy(this.grindCenter).multiplyScalar(-BILLET_SCALE);
         this.billetHitTarget.position.y = 0;
-        this.billetRig.updateMatrixWorld(true);
-        const seated = new Box3().setFromObject(this.billet);
-        this.billetRig.position.y += anchor[1] - seated.min.y + this.grindOffset.x;
-        this.billetRig.position.x += anchor[0] - seated.max.x + this.grindFeed;
+        this.applyGrindTransform();
       } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
     if(activeStation==="cut") this.sawView.update(snapshot,this.cutPose,this.cutValid);
+    this.render();
+  }
+
+  /** Refresh quench heat feedback without rebuilding the workpiece mesh. */
+  refreshQuenchThermal(snapshot: ForgeSnapshot): void {
+    this.snapshot = snapshot;
+    const appearance = thermalSteelAppearance(snapshot.averageTemperatureC);
+    BILLET_MATERIAL.emissive.copy(appearance.emissive);
+    BILLET_MATERIAL.emissiveIntensity = appearance.emissiveIntensity;
     this.render();
   }
 
@@ -385,6 +398,8 @@ export class ForgeBilletView {
 
   setStation(station: ForgeStation, nowMs = performance.now()): void {
     if (station === this.station && !this.isTransitioning) return;
+    const leavingQuench = station === "overview"
+      && (this.station === "quench-water" || this.station === "quench-oil");
     if (station === "quench-water" || station === "quench-oil") {
       this.quenchOffset.set(0, 0, 0);
       this.quenchVertical = 0;
@@ -397,6 +412,11 @@ export class ForgeBilletView {
     const frame = this.cameraFrame(station);
     this.cameraToPosition.fromArray(frame.position);
     this.cameraToTarget.fromArray(frame.target);
+    if (leavingQuench) {
+      this.isTransitioning = false;
+      this.applyCameraFrame(station);
+      return;
+    }
     this.transitionStartedAtMs = nowMs;
     this.isTransitioning = true;
   }
@@ -412,9 +432,24 @@ export class ForgeBilletView {
     const hammerMoved=this.hammerView.tick(nowMs);
     this.grinderModel.tick(nowMs / 1000);
     const inQuench=this.station==="quench-water"||this.station==="quench-oil";
-    const quenchMoved=inQuench?this.quenchEffects.update(nowMs,this.billetRig.position,this.quenchImmersion(),this.snapshot?.averageTemperatureC??20):this.quenchEffects.hide();
+    // Decorative steam/ripples are deferred from the current acceptance gate.
+    // Keep the effect object dormant so it cannot consume the interaction frame.
+    const quenchMoved = this.quenchEffects.hide();
     if (!this.isTransitioning) {
-      if (materialMoved || sawMoved || furnaceMoved || hammerMoved || quenchMoved || this.station === "grind") this.render();
+      const grindRenderReady = this.station === "grind"
+        && this.grindPoseDirty
+        && nowMs - this.lastGrindRenderMs >= 16;
+      const quenchRenderReady = this.station !== "quench-water" && this.station !== "quench-oil"
+        ? false
+        : this.quenchPoseDirty && nowMs - this.lastQuenchRenderMs >= 500;
+      if (materialMoved || sawMoved || furnaceMoved || hammerMoved || quenchMoved || quenchRenderReady || grindRenderReady || this.station === "grind") {
+        this.quenchPoseDirty = false;
+        if (this.station === "quench-water" || this.station === "quench-oil") this.lastQuenchRenderMs = nowMs;
+        if (this.station === "quench-water" || this.station === "quench-oil") this.lastQuenchEffectRenderMs = nowMs;
+        this.grindPoseDirty = false;
+        if (this.station === "grind") this.lastGrindRenderMs = nowMs;
+        this.render();
+      }
       return;
     }
     const amount = clamp((nowMs - this.transitionStartedAtMs) / 420, 0, 1);
@@ -470,7 +505,24 @@ export class ForgeBilletView {
     const hit=this.pickObject(x,y,[this.hammerView.item],false)
       ??this.pickObject(x+0.05,y,[this.hammerView.item],false)
       ??this.pickObject(x-0.05,y,[this.hammerView.item],false);
-    return hit?{x:hit.point.x/ANVIL.scale,z:hit.point.z/ANVIL.scale}:null;
+    if (hit) return {x:hit.point.x/ANVIL.scale,z:hit.point.z/ANVIL.scale};
+    // The close-up camera can place the projected center on a shared lattice
+    // edge. Fall back to the actual billet footprint on the anvil plane.
+    const tablePoint = this.hammerTablePoint(x, y);
+    if (tablePoint
+      && Math.abs(tablePoint.x - this.hammerPose.x) <= FORGE_RULES.workpieceLength / 2
+      && Math.abs(tablePoint.z - this.hammerPose.z) <= FORGE_RULES.initialSectionWidth * 0.75) {
+      return tablePoint;
+    }
+    // Keep the center of the close-up canvas forgiving when the billet's
+    // projected center is a few pixels above the viewport midpoint.
+    const center = new Box3().setFromObject(this.hammerView.item).getCenter(new Vector3()).project(this.camera);
+    const centerX = (center.x + 1) * this.viewport.width / 2;
+    const centerY = (1 - center.y) * this.viewport.height / 2;
+    if (Math.hypot(x - centerX, y - centerY) <= 28) {
+      return { x: this.hammerPose.x, z: this.hammerPose.z };
+    }
+    return null;
   }
   aimHammer(point:{x:number;z:number}|null,energy:number) {const hit=this.hammerView.setAim(point,energy);this.render();return hit;}
 
@@ -482,6 +534,30 @@ export class ForgeBilletView {
   pickFurnace(x: number, y: number): boolean {
     return this.pickObject(x, y, [this.furnaceView.target, this.furnaceView.item], false) !== null;
   }
+
+  setTemperInsertionOffset(offsetZ: number): void {
+    this.furnaceView.setManualOffset(offsetZ);
+    if (this.snapshot && this.station === "temper") {
+      this.furnaceView.update(this.snapshot);
+      this.render();
+    }
+  }
+
+  setFurnaceInsertionOffset(offsetZ: number): void {
+    this.furnaceView.setManualOffset(offsetZ);
+    if (this.snapshot && this.station === "furnace") {
+      this.furnaceView.update(this.snapshot);
+      this.render();
+    }
+  }
+
+  furnaceInsertionOffset(): number { return this.furnaceView.manualOffset(); }
+  furnaceInsertionComplete(): boolean { return this.furnaceView.isFullyInside(); }
+  furnaceInsertionOutside(): boolean { return this.furnaceView.isFullyOutside(); }
+
+  temperInsertionOffset(): number { return this.furnaceView.manualOffset(); }
+
+  clearTemperInsertionOffset(): void { this.furnaceView.clearManualOffset(); }
 
   updateCut(pose: CutPose, valid: boolean | null, trayPage = 0): void {
     this.cutPose=pose; this.cutValid=valid;
@@ -588,7 +664,25 @@ export class ForgeBilletView {
     if (pose.vertical !== undefined) this.quenchVertical = Math.max(-60, Math.min(60, pose.vertical));
     if (pose.tilt !== undefined) this.quenchTilt = pose.tilt;
     if (pose.yaw !== undefined) this.quenchYaw = pose.yaw;
-    if (this.snapshot && (this.station === "quench-water" || this.station === "quench-oil")) this.update(this.snapshot, null, this.station, this.temperPreviewC);
+    if (this.snapshot && (this.station === "quench-water" || this.station === "quench-oil")) {
+      this.applyQuenchPose();
+      this.quenchPoseDirty = true;
+    }
+  }
+
+  private applyQuenchPose(): void {
+    if (!this.snapshot || (this.station !== "quench-water" && this.station !== "quench-oil")) return;
+    const anchor = BILLET_ANCHORS[this.station];
+    this.billetRig.position.set(...anchor);
+    this.billetRig.position.x += this.quenchOffset.x;
+    this.billetRig.position.z += this.quenchOffset.z;
+    this.billetRig.position.y += this.quenchVertical;
+    // Player axes: x=right, y=inward (Three z), z=up (Three y).
+    this.quenchXQuaternion.setFromAxisAngle(new Vector3(1, 0, 0), this.quenchTilt);
+    this.quenchYQuaternion.setFromAxisAngle(new Vector3(0, 0, 1), this.quenchYaw);
+    this.billetRig.quaternion.copy(this.quenchBaseQuaternion)
+      .premultiply(this.quenchXQuaternion)
+      .premultiply(this.quenchYQuaternion);
   }
 
   quenchPose(): { vertical: number; tilt: number; yaw: number } {
@@ -605,10 +699,18 @@ export class ForgeBilletView {
 
   setInspectionView(view: InspectionView): void {
     this.inspectionView = view;
-    this.applyCameraFrame(this.station);
+    this.cameraFromPosition.copy(this.camera.position);
+    this.cameraFromTarget.copy(this.cameraTarget);
+    const frame = this.cameraFrame(this.station);
+    this.cameraToPosition.fromArray(frame.position);
+    this.cameraToTarget.fromArray(frame.target);
+    this.transitionStartedAtMs = performance.now();
+    this.isTransitioning = true;
   }
 
   inspectionViewMode(): InspectionView { return this.inspectionView; }
+
+  isInspectionActive(): boolean { return this.inspectionView !== "default"; }
 
   setGrindPose(offset: { x?: number; z?: number; angle?: number; yaw?: number; roll?: number; feed?: number }): void {
     if (offset.x !== undefined) this.grindOffset.x = clamp(offset.x, 0, workshopUnits(200));
@@ -619,7 +721,7 @@ export class ForgeBilletView {
     if (offset.feed !== undefined) this.grindFeed = clamp(offset.feed, -workshopUnits(120), 0);
     if (this.snapshot && this.station === "grind") {
       this.applyGrindTransform();
-      this.render();
+      this.grindPoseDirty = true;
     }
   }
 
@@ -628,13 +730,24 @@ export class ForgeBilletView {
     this.billetRig.position.set(...anchor);
     this.billetRig.position.z += this.grindOffset.z;
     this.billetRig.rotation.set(0, Math.PI / 2, 0);
-    this.billetRig.rotateX(this.grindAngle);
-    this.billetRig.rotateY(this.grindYaw);
-    this.billetRig.rotateZ(this.grindRoll);
+    // Player right = world +Z, forward = +X, up = +Y.
+    this.billetRig.rotateOnWorldAxis(new Vector3(0,0,1),this.grindAngle);
+    this.billetRig.rotateOnWorldAxis(new Vector3(1,0,0),this.grindYaw);
+    this.billetRig.rotateOnWorldAxis(new Vector3(0,1,0),this.grindRoll);
     this.billetRig.updateMatrixWorld(true);
-    const seated = new Box3().setFromObject(this.billet);
-    this.billetRig.position.y += anchor[1] - seated.min.y + this.grindOffset.x;
-    this.billetRig.position.x += anchor[0] - seated.max.x + this.grindFeed;
+    const localBounds=this.billet.geometry.boundingBox;
+    if(!localBounds)return;
+    // The actual mesh support is essential after an oblique bevel: a rotated
+    // bounding box contains empty corners which must not hold it off the belt.
+    const vertices=this.billet.geometry.getAttribute("position"),p=new Vector3();
+    let minY=Infinity,maxX=-Infinity,maxContactX=-Infinity;
+    for(let i=0;i<vertices.count;i++){
+      p.fromBufferAttribute(vertices,i).applyMatrix4(this.billet.matrixWorld);
+      minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);
+      if(Math.abs(p.z-STATION_ANCHORS.grind[2])<workshopUnits(GRINDER.beltWidth/2)-1e-5)maxContactX=Math.max(maxContactX,p.x);
+    }
+    this.billetRig.position.y += anchor[1] - minY + this.grindOffset.x;
+    this.billetRig.position.x += anchor[0] - (Number.isFinite(maxContactX)?maxContactX:maxX) + this.grindFeed;
   }
 
   grindPose(): { x: number; z: number; angle: number; yaw: number; roll: number; feed: number } {
@@ -643,61 +756,61 @@ export class ForgeBilletView {
 
   grindContactTarget(): HammerPickTarget | null {
     if (this.station !== "grind" || !this.snapshot || this.grindFeed < -workshopUnits(0.25)) return null;
-    this.billet.updateWorldMatrix(true, false);
-    const positions = this.billet.geometry.getAttribute("position");
-    const point = new Vector3();
-    const origin = STATION_ANCHORS.grind;
-    let section: number | null = null, nearest = Infinity;
-    for (let i = 0; i < positions.count; i++) {
-      point.fromBufferAttribute(positions, i).applyMatrix4(this.billet.matrixWorld);
-      if (Math.abs(point.x - BILLET_ANCHORS.grind[0]) > workshopUnits(0.3)) continue;
-      if (point.y < WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.lowerY) || point.y > WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.upperY)) continue;
-      const lateral = Math.abs(point.z - origin[2]);
-      if (lateral > workshopUnits(GRINDER.beltWidth / 2) || lateral >= nearest) continue;
-      const index = sectionIndexAt(positions.getX(i), this.snapshot.sections);
-      if (index !== null) { nearest = lateral; section = index; }
-    }
-    return section === null ? null : { sectionIndex: section, faceBias: 1 };
+    const bounds = this.worldBilletBounds();
+    const beltX = BILLET_ANCHORS.grind[0];
+    if (bounds.max.x < beltX - workshopUnits(0.3) || bounds.min.x > beltX + workshopUnits(0.3)
+      || bounds.max.y < WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.lowerY)
+      || bounds.min.y > WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.upperY)
+      || bounds.max.z < STATION_ANCHORS.grind[2]-workshopUnits(GRINDER.beltWidth/2)
+      || bounds.min.z > STATION_ANCHORS.grind[2]+workshopUnits(GRINDER.beltWidth/2)) return null;
+    return { sectionIndex: Math.floor(this.snapshot.sections.length / 2), faceBias: 1 };
   }
 
-  grindContactPatch(): { readonly axialPosition: number; readonly verticalOffset: number; readonly axialWidth: number; readonly verticalHeight: number; readonly depth: number; readonly angle: number } | null {
+  grindContactPatch(): NonNullable<GrindOperation["contact"]> | null {
     if (this.station !== "grind" || !this.snapshot || this.grindFeed < -workshopUnits(0.25)) return null;
-    this.billet.updateWorldMatrix(true, false);
-    const positions = this.billet.geometry.getAttribute("position");
-    const origin = STATION_ANCHORS.grind;
-    const point = new Vector3();
-    let best = Infinity, axial = 0, vertical = 0;
-    for (let i = 0; i < positions.count; i++) {
-      point.fromBufferAttribute(positions, i).applyMatrix4(this.billet.matrixWorld);
-      const lateral = Math.abs(point.z - origin[2]);
-      if (Math.abs(point.x - BILLET_ANCHORS.grind[0]) > workshopUnits(0.3)
-        || point.y < WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.lowerY)
-        || point.y > WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.upperY)
-        || lateral > workshopUnits(GRINDER.beltWidth / 2) || lateral >= best) continue;
-      best = lateral;
-      axial = positions.getX(i);
-      vertical = positions.getY(i);
-    }
-    return best === Infinity ? null : { axialPosition: axial, verticalOffset: vertical, axialWidth: 48, verticalHeight: 28, depth: 4, angle: this.grindAngle };
+    if (!this.grindContactTarget()) return null;
+    const inverse=this.billet.matrixWorld.clone().invert();
+    const origin=new Vector3(BILLET_ANCHORS.grind[0],WORKSHOP_FLOOR_Y+workshopUnits((GRINDER.lowerY+GRINDER.upperY)/2),STATION_ANCHORS.grind[2]).applyMatrix4(inverse);
+    const normal=new Vector3(1,0,0).transformDirection(inverse);
+    const across=new Vector3(0,0,1).transformDirection(inverse);
+    const down=new Vector3(0,-1,0).transformDirection(inverse);
+    const point=(p:Vector3)=>({x:p.x,y:p.y,z:p.z});
+    return { axialPosition: origin.x, verticalOffset: origin.y, axialWidth: GRINDER.beltWidth, verticalHeight: GRINDER.upperY-GRINDER.lowerY,
+      depth: 4, frame:{origin:point(origin),normal:point(normal),across:point(across),down:point(down),width:GRINDER.beltWidth,height:GRINDER.upperY-GRINDER.lowerY} };
   }
 
-  quenchImmersion(): number {
+  private worldBilletBounds(): Box3 {
+    this.billet.updateWorldMatrix(true, false);
+    const localBounds = this.billet.geometry.boundingBox;
+    return localBounds ? localBounds.clone().applyMatrix4(this.billet.matrixWorld) : new Box3();
+  }
+
+  quenchImmersion(nowMs = Number.POSITIVE_INFINITY): number {
     if(this.station!=="quench-water" && this.station!=="quench-oil")return 0;
+    if (Number.isFinite(nowMs) && nowMs - this.quenchImmersionCacheMs < 100) return this.quenchImmersionCache;
     this.billetRig.updateMatrixWorld(true);
-    const b=new Box3().setFromObject(this.billet),a=BILLET_ANCHORS[this.station];
+    const localBounds=this.billet.geometry.boundingBox;
+    if(!localBounds)return 0;
+    const b=localBounds.clone().applyMatrix4(this.billet.matrixWorld),a=BILLET_ANCHORS[this.station];
     if(b.max.x<a[0]-28 || b.min.x>a[0]+28 || b.max.z<a[2]-30 || b.min.z>a[2]+30)return 0;
-    return clamp((QUENCH_SURFACE_Y-b.min.y)/Math.max(0.001,b.max.y-b.min.y),0,1);
+    const immersion = clamp((QUENCH_SURFACE_Y-b.min.y)/Math.max(0.001,b.max.y-b.min.y),0,1);
+    this.quenchImmersionCache = immersion;
+    this.quenchImmersionCacheMs = nowMs;
+    return immersion;
   }
 
   // Read-only browser diagnostics: tests still operate real pointer/keyboard inputs.
   inspectScene() {
     this.scene.updateMatrixWorld(true);this.camera.updateMatrixWorld(true);
-    const project=(o:Object3D)=>{
-      const world=new Box3().setFromObject(o).getCenter(new Vector3());
+    const project=(o:Object3D,useBounds=false)=>{
+      const world=useBounds
+        ? new Box3().setFromObject(o).getCenter(new Vector3())
+        : new Vector3().setFromMatrixPosition(o.matrixWorld);
       const p=world.clone().project(this.camera);
       return {x:(p.x+1)*this.viewport.width/2,y:(1-p.y)*this.viewport.height/2,world:world.toArray()};
     };
-    const points:Record<string,ReturnType<typeof project>>={billet:project(this.billet),hammer:project(this.hammerView.item),temper:project(this.temperControl)};
+    const inspectedBillet = this.station === "anvil" ? this.hammerView.item : this.billet;
+    const points:Record<string,ReturnType<typeof project>>={billet:project(inspectedBillet,true),hammer:project(this.hammerView.item,true),temper:project(this.temperControl)};
     for(const [name,object] of this.stationMeshes)points["station:"+name]=project(object);
     this.materialsView?.candidates.forEach(m=>points["material:"+m.userData.materialId]=project(m));
     this.materialsView?.tableItems.forEach((m,i)=>points["table:"+i]=project(m));
@@ -706,7 +819,8 @@ export class ForgeBilletView {
     return {station:this.station,transitioning:this.isTransitioning,points,camera:{position:this.camera.position.toArray(),target:this.cameraTarget.toArray(),fov:this.camera.fov},
       renderer:{calls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures},
       immersion:this.quenchImmersion(),
-      grind:this.station==="grind"?{pose:this.grindPose(),contact:this.grindContactTarget(),billetBounds:new Box3().setFromObject(this.billet),restY:BILLET_ANCHORS.grind[1],frontX:BILLET_ANCHORS.grind[0],model:this.grinderModel.root.name,solids:this.snapshot?.geometry.solids?.length ?? 0,grid:this.snapshot?.geometry.grid,vertices:this.billet.geometry.getAttribute("position").count}:null};
+      grind:this.station==="grind"?{pose:this.grindPose(),contact:this.grindContactTarget(),frame:this.grindContactPatch()?.frame,metrics:this.snapshot?.grindMetrics,
+        billetBounds:new Box3().setFromObject(this.billet),restY:BILLET_ANCHORS.grind[1],frontX:BILLET_ANCHORS.grind[0],model:this.grinderModel.root.name,solids:this.snapshot?.geometry.solids?.length ?? 0,grid:this.snapshot?.geometry.grid,vertices:this.billet.geometry.getAttribute("position").count}:null};
   }
 
   pickTemperControl(viewportX: number, viewportY: number): boolean {
@@ -717,13 +831,15 @@ export class ForgeBilletView {
     if (!this.snapshot) {
       return null;
     }
-    const hit = this.pickObject(viewportX, viewportY, [this.billet, this.billetHitTarget], false);
+    const pickMesh = this.station === "anvil" ? this.hammerView.item : this.billet;
+    const hit = this.pickObject(viewportX, viewportY, [pickMesh, this.billetHitTarget], false);
     if (!hit) {
       return null;
     }
 
-    const localPoint = this.billet.worldToLocal(hit.point.clone());
-    const sectionIndex = sectionIndexAt(localPoint.x, this.snapshot.sections);
+    const localPoint = pickMesh.worldToLocal(hit.point.clone());
+    const sectionIndex = sectionIndexAt(localPoint.x, this.snapshot.sections)
+      ?? (this.station === "grind" ? Math.floor(this.snapshot.sections.length / 2) : null);
     if (sectionIndex === null) {
       return null;
     }
@@ -904,13 +1020,19 @@ export class ForgeBilletView {
   }
 
   private updateStationEmphasis(activeStation: ForgeStation): void {
+    const quenchFocus = activeStation === "quench-water" || activeStation === "quench-oil";
+    const materialsFocus = activeStation === "materials";
     this.billetRig.visible=!["materials","cut","furnace","temper","anvil","overview"].includes(activeStation);
     // Every station has one persistent body. Only active workpieces and tools change visibility.
+    // The selection table is part of the continuous room and must remain
+    // visible in the quench view; only obstructing tools are suppressed.
     if(this.materialsView)this.materialsView.group.visible=true;
     this.sawView.group.visible=true;this.sawView.setActive(activeStation==="cut");
     this.furnaceView.group.visible=true;this.furnaceView.body.visible=true;
     this.furnaceView.itemRig.visible=activeStation==="furnace"||activeStation==="temper";
     this.anvilModel.visible=true;
+    const power = this.stationRoots.get("power");
+    if (power) power.visible = true;
     this.hammerView.setActive(activeStation==="anvil");
     for(const mesh of this.materialMeshes.values())mesh.visible=false;
   }
@@ -923,16 +1045,40 @@ export class ForgeBilletView {
   }
 
   private cameraFrame(station: ForgeStation) {
+    // Inspection views are a shared camera mode. Every station gets the same
+    // orthogonal framing around its active workpiece; the station-specific
+    // camera remains the default operation view.
+    if (station !== "overview" && this.inspectionView !== "default") {
+      const anchor = BILLET_ANCHORS[station];
+      const target = new Vector3(anchor[0], anchor[1], anchor[2]);
+      if (station === "quench-water" || station === "quench-oil") target.y = QUENCH_SURFACE_Y + 4;
+      else if (station === "furnace") target.y = FURNACE.hearth;
+      else if (station === "grind") target.y += workshopUnits(38);
+      else target.y = WORKSHOP_SURFACE_Y + 5;
+      const distance = station === "quench-water" || station === "quench-oil"
+        ? Math.max(1, 2.25 / this.camera.aspect)
+        : station === "grind" ? Math.max(1, 0.46 / this.camera.aspect) : Math.max(1, 1.2 / this.camera.aspect);
+      return inspectionCameraFrame(target, this.inspectionView, distance);
+    }
     if(station==="anvil")return hammerCameraFrame(this.camera.aspect);
-    if (station === "furnace" || station === "temper") return furnaceCameraFrame(this.camera.aspect);
+    if (station === "furnace") return furnaceCameraFrame(this.camera.aspect, FURNACE_ORIGIN);
+    if (station === "temper") return furnaceCameraFrame(this.camera.aspect, FURNACE_ORIGIN);
     if(station==="cut")return sawCameraFrame(this.camera.aspect);
     if (station === "materials") return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
     if (station === "weld") return weldCameraFrame(this.camera.aspect);
     if (station === "grind") {
       const target = new Vector3(BILLET_ANCHORS.grind[0], BILLET_ANCHORS.grind[1] + workshopUnits(38), BILLET_ANCHORS.grind[2]);
       const distance = Math.max(1, 0.46 / this.camera.aspect);
-      if (this.inspectionView !== "default") return inspectionCameraFrame(target, this.inspectionView, distance);
       return {position:target.clone().add(new Vector3(-workshopUnits(350), workshopUnits(92), 0).multiplyScalar(distance)).toArray(),target:target.toArray()};
+    }
+    if (station === "quench-water" || station === "quench-oil") {
+      const anchor = STATION_ANCHORS[station];
+      const target = new Vector3(anchor[0], QUENCH_SURFACE_Y + 4, anchor[2]);
+      const distance = Math.max(1, 2.25 / this.camera.aspect);
+      // Approach from the opposite aisle so the reserved power hammer stays
+      // behind the camera instead of occluding the basin.
+      const offset = new Vector3(0, 82, 132).multiplyScalar(distance);
+      return { position: target.clone().add(offset).toArray(), target: target.toArray() };
     }
     if (station === "overview") {
       const frame=CAMERA_FRAMES.overview;
@@ -943,10 +1089,6 @@ export class ForgeBilletView {
     const anchor=STATION_ANCHORS[station];
     const target=new Vector3(anchor[0],WORKSHOP_SURFACE_Y+5,anchor[2]);
     const distance=Math.max(1,1.2/this.camera.aspect);
-    if (this.inspectionView !== "default") {
-      const billetAnchor = BILLET_ANCHORS[station];
-      return inspectionCameraFrame(new Vector3(billetAnchor[0], billetAnchor[1] + workshopUnits(24), billetAnchor[2]), this.inspectionView, distance);
-    }
     const offset=new Vector3(22,38,72);
     return {position:offset.multiplyScalar(distance).add(target).toArray(),target:target.toArray()};
   }

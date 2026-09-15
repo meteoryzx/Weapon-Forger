@@ -1,4 +1,4 @@
-import { BoxGeometry, BufferGeometry, DoubleSide, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, Vector3 } from "three";
+import { Box3, BoxGeometry, BufferGeometry, DoubleSide, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, Vector3 } from "three";
 import type { ForgeSnapshot } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
 import { FURNACE_BODY_SCALE_Y, FURNACE_HEARTH_Y, WORKSHOP_FLOOR_Y, WORKSHOP_UNITS_PER_MM, WORKSHOP_LAYOUT } from "../app/workshop-scale.ts";
@@ -6,9 +6,9 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 
 export const FURNACE_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.furnace!.origin);
 export const FURNACE = { floor:WORKSHOP_FLOOR_Y,hearth:FURNACE_HEARTH_Y,front:24,rear:-48,halfOpening:24,ceiling:72,scale:WORKSHOP_UNITS_PER_MM } as const;
-export function furnaceCameraFrame(aspect:number) {
+export function furnaceCameraFrame(aspect:number, origin = FURNACE_ORIGIN) {
   const target=new Vector3(0,48,30),offset=new Vector3(44,50,105).multiplyScalar(Math.max(1,1.2/aspect));
-  return {position:target.clone().add(offset).add(FURNACE_ORIGIN).toArray(),target:target.add(FURNACE_ORIGIN).toArray()};
+  return {position:target.clone().add(offset).add(origin).toArray(),target:target.add(origin).toArray()};
 }
 export class FurnaceStationView {
   readonly group=new Group();
@@ -19,11 +19,14 @@ export class FurnaceStationView {
   readonly target=new Mesh(new BoxGeometry(76,42,75),new MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false}));
   private readonly kit=new WorkshopModelKit();
   private desiredZ=0;
+  private outsideZ=0;
   private lastLocation:string|null=null;
   private lastId:string|null=null;
+  private lastGeometryFingerprint:number|null=null;
   private lastTick:number|null=null;
-  constructor(private readonly geometryFor:(snapshot:ForgeSnapshot)=>BufferGeometry) {
-    this.group.position.copy(FURNACE_ORIGIN);this.group.name="heating-station";this.body.name="open-forge";
+  private manualPositioned=false;
+  constructor(private readonly geometryFor:(snapshot:ForgeSnapshot)=>BufferGeometry, origin = FURNACE_ORIGIN, name = "heating-station") {
+    this.group.position.copy(origin);this.group.name=name;this.body.name="open-forge";
     this.body.scale.set(0.72,FURNACE_BODY_SCALE_Y,1.22);this.body.position.y=WORKSHOP_FLOOR_Y*(1-FURNACE_BODY_SCALE_Y);
     const k=this.kit;
     for(const x of [-400,400])for(const z of [-535,565]) {
@@ -58,15 +61,50 @@ export class FurnaceStationView {
     this.itemRig.add(this.item);this.group.add(this.body,this.target,this.itemRig);
   }
   update(snapshot:ForgeSnapshot) {
-    this.item.geometry.dispose();this.item.geometry=this.geometryFor(snapshot);this.item.geometry.computeBoundingBox();
+    const geometryFingerprint=fingerprintGeometry(snapshot.geometry);
+    if (this.lastGeometryFingerprint !== geometryFingerprint) {
+      this.item.geometry.dispose();this.item.geometry=this.geometryFor(snapshot);this.item.geometry.computeBoundingBox();
+      this.lastGeometryFingerprint=geometryFingerprint;
+    }
     const b=this.item.geometry.boundingBox!,c=b.getCenter(new Vector3()),length=(b.max.x-b.min.x)*FURNACE.scale;
     this.item.position.set(-c.x*FURNACE.scale,-b.min.y*FURNACE.scale,-c.z*FURNACE.scale);this.itemRig.position.y=FURNACE.hearth;
-    const z=snapshot.billetLocation==="furnace"?FURNACE.front-length*0.15:FURNACE.front+3+length/2;
-    this.desiredZ=z;
-    if(this.lastId!==snapshot.workpieceId||this.lastLocation===null)this.itemRig.position.z=z;
+    // The rig rotates the billet's long axis into Z. Center its transformed
+    // bounds inside the actual chamber span; the old front-relative offset
+    // deliberately left the leading end outside the mouth.
+    this.outsideZ=FURNACE.front+3+length/2;
+    if(this.lastId!==snapshot.workpieceId||this.lastLocation===null){
+      this.desiredZ=this.outsideZ;
+      this.itemRig.position.z=this.desiredZ;
+    }
+    if(snapshot.billetLocation==="furnace" && this.lastLocation!=="furnace" && !this.manualPositioned){
+      this.desiredZ=FURNACE.rear+length/2+4;
+      this.itemRig.position.z=this.desiredZ;
+    }
     this.lastId=snapshot.workpieceId;this.lastLocation=snapshot.billetLocation;
     const appearance=thermalSteelAppearance(snapshot.averageTemperatureC);
     this.item.material.emissive.copy(appearance.emissive);this.item.material.emissiveIntensity=appearance.emissiveIntensity;
+  }
+  setInsertionZ(z:number): void { this.manualPositioned=true;this.desiredZ=Math.max(-180,Math.min(120,z));this.itemRig.position.z=this.desiredZ; }
+  insertionZ(): number { return this.desiredZ; }
+  setManualOffset(offsetZ:number): void { this.setInsertionZ(this.outsideZ + Math.max(-70,Math.min(70,offsetZ))); }
+  manualOffset(): number { return this.desiredZ - this.outsideZ; }
+  clearManualOffset(): void { this.manualPositioned=false;this.desiredZ=this.outsideZ;this.itemRig.position.z=this.desiredZ; }
+  isFullyInside(): boolean {
+    this.group.updateMatrixWorld(true);
+    const bounds = new Box3().setFromObject(this.item);
+    const minZ = bounds.min.z - this.group.position.z;
+    const maxZ = bounds.max.z - this.group.position.z;
+    const minX = bounds.min.x - this.group.position.x;
+    const maxX = bounds.max.x - this.group.position.x;
+    return minZ > FURNACE.rear + 1 && maxZ < FURNACE.front - 1
+      && minX > -FURNACE.halfOpening + 1 && maxX < FURNACE.halfOpening - 1;
+  }
+  isFullyOutside(): boolean {
+    this.group.updateMatrixWorld(true);
+    const bounds = new Box3().setFromObject(this.item);
+    const minZ = bounds.min.z - this.group.position.z;
+    const maxZ = bounds.max.z - this.group.position.z;
+    return maxZ < FURNACE.rear - 1 || minZ > FURNACE.front + 1;
   }
   tick(now:number) {
     const dt=this.lastTick===null?0:Math.min(0.05,(now-this.lastTick)/1000);this.lastTick=now;
@@ -78,4 +116,19 @@ export class FurnaceStationView {
     this.group.traverse(o=>{if(o instanceof Mesh){o.geometry.dispose();(Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());}});
     this.kit.woodTexture.dispose();this.kit.mineralTexture.dispose();
   }
+}
+
+function fingerprintGeometry(geometry:ForgeSnapshot["geometry"]):number {
+  let hash=2166136261;
+  const add=(value:number) => {
+    hash^=Math.round(value*1000);
+    hash=Math.imul(hash,16777619);
+  };
+  add(geometry.nodes.length);add(geometry.grid.widthBlocks);add(geometry.grid.heightBlocks);
+  for(const node of geometry.nodes){add(node.axialPosition);add(node.lateralOffset);add(node.verticalOffset);}
+  for(const solid of geometry.solids??[]){
+    add(solid.vertices.length);add(solid.faces.length);
+    for(const face of solid.faces)add(face.length);
+  }
+  return hash>>>0;
 }

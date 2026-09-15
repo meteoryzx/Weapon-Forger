@@ -5,9 +5,11 @@ import {
   type ForgeSnapshot,
   type ForgeState,
   type CutOperation,
+  type GrindOperation,
   totalVolume,
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
+import type { AbrasiveUpdate } from "../app/grind-update.ts";
 import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
 import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint, type HammerPose, type SurfaceHammerOperation } from "../forge/index.ts";
 import { CUT_HOME, cutBounds, cutOperationFor, tablePoint, validCutPose, type CutPose } from "../app/cut-placement.ts";
@@ -330,18 +332,50 @@ cutConfirm.addEventListener("click",()=>{
   },1150);
 });
 let furnaceLastTick: number | null = null;
+let furnaceElapsedMs = 0;
+let furnaceHudLastTick = 0;
+let temperating = false;
+let temperElapsedMs = 0;
 const heatControls = document.querySelector<HTMLElement>("#heat-controls")!;
 const heatToggle = document.querySelector<HTMLButtonElement>("#heat-toggle")!;
 const furnaceModes=[...document.querySelectorAll<HTMLButtonElement>("[data-furnace-mode]")];
 const heatStatus = document.querySelector<HTMLElement>("#heat-status")!;
 let temperPreviewC: number | null = null;
 let temperDrag: { readonly startedAtMs: number; readonly startY: number } | null = null;
+let temperInsertionDrag: { readonly startX: number; readonly startY: number; readonly startOffset: number; moved: boolean } | null = null;
+let furnaceInsertionDrag: { readonly startX: number; readonly startOffset: number; moved: boolean } | null = null;
 let quenchContacted = false;
 let quenchStarted = false;
-let quenchLastTick: number | null = null;
+let quenchPhase: "ready" | "immersed" | "checked" = "ready";
+let quenchDrag: { readonly startX: number; readonly startY: number; readonly pose: ReturnType<ForgeBilletView["quenchPose"]>; readonly point: { x: number; z: number } | null; moved: boolean } | null = null;
 let grindDrag: { readonly point: { x: number; z: number }; readonly pose: ReturnType<ForgeBilletView["grindPose"]>; readonly translate: boolean } | null = null;
 let grindHolding = false;
 let grindLastTick: number | null = null;
+let grindWorker:Worker|null=null,grindPending=false,grindWorkerSource:ForgeState|null=null;
+function grindStep(operation:GrindOperation):void {
+  if(grindPending)return;
+  const source=application.getState();
+  grindPending=true;
+  grindWorker??=new Worker(new URL("../platform/grind.worker.ts",import.meta.url),{type:"module"});
+  const timer=setTimeout(()=>fail("研磨计算超时，请重试。"),15000);
+  const fail=(message:string)=>{
+    clearTimeout(timer);grindPending=false;grindWorker?.terminate();grindWorker=null;grindWorkerSource=null;
+    grindHolding=false;hudState.textContent=message;
+  };
+  grindWorker.onerror=()=>fail("研磨计算失败，请重试。");
+  grindWorker.onmessage=(event:MessageEvent<AbrasiveUpdate|{error:string}>)=>{
+    clearTimeout(timer);grindPending=false;
+    if("error" in event.data){fail(event.data.error);return;}
+    if(activeStation!=="grind"||application.getState()!==source){grindWorkerSource=null;return;}
+    if(application.commitGrinding(source,event.data)&&event.data.changed){
+      view?.prepareGrindMesh(event.data.positions,event.data.colors);
+      document.body.dataset.grindComputeMs=event.data.computeMs.toFixed(2);
+      updateView();
+    }
+    grindWorkerSource=application.getState();
+  };
+  grindWorker.postMessage({...(grindWorkerSource===source?{}:{state:source}),operation});
+}
 let gesture: {
   readonly kind: "grind" | "weld" | "quench";
   readonly target: HammerPickTarget;
@@ -358,8 +392,8 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
-  "quench-water": { title: "水槽 · 淬火", hint: "钢坯长轴沿 Y、宽轴沿 X；A/D 绕 X 轴旋转，滚轮绕 Y 轴旋转，W/S 沿 Z 轴上下。触液后开始冷却。" },
-  "quench-oil": { title: "油槽 · 淬火", hint: "钢坯长轴沿 Y、宽轴沿 X；A/D 绕 X 轴旋转，滚轮绕 Y 轴旋转，W/S 沿 Z 轴上下。触液后开始冷却。" },
+  "quench-water": { title: "水槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
+  "quench-oil": { title: "油槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
   temper: { title: "火炉 · 回火", hint: "拖动炉身温度控制，松开把当前温度写入工件。" },
   grind: { title: "砂带 · 研磨", hint: "拖动调整 XYZ；滚轮绕 X，A/D 绕 Y，Q/E 绕 Z；Shift＋拖动水平移动；W 贴近后按住持续研磨，S 远离停止。" },
 };
@@ -410,6 +444,31 @@ function acceptanceOperationCount(state: ForgeState): number {
   )).length;
 }
 
+function toggleQuench(): void {
+  if (!view || (activeStation !== "quench-water" && activeStation !== "quench-oil")) return;
+  if (quenchPhase === "ready") {
+    view.setQuenchPose({ vertical: -60, tilt: 0, yaw: 0 });
+    latestSnapshot = application.applyIntent({
+      kind: "quench",
+      medium: activeStation === "quench-water" ? "water" : "oil",
+      immersion: 1,
+      movement: 0,
+      dwellMs: 1_000,
+      exitTemperatureC: 20,
+    });
+    quenchPhase = "immersed";
+    quenchStarted = true;
+    quenchContacted = true;
+    view.refreshQuenchThermal(latestSnapshot);
+  } else if (quenchPhase === "immersed") {
+    view.setQuenchPose({ vertical: 0, tilt: 0, yaw: 0 });
+    quenchPhase = "checked";
+    quenchContacted = false;
+  }
+  updateView();
+  updateThermalHud();
+}
+
 function acceptanceState(state: ForgeState): readonly string[] {
   const sections = state.workpiece.sections;
   const joint = state.workpiece.joints[state.workpiece.joints.length - 1];
@@ -447,17 +506,22 @@ function acceptanceState(state: ForgeState): readonly string[] {
         `损伤 ${Math.round(average(sections.map((section) => section.damage)) * 100)}% · ${shared}`,
       ];
     case "quench":
-      const quenchPose = view?.quenchPose();
-      const quenchState = latestSnapshot.quenched ? "冷却中/已触液" : quenchPose && quenchPose.vertical <= -22 ? "已触液，冷却启动" : "悬空，尚未触液";
+      const quenchState = quenchPhase === "ready" ? "等待放入" : quenchPhase === "immersed" ? "工件已浸入" : "淬火检查";
+      const stress = average(sections.map((section) => section.stress));
+      const damage = average(sections.map((section) => section.damage));
+      const risk = latestSnapshot.hasCracks ? "已开裂" : stress >= 0.42 || damage >= 0.3 ? "高风险" : stress >= 0.2 || damage >= 0.12 ? "需回火" : "状态稳定";
       return [
         `样本介质 ${acceptanceMedium === "water" ? "水" : "油"} · 当前温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃`,
         `淬火记录 ${latestSnapshot.quenchMedium ?? "未淬火"} · 起始温度 ${latestSnapshot.quenchStartTemperatureC?.toFixed(0) ?? "未记录"}℃`,
-        `${quenchState} · 滚轮旋转 · W/S 上下 · A/D 翻转`,
+        `应力 ${stress.toFixed(3)} · 热损伤 ${Math.round(average(sections.map((section) => section.thermalDamage)) * 100)}% · 完整度 ${Math.round((1 - damage) * 100)}%`,
+        `检查结论：${risk} · 裂纹 ${latestSnapshot.hasCracks ? "已产生" : "未产生"}`,
+        `${quenchState} · 点击槽体或工件切换状态`,
         shared,
       ];
     case "temper":
       return [
-        `当前调节 ${displayedTemper ?? "未设定"}℃ · 已记录 ${latestSnapshot.temperTemperatureC ?? "未回火"}℃`,
+        `目标 ${displayedTemper ?? "未设定"}℃ · 保温 ${(temperElapsedMs / 1000).toFixed(1)}s · 已记录 ${latestSnapshot.temperTemperatureC ?? "未回火"}℃`,
+        `残余应力 ${average(sections.map((section) => section.stress)).toFixed(3)} · 裂纹 ${latestSnapshot.hasCracks ? "保留" : "无"}`,
         shared,
       ];
     case "grind":
@@ -473,6 +537,7 @@ function acceptanceState(state: ForgeState): readonly string[] {
 
 function renderState(): void {
   const state = application.getState();
+  document.body.dataset.cameraState = view?.isCameraTransitioning() ? "moving" : "settled";
   const operationCounts = state.operations.reduce<Record<string, number>>((counts, operation) => ({
     ...counts,
     [operation.kind]: (counts[operation.kind] ?? 0) + 1,
@@ -521,12 +586,14 @@ function renderState(): void {
   document.body.dataset.temperatureC = latestSnapshot.averageTemperatureC.toFixed(2);
   document.body.dataset.billetLocation = latestSnapshot.billetLocation;
   heatControls.hidden = activeStation !== "furnace" && activeStation !== "temper";
-  heatToggle.hidden=activeStation==="temper";
+  heatToggle.hidden=false;
   furnaceModes.forEach(button=>button.setAttribute("aria-pressed",String(button.dataset.furnaceMode===activeStation)));
-  heatToggle.textContent = latestSnapshot.billetLocation === "furnace" ? "取出查看" : "送入加热";
+  heatToggle.textContent = activeStation === "temper"
+    ? latestSnapshot.billetLocation === "furnace" ? "取出并完成回火" : "送入回火"
+    : latestSnapshot.billetLocation === "furnace" ? "取出查看" : "送入加热";
   const overheating = latestSnapshot.averageTemperatureC >= state.workpiece.material.overheatTemperatureC;
   heatStatus.textContent = `${latestSnapshot.billetLocation === "furnace" ? "炉内 · 整体加热中" : "炉外 · 查看火色 / 自然冷却"} · ${latestSnapshot.averageTemperatureC.toFixed(0)}℃${overheating ? " · 过热，继续加热会增加氧化与损伤" : ""}`;
-  if(activeStation==="temper")heatStatus.textContent=`回火温度 ${displayedTemper??"未设定"}℃ · ${latestSnapshot.workpieceId}`;
+  if(activeStation==="temper")heatStatus.textContent=`回火目标 ${displayedTemper??"未设定"}℃ · 保温 ${(temperElapsedMs / 1000).toFixed(1)}s · ${temperating ? "炉内回火中" : "炉外待命"}`;
   document.body.dataset.benchCount = String(latestSnapshot.benchCount);
   document.body.dataset.benchMaterialIds = state.bench.map((piece) => piece.material.id).join(",");
   document.body.dataset.benchWorkpieceIds = state.bench.map((piece) => piece.id).join(",");
@@ -539,6 +606,12 @@ function renderState(): void {
   document.body.dataset.totalMaterialVolume=String([state.workpiece,...state.bench].reduce((sum,workpiece)=>sum+totalVolume({...state,workpiece}),0));
   document.body.dataset.cutLossVolume=String((state.cutLosses??[]).reduce((sum,loss)=>sum+loss.volume,0));
   document.body.dataset.quenchMedium = latestSnapshot.quenchMedium ?? "none";
+  const thermalBlocks = latestSnapshot.sections.flatMap((section) => section.blocks);
+  const bottomTemperature = thermalBlocks.filter((block) => block.heightIndex === 0).map((block) => block.temperatureC);
+  const topTemperature = thermalBlocks.filter((block) => block.heightIndex === latestSnapshot.geometry.grid.heightBlocks - 1).map((block) => block.temperatureC);
+  const mean = (values: readonly number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : latestSnapshot.averageTemperatureC;
+  document.body.dataset.quenchTemperatureBottom = mean(bottomTemperature).toFixed(2);
+  document.body.dataset.quenchTemperatureTop = mean(topTemperature).toFixed(2);
   document.body.dataset.cameraState = view?.isCameraTransitioning() ? "moving" : "settled";
   if (materialSession && materialSelection.getAcquiredCount() === 0) {
     document.body.dataset.workpieceId = "none";
@@ -557,6 +630,10 @@ function updateView(hammerPreview = null): void {
   renderState();
 }
 
+function updateThermalHud(): void {
+  renderState();
+}
+
 function setStation(station: ForgeStation): void {
   if(cutting||hammerPending)return;
   const furnaceModeSwitch=(activeStation==="furnace"||activeStation==="temper")&&(station==="furnace"||station==="temper");
@@ -570,8 +647,7 @@ function setStation(station: ForgeStation): void {
     return;
   }
   if (activeStation === "furnace") {
-    tickFurnace(performance.now(), true);
-    if (latestSnapshot.billetLocation === "furnace") stopHeating();
+    if (application.getState().workpiece.thermal.location === "furnace") stopHeating();
   }
   furnaceLastTick = null;
   gesture = null;
@@ -579,6 +655,13 @@ function setStation(station: ForgeStation): void {
   temperPreviewC = null;
   materialSelection.cancel();
   activeStation = station;
+  if (station === "quench-water" || station === "quench-oil") {
+    quenchPhase = "ready";
+    quenchContacted = false;
+    quenchStarted = false;
+  }
+  grindHolding=false;grindDrag=null;grindLastTick=null;
+  if(station==="grind")application.prepareGrinding();
   cancelCutPreview();cutDrag=null;
   document.body.classList.toggle("cut-view",station==="cut");
   document.body.classList.toggle("heat-view",station==="furnace"||station==="temper");
@@ -671,30 +754,85 @@ nextRackPage.addEventListener("click", () => { rackPage += 1; updateView(); });
 workpieceTravel.addEventListener("click", () => setStation(workpieceStation.value as ForgeStation));
 
 function tickFurnace(now: number, flush = false): void {
-  if (activeStation !== "furnace" || document.hidden || !document.hasFocus()) { furnaceLastTick = null; return; }
+  if ((activeStation !== "furnace" && activeStation !== "temper") || document.hidden || !document.hasFocus()) { furnaceLastTick = null; return; }
   if (furnaceLastTick === null) { furnaceLastTick = now; return; }
   const elapsedMs = now - furnaceLastTick;
-  if (elapsedMs <= 0 || (!flush && elapsedMs < 250)) return;
+  if (elapsedMs <= 0) return;
+  furnaceElapsedMs = Math.min(furnaceElapsedMs + elapsedMs, FORGE_RULES.maximumThermalIntentMs);
+  if (activeStation === "temper" && temperating) temperElapsedMs = Math.min(temperElapsedMs + elapsedMs, 300_000);
   furnaceLastTick = now;
-  application.applyIntent({ kind: "move-billet", destination: latestSnapshot.billetLocation, elapsedMs: Math.min(elapsedMs, FORGE_RULES.maximumThermalIntentMs) });
-  updateView();
+  if (flush) {
+    if (furnaceElapsedMs > 0) {
+      // The displayed preview already contains this interval. Commit it
+      // instead of applying the same heating duration a second time.
+      application.getSnapshot(furnaceElapsedMs);
+      application.commitPreview();
+    }
+    latestSnapshot = application.getSnapshot();
+    return;
+  }
+  // Keep the physical simulation on its fixed substeps, but expose the
+  // intermediate state frequently enough that heating reads as continuous.
+  if (now - furnaceHudLastTick < 100) return;
+  furnaceHudLastTick = now;
+  latestSnapshot = application.getSnapshot(furnaceElapsedMs);
+  updateThermalHud();
 }
 
 function startHeating(): void {
-  tickFurnace(performance.now(), true);
+  if (application.getState().workpiece.thermal.location === "furnace") return;
+  furnaceElapsedMs = 0;
+  application.setFurnaceTemperature(FORGE_RULES.furnaceGasTemperatureC);
+  furnaceLastTick = null;
+  furnaceHudLastTick = performance.now();
   application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
   updateView();
 }
 
+function startTempering(): void {
+  if (application.getState().workpiece.thermal.location === "furnace") return;
+  temperating = true;
+  temperElapsedMs = 0;
+  furnaceElapsedMs = 0;
+  application.setFurnaceTemperature(temperPreviewC ?? 220);
+  furnaceLastTick = null;
+  furnaceHudLastTick = performance.now();
+  application.applyIntent({ kind: "move-billet", destination: "furnace", elapsedMs: 0 });
+  updateView();
+}
+
+function stopTempering(): void {
+  if (application.getState().workpiece.thermal.location !== "furnace") return;
+  tickFurnace(performance.now(), true);
+  application.applyIntent({
+    kind: "temper",
+    temperatureC: Math.round(temperPreviewC ?? latestSnapshot.temperTemperatureC ?? 220),
+    durationMs: Math.round(temperElapsedMs),
+  });
+  application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
+  temperating = false;
+  temperElapsedMs = 0;
+  furnaceElapsedMs = 0;
+  furnaceLastTick = null;
+  updateView();
+}
+
 function stopHeating(): void {
+  if (application.getState().workpiece.thermal.location !== "furnace") return;
   tickFurnace(performance.now(), true);
   application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
+  furnaceElapsedMs = 0;
+  furnaceHudLastTick = 0;
   updateView();
 }
 
 function toggleHeating(): void {
+  if (activeStation === "temper") {
+    if (application.getState().workpiece.thermal.location === "furnace") stopTempering();
+    return;
+  }
   if (activeStation !== "furnace") return;
-  if (latestSnapshot.billetLocation === "furnace") stopHeating(); else startHeating();
+  if (application.getState().workpiece.thermal.location === "furnace") stopHeating();
 }
 heatToggle.addEventListener("click", toggleHeating);
 furnaceModes.forEach(button=>button.addEventListener("click",()=>setStation(button.dataset.furnaceMode as ForgeStation)));
@@ -727,15 +865,16 @@ function finishGesture(endX: number, endY: number): void {
 function updateTemperPreview(clientY: number): void {
   if (temperDrag === null) return;
   temperPreviewC = Math.min(450, Math.max(80, 220 + (temperDrag.startY - clientY) * 2));
+  application.setFurnaceTemperature(temperPreviewC);
   view?.setTemperPreview(temperPreviewC);
+  if (temperating) latestSnapshot = application.getSnapshot(furnaceElapsedMs);
   renderState();
 }
 
 function finishTemper(): void {
   if (temperDrag === null || temperPreviewC === null) return;
-  application.applyIntent({ kind: "temper", temperatureC: Math.round(temperPreviewC) });
   temperDrag = null;
-  temperPreviewC = null;
+  if (activeStation !== "temper") temperPreviewC = null;
   updateView();
 }
 
@@ -752,6 +891,7 @@ if (["127.0.0.1","localhost","::1"].includes(window.location.hostname)) {
   Object.defineProperty(window,"__THREE_GAME_DIAGNOSTICS__",{get:()=>view?.inspectScene()});
 }
 activeStation = acceptanceStation ?? "overview";
+if(activeStation==="grind")application.prepareGrinding();
 document.body.classList.toggle("heat-view", activeStation === "furnace" || activeStation === "temper");
 document.body.classList.toggle("hammer-view", activeStation === "anvil");
 document.body.classList.toggle("material-session",activeStation==="materials");
@@ -762,6 +902,7 @@ if(activeStation==="cut")scheduleCutPreview();
 canvas.addEventListener("pointerdown", (event) => {
   if (!view) return;
   if (view.isCameraTransitioning()) return;
+  if (view.isInspectionActive()) return;
   canvas.setPointerCapture(event.pointerId);
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
@@ -807,7 +948,7 @@ canvas.addEventListener("pointerdown", (event) => {
   }
 
   if (activeStation === "furnace") {
-    if (view.pickFurnace(x, y)) toggleHeating();
+    if (view.pickFurnace(x, y)) furnaceInsertionDrag = { startX: x, startOffset: view.furnaceInsertionOffset(), moved: false };
     return;
   }
   if(activeStation==="anvil"){
@@ -847,9 +988,11 @@ canvas.addEventListener("pointerdown", (event) => {
     return;
   }
   if ((activeStation === "quench-water" || activeStation === "quench-oil") && target) {
-    quenchContacted = false;
-    quenchStarted = false;
-    quenchLastTick = null;
+    toggleQuench();
+    return;
+  }
+  if ((activeStation === "quench-water" || activeStation === "quench-oil") && view.pickQuenchBasin(x, y, activeStation)) {
+    toggleQuench();
     return;
   }
   if (activeStation === "temper" && view.pickTemperControl(x, y)) {
@@ -857,6 +1000,10 @@ canvas.addEventListener("pointerdown", (event) => {
     temperPreviewC = 220;
     view.setTemperPreview(temperPreviewC);
     renderState();
+    return;
+  }
+  if (activeStation === "temper" && view.pickFurnace(x, y)) {
+    temperInsertionDrag = { startX: x, startY: y, startOffset: view.temperInsertionOffset(), moved: false };
   }
 });
 
@@ -885,9 +1032,37 @@ canvas.addEventListener("pointermove", (event) => {
       if (grindDrag.translate) {
         view.setGrindPose({ z: grindDrag.pose.z + point.z - grindDrag.point.z });
       } else {
-        view.setGrindPose({ x: grindDrag.pose.x + point.x - grindDrag.point.x });
+        view.setGrindPose({ x: grindDrag.pose.x + point.x - grindDrag.point.x, z:grindDrag.pose.z+point.z-grindDrag.point.z });
       }
     }
+    return;
+  }
+  if (quenchDrag && view) {
+    const bounds = canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+    const dx = x - quenchDrag.startX, dy = y - quenchDrag.startY;
+    if (Math.hypot(dx, dy) > 4) quenchDrag.moved = true;
+    if (quenchDrag.moved) {
+      const point = view.quenchTablePoint(x, y);
+      if (point) view.updateQuenchPosition(point, activeStation as "quench-water" | "quench-oil");
+      view.setQuenchPose({ vertical: quenchDrag.pose.vertical - dy * 0.45, yaw: quenchDrag.pose.yaw + dx * 0.006 });
+    }
+    return;
+  }
+  if (temperInsertionDrag && view) {
+    const bounds = canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
+    const dx = x - temperInsertionDrag.startX, dy = y - temperInsertionDrag.startY;
+    if (Math.hypot(dx, dy) > 4) temperInsertionDrag.moved = true;
+    if (temperInsertionDrag.moved) view.setTemperInsertionOffset(temperInsertionDrag.startOffset - dx * 0.35);
+    return;
+  }
+  if (furnaceInsertionDrag && view) {
+    const bounds = canvas.getBoundingClientRect();
+    const x = event.clientX - bounds.left;
+    const dx = x - furnaceInsertionDrag.startX;
+    if (Math.abs(dx) > 4) furnaceInsertionDrag.moved = true;
+    if (furnaceInsertionDrag.moved) view.setFurnaceInsertionOffset(furnaceInsertionDrag.startOffset - dx * 0.35);
     return;
   }
   if (temperDrag === null) return;
@@ -902,6 +1077,24 @@ canvas.addEventListener("pointerup", (event) => {
   grindDrag=null;
   grindHolding = false;
   grindLastTick = null;
+  if (quenchDrag) {
+    const shouldToggle = !quenchDrag.moved;
+    quenchDrag = null;
+    if (shouldToggle) toggleQuench();
+  }
+  if (temperInsertionDrag) {
+    const moved = temperInsertionDrag.moved;
+    temperInsertionDrag = null;
+    if (moved && view?.furnaceInsertionComplete() && application.getState().workpiece.thermal.location !== "furnace") startTempering();
+    else if (moved && view?.furnaceInsertionOutside() && application.getState().workpiece.thermal.location === "furnace") stopTempering();
+  }
+  if (furnaceInsertionDrag) {
+    const moved = furnaceInsertionDrag.moved;
+    furnaceInsertionDrag = null;
+    if (moved && view?.furnaceInsertionComplete() && application.getState().workpiece.thermal.location !== "furnace") startHeating();
+    else if (moved && view?.furnaceInsertionOutside() && application.getState().workpiece.thermal.location === "furnace") stopHeating();
+    else if (moved) heatStatus.textContent = "工件尚未完全进入炉腔，请继续拖动至炉内。";
+  }
   if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
@@ -917,6 +1110,9 @@ canvas.addEventListener("pointercancel", () => {
   grindHolding = false;
   grindLastTick = null;
   temperDrag = null;
+  temperInsertionDrag = null;
+  furnaceInsertionDrag = null;
+  quenchDrag = null;
   temperPreviewC = null;
   gesture = null;
   updateView();
@@ -924,6 +1120,7 @@ canvas.addEventListener("pointercancel", () => {
 
 window.addEventListener("keydown", (event) => {
   if (event.key !== "Escape" && (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement)) return;
+  if (view?.isInspectionActive()) return;
   if(activeStation==="cut" && ["q","e","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Enter"].includes(event.key.length===1?event.key.toLowerCase():event.key)){
     event.preventDefault();if(cutting)return;
     const key=event.key.toLowerCase();
@@ -950,6 +1147,15 @@ window.addEventListener("keydown", (event) => {
     });
     return;
   }
+  if ((activeStation === "quench-water" || activeStation === "quench-oil")
+    && (event.key.toLowerCase() === "s" || event.key.toLowerCase() === "w")) {
+    event.preventDefault();
+    // Preserve the compact keyboard path used by the acceptance slice while
+    // keeping the basin/workpiece click path as the primary interaction.
+    if (event.key.toLowerCase() === "s" && quenchPhase === "ready") toggleQuench();
+    if (event.key.toLowerCase() === "w" && quenchPhase === "immersed") toggleQuench();
+    return;
+  }
   if (event.key === "Escape" && activeStation === "materials") {
     if (materialSelection.getCandidate()) {
       materialSelection.cancel();
@@ -966,27 +1172,6 @@ window.addEventListener("keydown", (event) => {
     if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer") return;
     event.preventDefault();
     setStation("overview");
-    return;
-  }
-  if (activeStation === "quench-water" || activeStation === "quench-oil") {
-    const pose = view?.quenchPose();
-    if (!pose) return;
-    const step = Math.PI / 24;
-    switch (event.key.toLowerCase()) {
-      case "w": view?.setQuenchPose({ vertical: pose.vertical + 8 }); break;
-      case "s": view?.setQuenchPose({ vertical: pose.vertical - 8 }); break;
-      case "a": view?.setQuenchPose({ yaw: pose.yaw - step }); break;
-      case "d": view?.setQuenchPose({ yaw: pose.yaw + step }); break;
-      default: return;
-    }
-    const immersion=view?.quenchImmersion()??0;
-    if (immersion > 0 && !quenchStarted) {
-      quenchStarted = true;
-      quenchContacted = true;
-      application.applyIntent({ kind: "quench", medium: activeStation === "quench-water" ? "water" : "oil", immersion, movement: 0, dwellMs: 0, exitTemperatureC: latestSnapshot.averageTemperatureC });
-      updateView();
-    }
-    event.preventDefault();
     return;
   }
   if (activeStation !== "anvil") return;
@@ -1006,16 +1191,21 @@ window.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("wheel",event=>{
+  if (activeStation === "temper") {
+    event.preventDefault();
+    const current = temperPreviewC ?? latestSnapshot.temperTemperatureC ?? 220;
+    const next = Math.min(450, Math.max(80, current + (event.deltaY < 0 ? 5 : -5)));
+    temperPreviewC = next;
+    application.setFurnaceTemperature(next);
+    view?.setTemperPreview(next);
+    if (temperating) latestSnapshot = application.getSnapshot(furnaceElapsedMs);
+    renderState();
+    return;
+  }
   if (activeStation === "grind") {
     event.preventDefault();
     const pose = view?.grindPose();
     if (pose) view?.setGrindPose({ angle: pose.angle + (event.deltaY < 0 ? 1 : -1) * Math.PI / 72 });
-    return;
-  }
-  if (activeStation === "quench-water" || activeStation === "quench-oil") {
-    event.preventDefault();
-    const pose = view?.quenchPose();
-    if (pose) view?.setQuenchPose({ tilt: pose.tilt + (event.deltaY < 0 ? 1 : -1) * Math.PI / 36 });
     return;
   }
   if(activeStation!=="anvil")return;event.preventDefault();
@@ -1025,15 +1215,6 @@ canvas.addEventListener("wheel",event=>{
 
 const renderFrame = (nowMs: number): void => {
   tickFurnace(nowMs);
-  if ((activeStation === "quench-water" || activeStation === "quench-oil") && quenchContacted && document.hasFocus()) {
-    if (quenchLastTick === null) quenchLastTick = nowMs;
-    const elapsedMs = nowMs - quenchLastTick;
-    if (elapsedMs >= 250) {
-      quenchLastTick = nowMs;
-      application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: Math.min(elapsedMs, 1000) });
-      updateView();
-    }
-  } else quenchLastTick = null;
   if (activeStation === "grind" && grindHolding && !grindDrag?.translate && view && document.hasFocus()) {
     if (grindLastTick === null) grindLastTick = nowMs;
     const elapsedMs = Math.min(160, Math.max(0, nowMs - grindLastTick));
@@ -1042,8 +1223,7 @@ const renderFrame = (nowMs: number): void => {
       const contact = view.grindContactTarget();
       const patch = view.grindContactPatch();
       if (contact && patch) {
-        application.applyIntent({ kind: "grind", sectionIndex: contact.sectionIndex, amount: Math.min(0.2, elapsedMs / 3500), angle: view.grindPose().angle, contact: patch });
-        updateView();
+        grindStep({ kind: "grind", sectionIndex: contact.sectionIndex, amount: Math.min(0.2, elapsedMs / 3500), angle: view.grindPose().angle, contact: patch });
       }
     }
   } else if (!grindHolding) grindLastTick = null;
@@ -1058,5 +1238,6 @@ window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {
   hammerWorker?.terminate();
   cutWorker?.terminate();
+  grindWorker?.terminate();
   view?.dispose();
 });

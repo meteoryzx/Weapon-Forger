@@ -6,9 +6,11 @@ import {
   FORGE_STATE_VERSION,
 } from "./forge-rules.ts";
 import { integrateMechanicalResponse } from "./forge-physics.ts";
+import { applyAbrasiveContact, abrasiveMetrics } from "./abrasive-contact.ts";
 import { cellCorners, cellStretches, deformSurfaceHammer } from "./hammer-surface.ts";
 import {
   cloneWorkpieceGeometry,
+  snapshotWorkpieceGeometry,
   createStructuredWorkpieceGeometry,
 } from "./workpiece-geometry.ts";
 import { grindSolids, grindSolidsContact, partitionSolids, solidBounds, solidEnvelope, solidVolumesByBlock, solidSurfaceArea, solidVolume, solidPoint, workpieceGrindingSolids, workpieceSolids } from "./solid-geometry.ts";
@@ -231,9 +233,9 @@ export function replayForgeState(initialState: ForgeState, operations: readonly 
   return operations.reduce(applyForgeOperation, cloneStateWithoutOperations(initialState));
 }
 
-export function previewThermalState(state: ForgeState, elapsedMs: number): ForgeState {
+export function previewThermalState(state: ForgeState, elapsedMs: number, furnaceTemperatureC: number = FORGE_RULES.furnaceGasTemperatureC): ForgeState {
   assertThermalDuration(elapsedMs);
-  const evolved = evolveThermalState(state, state.workpiece.thermal.location, elapsedMs);
+  const evolved = evolveThermalState(state, state.workpiece.thermal.location, elapsedMs, furnaceTemperatureC);
   return { ...evolved, workpiece: refreshSolidWorkpiece(evolved.workpiece) };
 }
 
@@ -268,38 +270,10 @@ export function createForgeSnapshot(state: ForgeState): ForgeSnapshot {
     heatTreatmentCount: state.workpiece.heatTreatments.length,
     materialRegionCount: workpiece.materialRegionCount,
     removedVolume: state.workpiece.sections.reduce((sum, section) => sum + section.removedVolume, 0),
-    grindMetrics: deriveGrindMetrics(state.workpiece, state.operations),
+    grindMetrics: abrasiveMetrics(state.workpiece),
     benchCount: state.bench.length,
     bench: state.bench.map(snapshotWorkpiece),
     sections: workpiece.sections,
-  };
-}
-
-function deriveGrindMetrics(workpiece: WorkpieceState, operations: readonly ForgeOperation[]) {
-  const solids = workpiece.geometry.solids ?? [];
-  if (!solids.length) return { bladeAngleDeg: 0, edgeThicknessMm: Math.min(...workpiece.sections.map(section => section.thickness)), roughness: 0, symmetry: 1 };
-  const bounds = solidBounds(solids, workpiece.geometry);
-  const volume = solids.reduce((sum, solid) => sum + solidVolume(solid, workpiece.geometry), 0);
-  const boxArea = 2 * ((bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY)
-    + (bounds.maxX - bounds.minX) * (bounds.maxZ - bounds.minZ)
-    + (bounds.maxY - bounds.minY) * (bounds.maxZ - bounds.minZ));
-  const surface = solidSurfaceArea(workpiece.geometry);
-  const midpoint = (bounds.minZ + bounds.maxZ) / 2;
-  let negative = 0, positive = 0;
-  for (const solid of solids) {
-    const volumeOfSolid = solidVolume(solid, workpiece.geometry);
-    const center = solid.vertices.map(vertex => solidPoint(vertex, workpiece.geometry))
-      .reduce((sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y, z: sum.z + point.z }), { x: 0, y: 0, z: 0 });
-    const count = solid.vertices.length || 1;
-    if (center.z / count < midpoint) negative += volumeOfSolid; else positive += volumeOfSolid;
-  }
-  const contact = [...operations].reverse().find((operation): operation is GrindOperation => operation.kind === "grind" && operation.contact !== undefined);
-  const angle = contact?.contact?.angle ?? 0;
-  return {
-    bladeAngleDeg: Math.min(90, Math.abs(Math.atan(Math.tan(angle))) * 2 * 180 / Math.PI),
-    edgeThicknessMm: volume / Math.max((bounds.maxX - bounds.minX) * Math.max(bounds.maxZ - bounds.minZ, 1e-9), 1e-9),
-    roughness: Math.max(0, Math.min(1, (surface - boxArea) / Math.max(boxArea, 1e-9))),
-    symmetry: 1 - Math.min(1, Math.abs(negative - positive) / Math.max(negative + positive, 1e-9)),
   };
 }
 
@@ -308,7 +282,7 @@ function snapshotWorkpiece(workpiece: WorkpieceState): ForgeSnapshotWorkpiece {
     workpieceId: workpiece.id,
     materialId: workpiece.material.id,
     averageTemperatureC: averageWorkpieceTemperatureOf(workpiece),
-    geometry: cloneWorkpieceGeometry(workpiece.geometry),
+    geometry: snapshotWorkpieceGeometry(workpiece.geometry),
     sections: workpiece.sections.map(sectionSnapshot),
     layerCount: workpiece.layerCount,
     carbon: workpiece.material.carbon,
@@ -383,16 +357,66 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
   const movement = clamp(operation.movement ?? 0.5, 0, 1);
   const dwellMs = Math.max(0, Math.min(30_000, operation.dwellMs ?? 1_000));
   const mediumRate = operation.medium === "water" ? 1.2 : 0.72;
-  const coolingExponent = mediumRate * (1.6 * immersion + 0.7 * movement + dwellMs / 900);
-  const endTemperatureC = hasInteractionFacts
-    ? roundThermal(FORGE_RULES.ambientTemperatureC + (startTemperatureC - FORGE_RULES.ambientTemperatureC) * Math.exp(-coolingExponent))
-    : FORGE_RULES.ambientTemperatureC;
+  // Movement and dwell describe contact with the medium. They must not cool
+  // cells that are above the liquid surface.
+  const coolingExponent = mediumRate * (0.9 * movement + dwellMs / 900);
+  const heightBlocks = state.workpiece.geometry.grid.heightBlocks;
+  let endTemperatureC = startTemperatureC;
   const sections = state.workpiece.sections.map((section, sectionIndex) => {
-    const blocks = section.blocks.map((block) => ({
-      ...block,
-      temperatureC: endTemperatureC,
-      plasticity: calculatePlasticity(endTemperatureC, state.workpiece.material),
-    }));
+    const blocks = section.blocks.map((block) => {
+      const cellImmersion = hasInteractionFacts ? clamp(immersion * heightBlocks - block.heightIndex, 0, 1) : 1;
+      const exponent = cellImmersion > 0
+        ? mediumRate * (1.6 * cellImmersion + coolingExponent * cellImmersion)
+        : 0;
+      const temperatureC = hasInteractionFacts
+        ? roundThermal(FORGE_RULES.ambientTemperatureC
+          + (block.temperatureC - FORGE_RULES.ambientTemperatureC) * Math.exp(-exponent))
+        : FORGE_RULES.ambientTemperatureC;
+      const coolingDrop = Math.max(0, block.temperatureC - temperatureC);
+      const startRange = Math.max(1, startTemperatureC - FORGE_RULES.ambientTemperatureC);
+      const coolingSeverity = clamp(coolingDrop / startRange, 0, 1) * cellImmersion;
+      const highTemperatureFactor = clamp(
+        (startTemperatureC - FORGE_RULES.quenchMinimumStartC)
+          / Math.max(1, FORGE_RULES.quenchIdealStartC - FORGE_RULES.quenchMinimumStartC),
+        0,
+        1.35,
+      );
+      const mediumShock = operation.medium === "water" ? 1 : 0.52;
+      const quenchShock = coolingSeverity * mediumShock * highTemperatureFactor;
+      const thermalDamage = clamp(
+        block.thermalDamage + quenchShock * (0.08 + state.workpiece.material.carbon * 0.28),
+        0,
+        1,
+      );
+      const stress = clamp(
+        block.stress + quenchShock * (0.16 + state.workpiece.material.carbon * 0.34),
+        0,
+        1,
+      );
+      const damage = clamp(
+        block.damage + quenchShock * state.workpiece.material.carbon * (operation.medium === "water" ? 0.22 : 0.07),
+        0,
+        1,
+      );
+      const cracked = block.cracked || (
+        operation.medium === "water"
+        && state.workpiece.material.carbon >= 0.5
+        && highTemperatureFactor >= 0.8
+        && coolingSeverity >= 0.8
+        && (stress >= 0.42 || thermalDamage >= 0.14)
+      );
+      return {
+        ...block,
+        temperatureC,
+        plasticity: calculatePlasticity(temperatureC, state.workpiece.material),
+        thermalDamage,
+        stress,
+        damage,
+        integrity: Math.max(0, 1 - damage),
+        cracked,
+      };
+    });
+    endTemperatureC = blocks.reduce((sum, block) => sum + block.temperatureC, 0) / Math.max(1, blocks.length);
     return summarizeSection(
       { ...section, blocks },
       sectionIndex,
@@ -423,6 +447,7 @@ function applyQuench(state: ForgeState, operation: QuenchOperation): ForgeState 
 // strokes on one spot leaves an uneven edge while spreading them stays even.
 function applyGrind(state: ForgeState, operation: GrindOperation): ForgeState {
   assertGrindOperation(state, operation);
+  if (operation.contact?.frame) return applyAbrasiveContact(state, operation);
   if (operation.contact) {
     return applyPlasticGrind(state, operation);
   }
@@ -681,18 +706,37 @@ function weldIntegrity(temperatureC: number, material: ForgeMaterial): number {
   return calculatePlasticity(temperatureC, material);
 }
 
-// Tempering is retained as a process event. A later material model may consume
-// thermal-history detail without changing the public operation history shape.
+// Tempering releases part of the residual stress accumulated by quenching and
+// cold work. It never repairs existing damage or cracks; the reduced model
+// keeps those facts intact while making temperature and soak time matter.
 function applyTemper(state: ForgeState, operation: TemperOperation): ForgeState {
   assertTemperOperation(operation);
+  const durationMs = Math.max(0, Math.min(300_000, operation.durationMs ?? 0));
+  const temperatureFactor = clamp((operation.temperatureC - 80) / 370, 0, 1);
+  const timeFactor = 1 - Math.exp(-durationMs / 60_000 * 0.35);
+  const recovery = clamp(
+    temperatureFactor * timeFactor * state.workpiece.material.stressRecoveryAtPeak,
+    0,
+    0.82,
+  );
+  const sections = state.workpiece.sections.map((section, sectionIndex) => summarizeSection({
+    ...section,
+    blocks: section.blocks.map((block) => ({
+      ...block,
+      stress: block.stress * (1 - recovery),
+      elasticStrain: block.elasticStrain * (1 - recovery),
+    })),
+  }, sectionIndex, state.workpiece.geometry.nodes, state.workpiece.geometry.grid));
   return appendOperation({
     ...state,
     workpiece: {
       ...state.workpiece,
+      sections,
       heatTreatments: [...state.workpiece.heatTreatments, {
         kind: "temper",
         operationIndex: state.operations.length,
         temperatureC: operation.temperatureC,
+        ...(operation.durationMs !== undefined ? { durationMs } : {}),
       }],
     },
   }, operation);
@@ -919,6 +963,7 @@ function evolveThermalState(
   state: ForgeState,
   environment: "inspection" | "furnace",
   elapsedMs: number,
+  furnaceTemperatureC: number = FORGE_RULES.furnaceGasTemperatureC,
 ): ForgeState {
   if (elapsedMs === 0) return state;
   const physicalSeconds = elapsedMs / 1000 * FORGE_RULES.thermalTimeScale;
@@ -940,7 +985,7 @@ function evolveThermalState(
     const oxidationBlend = clamp(oxidationDose / FORGE_RULES.oxidationEmissivityDose, 0, 1);
     const emissivity = lerp(state.workpiece.material.cleanEmissivity, state.workpiece.material.oxidizedEmissivity, oxidationBlend);
     const environmentGasC = environment === "furnace"
-      ? FORGE_RULES.furnaceGasTemperatureC
+      ? furnaceTemperatureC
       : FORGE_RULES.ambientTemperatureC;
     const environmentWallC = environment === "furnace"
       ? FORGE_RULES.furnaceWallTemperatureC
@@ -2226,6 +2271,9 @@ function assertCutOperation(state: ForgeState, operation: CutOperation): void {
 function assertTemperOperation(operation: TemperOperation): void {
   if (!Number.isFinite(operation.temperatureC) || operation.temperatureC < FORGE_RULES.ambientTemperatureC || operation.temperatureC > 500) {
     throw new Error("Temper temperature must be between ambient and 500C.");
+  }
+  if (operation.durationMs !== undefined && (!Number.isFinite(operation.durationMs) || operation.durationMs < 0 || operation.durationMs > 300_000)) {
+    throw new Error("Temper duration must be between 0 and 300000ms.");
   }
 }
 

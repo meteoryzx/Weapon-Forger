@@ -8,8 +8,8 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 
 export const ANVIL = { surface:WORKSHOP_SURFACE_Y,scale:WORKSHOP_UNITS_PER_MM } as const;
 export function hammerCameraFrame(aspect:number) {
-  const distance=70*Math.max(1,1.2/aspect);
-  return {position:[0,ANVIL.surface+distance*0.6,distance] as const,target:[0,ANVIL.surface+1,0] as const};
+  const distance=52*Math.max(1,1.05/aspect);
+  return {position:[0,ANVIL.surface+distance*0.58,distance] as const,target:[0,ANVIL.surface+2,0] as const};
 }
 export class HammerStationView {
   readonly group=new Group();

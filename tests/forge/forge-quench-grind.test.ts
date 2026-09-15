@@ -7,6 +7,7 @@ import {
   createForgeState,
   replayForgeState,
   type ForgeOperation,
+  HIGH_CARBON_STEEL,
 } from "../../src/forge/index.ts";
 
 describe("quench and grind", () => {
@@ -36,6 +37,43 @@ describe("quench and grind", () => {
     expect(createForgeSnapshot(quenched).averageTemperatureC).toBeLessThan(40);
     expect(createForgeSnapshot(quenched).quenched).toBe(true);
     expect(createForgeSnapshot(quenched).quenchMedium).toBe("water");
+  });
+
+  it("cools only immersed blocks and does not cool on zero-dwell contact", () => {
+    let state = applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "heat", temperatureC: 900 });
+    const untouched = state.workpiece.sections.flatMap((section) => section.blocks)
+      .filter((block) => block.heightIndex > 0)
+      .map((block) => block.temperatureC);
+    state = applyForgeOperation(state, { kind: "quench", medium: "water", immersion: 0.25, movement: 0, dwellMs: 0 });
+    const blocks = state.workpiece.sections.flatMap((section) => section.blocks);
+    expect(blocks.filter((block) => block.heightIndex === 0).every((block) => block.temperatureC < 900)).toBe(true);
+    expect(blocks.filter((block) => block.heightIndex > 0).map((block) => block.temperatureC)).toEqual(untouched);
+  });
+
+  it("turns severe high-carbon water quench into a real crack state", () => {
+    let state = applyForgeOperation(
+      createForgeState({ material: HIGH_CARBON_STEEL, sectionCount: 8 }),
+      { kind: "heat", temperatureC: 900 },
+    );
+    state = applyForgeOperation(state, {
+      kind: "quench", medium: "water", immersion: 1, movement: 0.8, dwellMs: 1_000,
+    });
+    const blocks = state.workpiece.sections.flatMap((section) => section.blocks);
+    expect(blocks.some((block) => block.cracked)).toBe(true);
+    expect(blocks.some((block) => block.thermalDamage > 0)).toBe(true);
+    expect(blocks.some((block) => block.stress > 0)).toBe(true);
+  });
+
+  it("makes oil quench less damaging than the same water quench", () => {
+    const heated = applyForgeOperation(
+      createForgeState({ material: HIGH_CARBON_STEEL, sectionCount: 8 }),
+      { kind: "heat", temperatureC: 900 },
+    );
+    const water = applyForgeOperation(heated, { kind: "quench", medium: "water", immersion: 1, movement: 0.8, dwellMs: 1_000 });
+    const oil = applyForgeOperation(heated, { kind: "quench", medium: "oil", immersion: 1, movement: 0.8, dwellMs: 1_000 });
+    const waterDamage = water.workpiece.sections.flatMap((section) => section.blocks).reduce((sum, block) => sum + block.damage, 0);
+    const oilDamage = oil.workpiece.sections.flatMap((section) => section.blocks).reduce((sum, block) => sum + block.damage, 0);
+    expect(waterDamage).toBeGreaterThan(oilDamage);
   });
 
   it("grinds a stroke along the edge, emphasizing the clicked section", () => {

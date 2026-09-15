@@ -37,14 +37,14 @@ export interface WorkshopStationDefinition {
 // One source of truth for the playable room. Origins are scene units; physical
 // dimensions remain in millimetres and are converted at model boundaries.
 export const WORKSHOP_LAYOUT: Record<string, WorkshopStationDefinition> = {
-  materials: { origin: [-145, 0, -112], footprint: [134, 116], workSurfaceY: 40, cameraTarget: [-145, 48, -120] },
+  materials: { origin: [-125, 0, -112], footprint: [134, 116], workSurfaceY: 40, cameraTarget: [-125, 48, -120] },
   cut: { origin: [-145, 0, 70], footprint: [68, 100], workSurfaceY: 40, cameraTarget: [-145, 40, 70] },
   anvil: { origin: [0, 0, 0], footprint: [66, 48], workSurfaceY: 40, cameraTarget: [0, 40, 0] },
   furnace: { origin: [76, 0, -135], footprint: [82, 142], workSurfaceY: 40, cameraTarget: [76, 48, -98] },
-  quench: { origin: [-50, 0, -160], footprint: [48, 92], workSurfaceY: 40, cameraTarget: [-50, 40, -160] },
+  quench: { origin: [-34, 0, -160], footprint: [48, 92], workSurfaceY: 40, cameraTarget: [-34, 40, -160] },
   "quench-oil": { origin: [15, 0, -160], footprint: [48, 92], workSurfaceY: 40, cameraTarget: [15, 40, -160] },
-  grind: { origin: [76, 0, 132], footprint: [92, 92], workSurfaceY: 40, cameraTarget: [76, 40, 154] },
-  power: { origin: [62, 0, 24], footprint: [76, 84], workSurfaceY: 40, cameraTarget: [62, 40, 24] },
+  grind: { origin: [150, 0, 132], footprint: [92, 92], workSurfaceY: 40, cameraTarget: [150, 40, 154] },
+  power: { origin: [150, 0, 24], footprint: [76, 84], workSurfaceY: 40, cameraTarget: [150, 40, 24] },
 };
 
 export function stationLayout(name: keyof typeof WORKSHOP_LAYOUT): WorkshopStationDefinition {

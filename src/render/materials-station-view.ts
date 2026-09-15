@@ -12,8 +12,10 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 // to the workshop's back-left so its full-sized table does not envelop the forge.
 export const MATERIALS_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.materials!.origin);
 export const MATERIALS_FRAMES = {
-  table: { position: [0, 78, 276], target: [0, 48, 150] },
-  rack: { position: [0, 98, 162], target: [0, 48, -8] },
+  // Operator-facing centerline: a slight downward angle keeps the whole
+  // tabletop readable and makes picking targets predictable.
+  table: { position: [0, 92, 116], target: [0, 46, 0] },
+  rack: { position: [0, 110, 140], target: [0, 48, -8] },
 } as const;
 
 const TABLE_SURFACE_Y = WORKSHOP_SURFACE_Y;
@@ -36,14 +38,14 @@ export function materialsCameraFrame(_focus: "table" | "rack", aspect: number) {
   const frame = MATERIALS_FRAMES.table;
   const target = new Vector3(...frame.target).add(MATERIALS_ORIGIN);
   const position = new Vector3(...frame.position).add(MATERIALS_ORIGIN);
-  position.sub(target).multiplyScalar(Math.max(1, 1.25 / aspect)).add(target);
+  position.sub(target).multiplyScalar(Math.max(1, 0.78 / aspect)).add(target);
   return { position: position.toArray(), target: target.toArray() };
 }
 
 export function weldCameraFrame(aspect: number) {
-  const target = new Vector3(-20, TABLE_SURFACE_Y + 12, 166).add(MATERIALS_ORIGIN);
-  const position = new Vector3(-20, 78, 330).add(MATERIALS_ORIGIN);
-  position.sub(target).multiplyScalar(Math.max(1, 1.15 / aspect)).add(target);
+  const target = new Vector3(0, TABLE_SURFACE_Y + 12, 12).add(MATERIALS_ORIGIN);
+  const position = new Vector3(0, 104, 154).add(MATERIALS_ORIGIN);
+  position.sub(target).multiplyScalar(Math.max(1, 0.78 / aspect)).add(target);
   return { position: position.toArray(), target: target.toArray() };
 }
 
@@ -140,7 +142,9 @@ export class MaterialsStationView {
       const onTable = tableIds.has(piece.workpieceId);
       const mesh = this.createWorkpieceMesh(piece, piece.workpieceId === activeWorkpieceId);
       if (onTable) {
-        mesh.position.set(-42 + tableIndex * 28, TABLE_ITEM_BASE_Y + 0.04, 150);
+        // The table is 800 mm deep at the shared scale. Keep the selected
+        // billet on its usable top instead of placing it beyond the rear edge.
+        mesh.position.set(-42 + tableIndex * 28, TABLE_ITEM_BASE_Y + 0.04, 0);
         mesh.quaternion.copy(orientationFor(STORED_DIRECTION));
         mesh.userData.tableSlot = tableIndex;
         this.tableItems.push(mesh);

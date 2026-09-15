@@ -131,6 +131,7 @@ export interface WorkpieceSolid {
   readonly blockId: string;
   readonly vertices: readonly SolidVertex[];
   readonly faces: readonly (readonly number[])[];
+  readonly groundFaces?: readonly number[];
 }
 
 export interface CutLoss {
@@ -167,6 +168,7 @@ export interface TemperEvent {
   readonly kind: "temper";
   readonly operationIndex: number;
   readonly temperatureC: number;
+  readonly durationMs?: number;
 }
 
 export type HeatTreatmentEvent = QuenchEvent | TemperEvent;
@@ -273,6 +275,15 @@ export interface GrindOperation {
     readonly verticalHeight: number;
     readonly depth: number;
     readonly angle?: number;
+    /** Abrasive plane and finite footprint in workpiece millimetres. */
+    readonly frame?: {
+      readonly origin: { readonly x: number; readonly y: number; readonly z: number };
+      readonly normal: { readonly x: number; readonly y: number; readonly z: number };
+      readonly across: { readonly x: number; readonly y: number; readonly z: number };
+      readonly down: { readonly x: number; readonly y: number; readonly z: number };
+      readonly width: number;
+      readonly height: number;
+    };
   };
 }
 
@@ -299,6 +310,7 @@ export interface WeldOperation {
 export interface TemperOperation {
   readonly kind: "temper";
   readonly temperatureC: number;
+  readonly durationMs?: number;
 }
 
 export type ForgeOperation =
@@ -376,6 +388,7 @@ export interface WeldIntent {
 export interface TemperIntent {
   readonly kind: "temper";
   readonly temperatureC: number;
+  readonly durationMs?: number;
 }
 
 export type ForgeIntent =

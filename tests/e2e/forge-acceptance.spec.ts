@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { dragScene } from "./scene-input.ts";
+import { dragScene, scenePoint } from "./scene-input.ts";
 
 const acceptanceSlices = [
   ["materials", "materials", "选料桌 · 选料"],
@@ -9,7 +9,7 @@ const acceptanceSlices = [
   ["hammer", "anvil", "铁砧 · 锤击"],
   ["quench", "quench-water", "水槽 · 淬火"],
   ["temper", "temper", "火炉 · 回火"],
-  ["grind", "grind", "磨石 · 研磨"],
+  ["grind", "grind", "砂带 · 研磨"],
 ] as const;
 
 for (const [verb, station, title] of acceptanceSlices) {
@@ -88,6 +88,48 @@ test("hammer force, free placement, continuous roll and click deformation preser
   expect(errors).toEqual([]);
 });
 
+test("grind contact commits real material removal", async ({ page }) => {
+  await page.goto("/?accept=grind");
+  const body = page.locator("body");
+  const point = await scenePoint(page, "billet");
+  const before = Number(await body.getAttribute("data-removed-volume"));
+  await page.mouse.move(point.x, point.y);
+  await page.mouse.down();
+  for (let i = 0; i < 8; i++) await page.keyboard.press("w");
+  await page.waitForTimeout(700);
+  await page.mouse.up();
+  await expect(body).toHaveAttribute("data-completed-verbs", /grind/);
+  await expect.poll(async () => Number(await body.getAttribute("data-removed-volume"))).toBeGreaterThan(before);
+  const once=Number(await body.getAttribute("data-removed-volume"));
+  const again=await scenePoint(page,"billet");
+  await page.mouse.move(again.x,again.y);await page.mouse.down();
+  await expect.poll(async()=>Number(await body.getAttribute("data-removed-volume")),{timeout:6000}).toBeGreaterThan(once+5);
+  await page.keyboard.press("s");
+  await page.waitForTimeout(500);
+  const withdrawn=await body.getAttribute("data-removed-volume");
+  await page.waitForTimeout(400);
+  expect(await body.getAttribute("data-removed-volume")).toBe(withdrawn);
+  await page.mouse.up();
+});
+
+test("quench cools only while the workpiece remains in the liquid", async ({ page }) => {
+  for (const medium of ["water", "oil"] as const) {
+    await page.goto(`/?accept=quench&medium=${medium}`);
+    const body = page.locator("body");
+    // The app listens on window; avoid a focus round-trip while the renderer
+    // is settling so this regression measures the real keyboard path.
+    const before = Number(await body.getAttribute("data-temperature-c"));
+    for (let i = 0; i < 40; i++) await page.keyboard.press("s");
+    await expect(body).toHaveAttribute("data-quench-medium", medium);
+    await expect.poll(async () => Number(await body.getAttribute("data-temperature-c"))).toBeLessThan(before);
+    for (let i = 0; i < 40; i++) await page.keyboard.press("w");
+    await page.waitForTimeout(450);
+    const outside = Number(await body.getAttribute("data-temperature-c"));
+    await page.waitForTimeout(450);
+    expect(Number(await body.getAttribute("data-temperature-c"))).toBe(outside);
+  }
+});
+
 test("weld acceptance joins the visible current and bench workpieces", async ({ page }) => {
   await page.goto("/?accept=weld");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
@@ -129,6 +171,10 @@ test("heating and tempering share one furnace and retain the current workpiece",
   expect(await camera()).toEqual(before);
   await page.locator("[data-furnace-mode=temper]").click();
   await dragScene(page,"temper",{x:0,y:-40});
+  await page.locator("#heat-toggle").click();
+  await expect(page.locator("#heat-toggle")).toHaveText("取出并完成回火");
+  await page.waitForTimeout(250);
+  await page.locator("#heat-toggle").click();
   await expect(body).toHaveAttribute("data-completed-verbs",/temper/);
   await expect(body).toHaveAttribute("data-workpiece-id",id!);
 });
