@@ -5,10 +5,21 @@ import { FURNACE_BODY_SCALE_Y, FURNACE_HEARTH_Y, WORKSHOP_FLOOR_Y, WORKSHOP_UNIT
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
 
 export const FURNACE_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.furnace!.origin);
+export const TEMPER_FURNACE_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.temper!.origin);
 export const FURNACE = { floor:WORKSHOP_FLOOR_Y,hearth:FURNACE_HEARTH_Y,front:24,rear:-48,halfOpening:24,ceiling:72,scale:WORKSHOP_UNITS_PER_MM } as const;
-export function furnaceCameraFrame(aspect:number, origin = FURNACE_ORIGIN) {
-  const target=new Vector3(0,48,30),offset=new Vector3(44,50,105).multiplyScalar(Math.max(1,1.2/aspect));
+export function furnaceCameraFrame(aspect:number, origin = FURNACE_ORIGIN, lateral = 1) {
+  const target=new Vector3(0,48,30);
+  const narrow=aspect<0.75;
+  const offset=narrow
+    ? new Vector3(0,70,155).multiplyScalar(Math.max(1,0.75/aspect))
+    : new Vector3(44*lateral,50,105).multiplyScalar(Math.max(1,1.2/aspect));
   return {position:target.clone().add(offset).add(origin).toArray(),target:target.add(origin).toArray()};
+}
+// The tempering furnace stands to the right of the heating furnace, so it is
+// serviced from the aisle on its left; approaching from the right would put the
+// camera outside the side wall.
+export function temperCameraFrame(aspect:number) {
+  return furnaceCameraFrame(aspect, TEMPER_FURNACE_ORIGIN, -1);
 }
 export class FurnaceStationView {
   readonly group=new Group();
@@ -25,7 +36,12 @@ export class FurnaceStationView {
   private lastGeometryFingerprint:number|null=null;
   private lastTick:number|null=null;
   private manualPositioned=false;
-  constructor(private readonly geometryFor:(snapshot:ForgeSnapshot)=>BufferGeometry, origin = FURNACE_ORIGIN, name = "heating-station") {
+  constructor(
+    private readonly geometryFor:(snapshot:ForgeSnapshot)=>BufferGeometry,
+    origin = FURNACE_ORIGIN,
+    name = "heating-station",
+    station: "furnace" | "temper" = "furnace",
+  ) {
     this.group.position.copy(origin);this.group.name=name;this.body.name="open-forge";
     this.body.scale.set(0.72,FURNACE_BODY_SCALE_Y,1.22);this.body.position.y=WORKSHOP_FLOOR_Y*(1-FURNACE_BODY_SCALE_Y);
     const k=this.kit;
@@ -52,11 +68,14 @@ export class FurnaceStationView {
       k.cylinder(this.body,"burner-collar",70,40,[0,1410,z],"steel");
     }
     k.batch(this.body);
-    this.temperControl=k.cylinder(this.body,"temperature-dial",32,18,[440,1040,300],"brass","z");
-    k.box(this.body,"dial-pointer",[4,38,3],[440,1040,311],"dark",0);
+    // The dial faces the aisle; the tempering furnace is a mirrored unit, so
+    // its controls sit on the opposite side of its body.
+    const dialX=station==="temper"?-440:440;
+    this.temperControl=k.cylinder(this.body,"temperature-dial",32,18,[dialX,1040,300],"brass","z");
+    k.box(this.body,"dial-pointer",[4,38,3],[dialX,1040,311],"dark",0);
     const glow=new PointLight("#ff8538",2200,125,2);glow.position.set(0,57,-10);this.group.add(glow);
     const liner=k.materials.brick;liner.emissive.set("#db5b15");liner.emissiveIntensity=0.55;
-    this.target.position.set(0,56,-10);this.target.userData.station="furnace";
+    this.target.position.set(0,56,-10);this.target.userData.station=station;
     this.itemRig.rotation.y=Math.PI/2;this.item.scale.setScalar(FURNACE.scale);this.item.castShadow=true;
     this.itemRig.add(this.item);this.group.add(this.body,this.target,this.itemRig);
   }

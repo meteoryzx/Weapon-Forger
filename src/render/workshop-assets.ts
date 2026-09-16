@@ -4,6 +4,19 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { GrinderModel } from "./grinder-model.ts";
 
 export interface StationAsset { root:Group; contact?:Mesh<BufferGeometry,MeshStandardMaterial>; control?:Mesh<BufferGeometry,MeshStandardMaterial> }
+
+// The rendered room is the authority for wall clearance: its side walls are
+// narrowed by ROOM_SCALE_X and its masonry has real thickness, so a station
+// that fits the declared layout rectangle can still be inside the wall.
+export const ROOM_SCALE_X = 0.72;
+export const ROOM_SIDE_WALL_X_MM = 3460;
+export const ROOM_WALL_THICKNESS_MM = 150;
+export const ROOM_BACK_Z_MM = -2600;
+export const ROOM_INTERIOR = {
+  // Distance from the room centre to each finished interior wall face.
+  halfWidthX: WORKSHOP_UNITS_PER_MM * (ROOM_SIDE_WALL_X_MM - ROOM_WALL_THICKNESS_MM / 2) * ROOM_SCALE_X,
+  backZ: WORKSHOP_UNITS_PER_MM * (ROOM_BACK_Z_MM + ROOM_WALL_THICKNESS_MM / 2),
+} as const;
 export function basinAsset(k:WorkshopModelKit,oil:boolean):StationAsset {
   const root=new Group();root.name=oil?"oil-basin":"water-basin";
   root.scale.set(0.52,QUENCH_BODY_SCALE_Y,0.92);root.position.y=WORKSHOP_FLOOR_Y*(1-QUENCH_BODY_SCALE_Y);
@@ -57,16 +70,16 @@ export function powerHammerAsset(k:WorkshopModelKit):StationAsset {
 }
 export function roomAsset(k:WorkshopModelKit) {
   const root=new Group();root.name="continuous-workshop";
-  root.scale.x=0.72;
+  root.scale.x=ROOM_SCALE_X;
   k.box(root,"floor-base",[7100,100,5300],[0,-66,0],"dark",0);
   for(let x=0;x<20;x++)for(let z=0;z<15;z++){
     k.box(root,"floor-paver",[346,16,342],[-3325+x*350,-8,-2420+z*346],"stone",3);
   }
   for(let row=0;row<10;row++)for(let col=0;col<20;col++){
-    k.box(root,"north-masonry",[344,218,150],[-3325+col*350,row*224+109,-2600],"stone",6);
+    k.box(root,"north-masonry",[344,218,ROOM_WALL_THICKNESS_MM],[-3325+col*350,row*224+109,ROOM_BACK_Z_MM],"stone",6);
   }
-  for(const x of [-3460,3460]){
-    k.box(root,"low-side-wall",[150,820,5200],[x,410,0],"stone");
+  for(const x of [-ROOM_SIDE_WALL_X_MM,ROOM_SIDE_WALL_X_MM]){
+    k.box(root,"low-side-wall",[ROOM_WALL_THICKNESS_MM,820,5200],[x,410,0],"stone");
     for(const z of [-2530,-1000,650,2400]){
       k.box(root,"wall-post",[150,2250,150],[x,1125,z],"endgrain");
     }

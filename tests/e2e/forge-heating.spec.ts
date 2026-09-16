@@ -1,31 +1,18 @@
-import { expect, test, type Page } from "@playwright/test";
-import { PerspectiveCamera, Vector3 } from "three";
-import { furnaceCameraFrame, FURNACE, FURNACE_ORIGIN } from "../../src/render/furnace-station-view.ts";
-import { WORKSHOP_STANDARD } from "../../src/app/workshop-scale.ts";
+import { expect, test } from "@playwright/test";
+import { dragScene } from "./scene-input.ts";
 
-async function clickMouth(page: Page) {
-  const box = (await page.locator("#game").boundingBox())!;
-  const frame = furnaceCameraFrame(box.width / box.height);
-  const camera = new PerspectiveCamera(WORKSHOP_STANDARD.camera.fov, box.width / box.height, 0.1, 2000);
-  camera.position.fromArray(frame.position); camera.lookAt(new Vector3().fromArray(frame.target)); camera.updateMatrixWorld(true);
-  const point = new Vector3(0, (FURNACE.hearth + FURNACE.ceiling) / 2, FURNACE.front).add(FURNACE_ORIGIN).project(camera);
-  await page.locator("#game").click({ position: { x: (point.x + 1) * box.width / 2, y: (1 - point.y) * box.height / 2 } });
-}
-
-test("one click inserts and keeps heating; a second extracts and cools without changing material", async ({ page }) => {
+test("dragging fully inside starts heating; dragging fully outside stops without changing material", async ({ page }) => {
   test.setTimeout(60000);
   await page.goto("/?accept=heat");
   await expect(page.locator("body")).toHaveAttribute("data-camera-state", "settled");
   const body = page.locator("body");
   const volume = await body.getAttribute("data-total-material-volume");
   const id = await body.getAttribute("data-workpiece-id");
-  await clickMouth(page);
+  await dragScene(page, "billet", { x: 230, y: 0 });
   await expect(body).toHaveAttribute("data-billet-location", "furnace");
   const temperature = async () => Number(await body.getAttribute("data-temperature-c"));
   await expect.poll(temperature).toBeGreaterThan(80);
-  await page.locator("#game").click({ position: { x: 4, y: 4 } });
-  await expect(body).toHaveAttribute("data-billet-location", "furnace");
-  await clickMouth(page);
+  await dragScene(page, "billet", { x: -230, y: 0 });
   await expect(body).toHaveAttribute("data-billet-location", "inspection");
   const extracted = await temperature();
   await expect.poll(temperature).toBeLessThan(extracted - 1);

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { Box3, Raycaster, Vector3 } from "three";
+import { Box3, BoxGeometry, Raycaster, Vector3 } from "three";
 import { applyForgeIntent, createForgeSnapshot, createForgeState } from "../../src/forge/index.ts";
 import { createBilletGeometry } from "../../src/render/forge-billet-view.ts";
-import { FURNACE, FURNACE_ORIGIN, FurnaceStationView } from "../../src/render/furnace-station-view.ts";
+import { FURNACE, FURNACE_ORIGIN, TEMPER_FURNACE_ORIGIN, FurnaceStationView, furnaceCameraFrame, temperCameraFrame } from "../../src/render/furnace-station-view.ts";
 import { MaterialsStationView } from "../../src/render/materials-station-view.ts";
 import { SawStationView } from "../../src/render/saw-station-view.ts";
+import { ROOM_INTERIOR } from "../../src/render/workshop-assets.ts";
 import { CUT_HOME } from "../../src/app/cut-placement.ts";
 import { WORKSHOP_LAYOUT } from "../../src/app/workshop-scale.ts";
 
@@ -39,7 +40,43 @@ describe("front-opening forge", () => {
     expect(new Set(burners.map(object => object.position.z)).size).toBe(3);
     expect(burners.every(object => object.position.x === 0)).toBe(true);
     expect(FURNACE_ORIGIN.toArray()).toEqual([...WORKSHOP_LAYOUT.furnace!.origin]);
+    expect(TEMPER_FURNACE_ORIGIN.toArray()).toEqual([...WORKSHOP_LAYOUT.temper!.origin]);
     view.dispose();
+  });
+
+  it("owns distinct heating and tempering targets", () => {
+    const geometry = () => new BoxGeometry(336, 8, 48);
+    const heating = new FurnaceStationView(geometry, FURNACE_ORIGIN, "heating-station", "furnace");
+    const tempering = new FurnaceStationView(geometry, TEMPER_FURNACE_ORIGIN, "tempering-station", "temper");
+    expect(heating.group.position.toArray()).not.toEqual(tempering.group.position.toArray());
+    expect(heating.target.userData.station).toBe("furnace");
+    expect(tempering.target.userData.station).toBe("temper");
+    heating.dispose();
+    tempering.dispose();
+  });
+
+  it("services the tempering furnace from the aisle and keeps both cameras in the room", () => {
+    const heating = furnaceCameraFrame(16 / 9, FURNACE_ORIGIN, 1);
+    const tempering = temperCameraFrame(16 / 9);
+    // Heating is viewed from its right; the tempering unit to its right is a
+    // mirrored station serviced from the aisle on its left.
+    expect(heating.position[0]!).toBeGreaterThan(FURNACE_ORIGIN.x);
+    expect(tempering.position[0]!).toBeLessThan(TEMPER_FURNACE_ORIGIN.x);
+    for (const aspect of [16 / 9, 390 / 844]) {
+      for (const frame of [furnaceCameraFrame(aspect, FURNACE_ORIGIN, 1), temperCameraFrame(aspect)]) {
+        expect(Math.abs(frame.position[0]!)).toBeLessThan(ROOM_INTERIOR.halfWidthX);
+        expect(frame.position[1]!).toBeGreaterThan(FURNACE.ceiling);
+      }
+    }
+    expect(tempering.position[2]!).toBeGreaterThan(TEMPER_FURNACE_ORIGIN.z + FURNACE.front);
+    const geometry = () => new BoxGeometry(336, 8, 48);
+    const heatingView = new FurnaceStationView(geometry, FURNACE_ORIGIN, "heating-station", "furnace");
+    const temperingView = new FurnaceStationView(geometry, TEMPER_FURNACE_ORIGIN, "tempering-station", "temper");
+    expect(heatingView.temperControl.position.x).toBeGreaterThan(0);
+    expect(temperingView.temperControl.position.x).toBeLessThan(0);
+    expect(temperingView.group.position.x).toBeGreaterThan(heatingView.group.position.x);
+    heatingView.dispose();
+    temperingView.dispose();
   });
 
   it("supports long and cut-sized billets and translates them into the mouth without rotating", () => {

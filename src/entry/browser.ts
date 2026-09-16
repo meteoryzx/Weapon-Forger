@@ -388,13 +388,13 @@ let gesture: {
 const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint: string }> = {
   overview: { title: "铁匠铺 · 总览", hint: "点击材料、工位或铁砧进入第一人称近景；Esc 返回总览。" },
   materials: { title: "选料桌 · 选料", hint: "" },
-  furnace: { title: "火炉 · 加热", hint: "点击炉口把钢坯送入加热；再次点击取出，根据颜色和温度判断火候。" },
+  furnace: { title: "火炉 · 加热", hint: "拖动钢坯自由调整方向；整体进入炉腔后开始加热，完全拖出后停止。" },
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
   "quench-water": { title: "水槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
   "quench-oil": { title: "油槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
-  temper: { title: "火炉 · 回火", hint: "拖动炉身温度控制，松开把当前温度写入工件。" },
+  temper: { title: "火炉 · 回火", hint: "滚轮调整目标温度；拖动钢坯整体进入炉腔后回火，完全拖出后完成。" },
   grind: { title: "砂带 · 研磨", hint: "拖动调整 XYZ；滚轮绕 X，A/D 绕 Y，Q/E 绕 Z；Shift＋拖动水平移动；W 贴近后按住持续研磨，S 远离停止。" },
 };
 
@@ -1054,7 +1054,7 @@ canvas.addEventListener("pointermove", (event) => {
     const x = event.clientX - bounds.left, y = event.clientY - bounds.top;
     const dx = x - temperInsertionDrag.startX, dy = y - temperInsertionDrag.startY;
     if (Math.hypot(dx, dy) > 4) temperInsertionDrag.moved = true;
-    if (temperInsertionDrag.moved) view.setTemperInsertionOffset(temperInsertionDrag.startOffset - dx * 0.35);
+    if (temperInsertionDrag.moved) view.dragTemperInsertion(temperInsertionDrag.startOffset, dx);
     return;
   }
   if (furnaceInsertionDrag && view) {
@@ -1085,8 +1085,8 @@ canvas.addEventListener("pointerup", (event) => {
   if (temperInsertionDrag) {
     const moved = temperInsertionDrag.moved;
     temperInsertionDrag = null;
-    if (moved && view?.furnaceInsertionComplete() && application.getState().workpiece.thermal.location !== "furnace") startTempering();
-    else if (moved && view?.furnaceInsertionOutside() && application.getState().workpiece.thermal.location === "furnace") stopTempering();
+    if (moved && view?.temperInsertionComplete() && application.getState().workpiece.thermal.location !== "furnace") startTempering();
+    else if (moved && view?.temperInsertionOutside() && application.getState().workpiece.thermal.location === "furnace") stopTempering();
   }
   if (furnaceInsertionDrag) {
     const moved = furnaceInsertionDrag.moved;

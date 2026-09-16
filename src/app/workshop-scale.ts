@@ -41,6 +41,7 @@ export const WORKSHOP_LAYOUT: Record<string, WorkshopStationDefinition> = {
   cut: { origin: [-145, 0, 70], footprint: [68, 100], workSurfaceY: 40, cameraTarget: [-145, 40, 70] },
   anvil: { origin: [0, 0, 0], footprint: [66, 48], workSurfaceY: 40, cameraTarget: [0, 40, 0] },
   furnace: { origin: [76, 0, -135], footprint: [82, 142], workSurfaceY: 40, cameraTarget: [76, 48, -98] },
+  temper: { origin: [156, 0, -135], footprint: [82, 142], workSurfaceY: 40, cameraTarget: [156, 48, -105] },
   quench: { origin: [-34, 0, -160], footprint: [48, 92], workSurfaceY: 40, cameraTarget: [-34, 40, -160] },
   "quench-oil": { origin: [15, 0, -160], footprint: [48, 92], workSurfaceY: 40, cameraTarget: [15, 40, -160] },
   grind: { origin: [150, 0, 132], footprint: [92, 92], workSurfaceY: 40, cameraTarget: [150, 40, 154] },

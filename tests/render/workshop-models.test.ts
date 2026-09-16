@@ -6,7 +6,7 @@ import { SawStationView } from "../../src/render/saw-station-view.ts";
 import { FurnaceStationView } from "../../src/render/furnace-station-view.ts";
 import { HammerStationView } from "../../src/render/hammer-station-view.ts";
 import { WorkshopModelKit } from "../../src/render/workshop-model-kit.ts";
-import { basinAsset, grindingAsset, powerHammerAsset } from "../../src/render/workshop-assets.ts";
+import { basinAsset, grindingAsset, powerHammerAsset, ROOM_INTERIOR } from "../../src/render/workshop-assets.ts";
 
 function solidBounds(root:Group) {
   root.updateMatrixWorld(true);
@@ -23,8 +23,8 @@ function solidBounds(root:Group) {
 describe("authored workshop geometry",()=>{
   it("grounds real station meshes inside their reserved footprint and room, without station overlaps",()=>{
     const k=new WorkshopModelKit(),geometry=()=>new BoxGeometry(336,8,48);
-    const selection=new MaterialsStationView(geometry),saw=new SawStationView(geometry),furnace=new FurnaceStationView(geometry),hammer=new HammerStationView();
-    const roots:Record<string,Group>={materials:selection.group,cut:saw.group,furnace:furnace.body,anvil:hammer.group};
+    const selection=new MaterialsStationView(geometry),saw=new SawStationView(geometry),furnace=new FurnaceStationView(geometry),temper=new FurnaceStationView(geometry,new Vector3(...WORKSHOP_LAYOUT.temper!.origin),"tempering-station","temper"),hammer=new HammerStationView();
+    const roots:Record<string,Group>={materials:selection.group,cut:saw.group,furnace:furnace.body,temper:temper.body,anvil:hammer.group};
     // Dynamic hand tools are excluded from the static furniture envelope.
     hammer.tool.removeFromParent();
     for(const [name,asset] of Object.entries({quench:basinAsset(k,false),"quench-oil":basinAsset(k,true),grind:grindingAsset(k),power:powerHammerAsset(k)})){
@@ -33,6 +33,7 @@ describe("authored workshop geometry",()=>{
       roots[name]=asset.root;
     }
     furnace.group.updateMatrixWorld(true);
+    temper.group.updateMatrixWorld(true);
     const measured=Object.entries(roots).map(([name,root])=>({name,bounds:solidBounds(root)}));
     for(const {name,bounds} of measured){
       const spec=WORKSHOP_LAYOUT[name]!,[x,,z]=spec.origin,[width,depth]=spec.footprint;
@@ -44,12 +45,17 @@ describe("authored workshop geometry",()=>{
       // Wall interior includes masonry thickness, not just the floor rectangle.
       expect(Math.max(Math.abs(bounds.min.x),Math.abs(bounds.max.x)),`${name} room width`).toBeLessThan(u(WORKSHOP_STANDARD.room.width/2-120));
       expect(Math.max(Math.abs(bounds.min.z),Math.abs(bounds.max.z)),`${name} room depth`).toBeLessThan(u(WORKSHOP_STANDARD.room.depth/2-150));
+      // The rendered room is narrower than the declared rectangle, so measure
+      // against its actual finished interior faces as well.
+      expect(bounds.min.x,`${name} interior left wall`).toBeGreaterThan(-ROOM_INTERIOR.halfWidthX);
+      expect(bounds.max.x,`${name} interior right wall`).toBeLessThan(ROOM_INTERIOR.halfWidthX);
+      expect(bounds.min.z,`${name} interior back wall`).toBeGreaterThan(ROOM_INTERIOR.backZ);
     }
     for(let i=0;i<measured.length;i++)for(let j=i+1;j<measured.length;j++){
       const a=measured[i]!,b=measured[j]!;
       expect(a.bounds.intersectsBox(b.bounds),`${a.name} overlaps ${b.name}`).toBe(false);
     }
-    selection.dispose();saw.dispose();furnace.dispose();hammer.dispose();
+    selection.dispose();saw.dispose();furnace.dispose();temper.dispose();hammer.dispose();
   });
 
   it("authors an 800 mm deep bench with an 875 mm work surface and an open basin",()=>{

@@ -41,13 +41,13 @@ test("authored stations preserve the continuous forge workflow and workpiece fac
   const identity=await body.getAttribute("data-workpiece-id");
 
   await visit("furnace");
-  await page.getByRole("button",{name:"送入加热",exact:true}).click();
+  await dragScene(page,"billet",{x:230,y:0});
   await expect.poll(async()=>Number(await body.getAttribute("data-temperature-c"))).toBeGreaterThan(50);
   const removeFromFurnace=page.getByRole("button",{name:"取出查看",exact:true});
   const removeFromFurnaceBox=await removeFromFurnace.boundingBox();
   expect(removeFromFurnaceBox).not.toBeNull();
   await page.mouse.click(removeFromFurnaceBox!.x+removeFromFurnaceBox!.width/2,removeFromFurnaceBox!.y+removeFromFurnaceBox!.height/2);
-  await expect(body).toHaveAttribute("data-completed-verbs",/heat/);
+  await expect(body).toHaveAttribute("data-billet-location","inspection");
 
   await visit("quench-water");
   await page.locator("#game").focus();
@@ -57,8 +57,7 @@ test("authored stations preserve the continuous forge workflow and workpiece fac
   await visit("furnace");
   await page.locator("[data-furnace-mode=temper]").click({force:true});
   await expect(body).toHaveAttribute("data-active-station","temper");
-  await dragScene(page,"temper",{x:0,y:-40});
-  await page.locator("#heat-toggle").click();
+  await dragScene(page,"billet",{x:-230,y:0});
   await expect(page.locator("#heat-toggle")).toHaveText("取出并完成回火");
   await page.waitForTimeout(250);
   await page.locator("#heat-toggle").click();

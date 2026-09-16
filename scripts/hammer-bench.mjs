@@ -1,0 +1,163 @@
+// Hammer capability loop.
+//
+// This is the red-capable feedback loop for "can the forge actually shape metal,
+// and does the game report the truth about it". It changes no game behaviour: it
+// drives the real rules layer and checks four capability targets. Run it with
+// `npm run bench:hammer`. A non-zero exit means at least one target is unmet.
+//
+// Targets:
+//   T1 speed    - 40 deliberate blows must thin a 120 mm span to <= 5 mm
+//   T2 freedom  - the player's own controls must be able to send material two
+//                 different ways (draw out along the length vs spread across the
+//                 width), not one isotropic squirt
+//   T3 feedback - reported facts must match the real deformed geometry
+//   T4 contract - volume stays conserved and replay stays byte-identical
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+
+const root = path.resolve(import.meta.dirname, "..");
+const forge = await import(pathToFileURL(path.join(root, "src/forge/index.ts")).href);
+const { applyForgeOperation, createForgeState, createForgeFacts, geometryVolumes, replayForgeState, serializeForgeState, HIGH_CARBON_STEEL, HAMMER_HOME } = forge;
+
+const quick = process.argv.includes("--quick");
+const PERFORMANCE = { blows: quick ? 16 : 40, positions: 7, spacing: 20, energy: 0.55, temperatureC: 1000 };
+const TARGETS = { spanMm: 120, spanThicknessMm: 5, feedbackPercent: 5, volumeDriftPercent: 0.2 };
+
+function heat(material, temperatureC) {
+  return applyForgeOperation(createForgeState({ material }), { kind: "heat", temperatureC });
+}
+
+function strike(pose, energy = PERFORMANCE.energy) {
+  return { kind: "surface-hammer", pose, target: { x: 0, z: 0 }, energy };
+}
+
+function realVolume(state) {
+  return [...geometryVolumes(state.workpiece).values()].reduce((sum, value) => sum + value, 0);
+}
+
+// Real geometry, read straight off the control lattice: nothing here trusts a
+// reported fact, so it can disagree with one on purpose.
+function realShape(state) {
+  const nodes = state.workpiece.geometry.nodes;
+  const bounds = nodes.reduce((acc, node) => ({
+    minX: Math.min(acc.minX, node.axialPosition), maxX: Math.max(acc.maxX, node.axialPosition),
+    minZ: Math.min(acc.minZ, node.lateralOffset), maxZ: Math.max(acc.maxZ, node.lateralOffset),
+    minY: Math.min(acc.minY, node.verticalOffset), maxY: Math.max(acc.maxY, node.verticalOffset),
+  }), { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity, minY: Infinity, maxY: -Infinity });
+  return { lengthMm: bounds.maxX - bounds.minX, widthMm: bounds.maxZ - bounds.minZ, heightMm: bounds.maxY - bounds.minY };
+}
+
+// Mean thickness of the material columns inside an axial window around the
+// centre: the same definition the facts layer now reports.
+function spanThickness(state, windowMm) {
+  const { grid } = state.workpiece.geometry;
+  const columns = new Map();
+  state.workpiece.sections.forEach((section, index) => {
+    if (section.blocks.length === 0) return;
+    if (Math.abs(section.position - centre(state)) > windowMm / 2) return;
+    for (const block of section.blocks) {
+      const key = `${index}:${block.widthIndex}`;
+      const footprint = block.length * block.width;
+      const column = columns.get(key) ?? { footprint: 0, thickness: 0 };
+      column.footprint = Math.max(column.footprint, footprint);
+      column.thickness += footprint > 0 ? block.volume / footprint : 0;
+      columns.set(key, column);
+    }
+  });
+  const all = [...columns.values()];
+  const area = all.reduce((sum, column) => sum + column.footprint, 0);
+  return area > 0 ? all.reduce((sum, column) => sum + column.thickness * column.footprint, 0) / area : 0;
+}
+
+function centre(state) {
+  const positions = state.workpiece.sections.filter(s => s.blocks.length > 0).map(s => s.position);
+  return positions.length ? (Math.min(...positions) + Math.max(...positions)) / 2 : 0;
+}
+
+function passAlong(state, offsets) {
+  let next = state;
+  let applied = 0;
+  for (const offset of offsets) {
+    try { next = applyForgeOperation(next, strike({ ...HAMMER_HOME, x: offset })); applied += 1; }
+    catch { /* a spent spot is reported through the thickness numbers, not an exception */ }
+  }
+  return { state: next, applied };
+}
+
+function offsetsFor(positions, spacing) {
+  const half = Math.floor(positions / 2);
+  const offsets = [];
+  for (let i = 0; i < positions; i += 1) offsets.push((i - half) * spacing);
+  return offsets;
+}
+
+const results = [];
+function check(id, label, passed, detail) {
+  results.push({ id, label, passed, detail });
+  console.log(`${passed ? "PASS" : "FAIL"}  ${id}  ${label}  ${detail}`);
+}
+
+// ---------------------------------------------------------------- T1: speed
+const started = heat(HIGH_CARBON_STEEL, PERFORMANCE.temperatureC);
+const initialSpan = spanThickness(started, TARGETS.spanMm);
+const startedAt = performance.now();
+let training = started;
+let applied = 0;
+for (let round = 0; round < Math.ceil(PERFORMANCE.blows / PERFORMANCE.positions) + 1; round += 1) {
+  const before = applied;
+  const next = passAlong(training, offsetsFor(PERFORMANCE.positions, PERFORMANCE.spacing));
+  training = next.state; applied = Math.min(PERFORMANCE.blows, applied + next.applied);
+  if (applied === before) break;
+  if (applied >= PERFORMANCE.blows) break;
+}
+const speedMs = performance.now() - startedAt;
+const finalSpan = spanThickness(training, TARGETS.spanMm);
+check("T1", `${PERFORMANCE.blows} blows thin a ${TARGETS.spanMm} mm span to <= ${TARGETS.spanThicknessMm} mm`,
+  applied === PERFORMANCE.blows && finalSpan <= TARGETS.spanThicknessMm,
+  `applied=${applied}/${PERFORMANCE.blows} span=${initialSpan.toFixed(2)}->${finalSpan.toFixed(2)} mm in ${(speedMs / 1000).toFixed(1)}s (${(speedMs / Math.max(1, applied)).toFixed(0)} ms/blow)`);
+
+// ------------------------------------------------------------- T2: freedom
+// Where the smith puts the blow, relative to the material's free surfaces, is
+// what decides whether metal runs out the end or out the side. That must be a
+// real choice, and the two choices must not be the same number.
+const perBlowGrowth = (offset) => {
+  const before = heat(HIGH_CARBON_STEEL, PERFORMANCE.temperatureC);
+  const after = applyForgeOperation(before, strike({ ...HAMMER_HOME, x: offset }, 1));
+  const a = realShape(before), b = realShape(after);
+  return { length: b.lengthMm - a.lengthMm, width: b.widthMm - a.widthMm };
+};
+const midBlow = perBlowGrowth(0);
+const endBlow = perBlowGrowth(155);
+const ratioOf = (growth) => growth.width !== 0 ? growth.length / growth.width : Infinity;
+const midRatio = ratioOf(midBlow), endRatio = ratioOf(endBlow);
+const separation = Math.abs(midRatio - endRatio) / Math.max(Math.abs(midRatio), Math.abs(endRatio), 1e-9);
+check("T2", "blow placement decides draw-out vs spread",
+  Number.isFinite(midRatio) && Number.isFinite(endRatio) && separation > 0.25,
+  `mid-bar dL/dW=${midRatio.toFixed(2)} (dL ${midBlow.length.toFixed(2)} dW ${midBlow.width.toFixed(2)}) | near free end dL/dW=${endRatio.toFixed(2)} (dL ${endBlow.length.toFixed(2)} dW ${endBlow.width.toFixed(2)}) | separation ${(separation * 100).toFixed(0)}% (needs >25%)`);
+
+// ------------------------------------------------------------ T3: feedback
+const facts = createForgeFacts(training);
+const shape = realShape(training);
+const lengthError = Math.abs(facts.totalLength - shape.lengthMm) / Math.max(shape.lengthMm, 1e-9) * 100;
+const reportedSpan = facts.sectionProfile
+  .filter(entry => Math.abs(entry.axialPositionMm - centre(training)) <= TARGETS.spanMm / 2);
+const reportedSpanArea = reportedSpan.reduce((sum, entry) => sum + entry.volumeMm3, 0);
+const reportedSpanThickness = reportedSpanArea > 0
+  ? reportedSpan.reduce((sum, entry) => sum + entry.thicknessMm * entry.volumeMm3, 0) / reportedSpanArea
+  : 0;
+const thicknessError = Math.abs(reportedSpanThickness - finalSpan) / Math.max(finalSpan, 1e-9) * 100;
+check("T3", "reported facts match the real geometry",
+  lengthError <= TARGETS.feedbackPercent && thicknessError <= TARGETS.feedbackPercent,
+  `length error ${lengthError.toFixed(2)}% | span thickness reported ${reportedSpanThickness.toFixed(2)} vs real ${finalSpan.toFixed(2)} mm (${thicknessError.toFixed(2)}% error)`);
+
+// ------------------------------------------------------------ T4: contract
+const drift = Math.abs(realVolume(training) - realVolume(started)) / realVolume(started) * 100;
+const replayed = replayForgeState(createForgeState({ material: HIGH_CARBON_STEEL }), training.operations);
+const replayEqual = serializeForgeState(replayed) === serializeForgeState(training);
+check("T4", "volume conserved and replay byte-identical",
+  drift <= TARGETS.volumeDriftPercent && replayEqual,
+  `geometric drift ${drift.toFixed(3)}% (fact says ${createForgeFacts(training).totalVolume.toFixed(0)} vs real ${realVolume(training).toFixed(1)}) | replay ${replayEqual ? "identical" : "DIFFERENT"}`);
+
+const failed = results.filter(result => !result.passed);
+console.log(`\n${results.length - failed.length}/${results.length} capability targets met${quick ? " (quick run)" : ""}`);
+process.exit(failed.length === 0 ? 0 : 1);

@@ -159,19 +159,23 @@ test("temper acceptance starts from a quenched workpiece", async ({ page }) => {
   await expect(page.locator("body")).toHaveAttribute("data-quench-medium", "water");
 });
 
-test("heating and tempering share one furnace and retain the current workpiece",async({page})=>{
+test("heating and tempering use independent furnaces and retain the current workpiece",async({page})=>{
   await page.goto("/?accept=temper");
   const body=page.locator("body"),id=await body.getAttribute("data-workpiece-id");
-  const camera=()=>page.evaluate(()=>(window as unknown as {__forgeInspect:()=>{camera:unknown}}).__forgeInspect().camera);
+  const camera=()=>page.evaluate(()=>(window as unknown as {__forgeInspect:()=>{camera:{position:number[];target:number[]}}}).__forgeInspect().camera);
   await expect(body).toHaveAttribute("data-camera-state","settled");
-  const before=await camera();
+  const temperFrame=await camera();
   await page.locator("[data-furnace-mode=furnace]").click();
   await expect(body).toHaveAttribute("data-active-station","furnace");
   await expect(body).toHaveAttribute("data-camera-state","settled");
-  expect(await camera()).toEqual(before);
+  const heatingFrame=await camera();
+  expect(heatingFrame.position).not.toEqual(temperFrame.position);
+  expect(heatingFrame.target).not.toEqual(temperFrame.target);
   await page.locator("[data-furnace-mode=temper]").click();
-  await dragScene(page,"temper",{x:0,y:-40});
-  await page.locator("#heat-toggle").click();
+  await expect(body).toHaveAttribute("data-active-station","temper");
+  await expect(body).toHaveAttribute("data-camera-state","settled");
+  expect(await camera()).toEqual(temperFrame);
+  await dragScene(page,"billet",{x:-230,y:0});
   await expect(page.locator("#heat-toggle")).toHaveText("取出并完成回火");
   await page.waitForTimeout(250);
   await page.locator("#heat-toggle").click();

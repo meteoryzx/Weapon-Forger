@@ -83,4 +83,15 @@ describe("surface hammer",()=>{
     const afterCut=applyForgeOperation(flat,{kind:"cut",path:{id:"after-hammer",start:{axialPosition:24,lateralOffset:-50},end:{axialPosition:24,lateralOffset:50},kerfWidth:1}});
     expect(afterCut.bench.length).toBe(1);expect(()=>serializeForgeState(afterCut)).not.toThrow();
   });
+  it("wears out one worked spot without rejecting blows everywhere else",()=>{
+    let state=applyForgeOperation(createForgeState({sectionCount:64}),{kind:"heat",temperatureC:950});
+    const at=(x:number)=>applyForgeOperation(state,{kind:"surface-hammer",pose:{...HAMMER_HOME,x},target:{x:0,z:0},energy:1});
+    let centreBlows=0;
+    for(let i=0;i<120;i++){try{state=at(0);centreBlows+=1;}catch{break;}}
+    expect(centreBlows).toBeGreaterThan(10);
+    // The centre is spent by now, but untouched material must still be workable:
+    // the guard may only veto cells this blow actually moves.
+    const remote=[-30,-26,26,30].map(x=>{try{state=at(x);return true;}catch{return false;}});
+    expect(remote.some(Boolean)).toBe(true);
+  });
 });

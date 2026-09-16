@@ -8,6 +8,10 @@ export const HAMMER_RULES = {
   // Increase visible change per deliberate hot blow while keeping the cap conservative.
   maximumCompression: 0.17, supportTolerance: 2, minimumHeight: 0.4,
   volumeTolerance: 0.00001, integrationSteps: 24,
+  // A relative before/after check still lets a cell ratchet down over many blows
+  // until it is degenerate, and at that point every later blow fails forever.
+  // Keep each cell above a floor of its own undeformed volume too.
+  minimumCellVolumeFraction: 0.02,
 } as const;
 export const HAMMER_HOME: HammerPose = { x: 0, z: 0, yaw: 0, roll: 0 };
 export interface HammerTriangle { readonly blockId: string; readonly points: readonly [SolidPoint, SolidPoint, SolidPoint] }
@@ -139,49 +143,82 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
   if(contact.point.y<HAMMER_RULES.minimumHeight)throw new Error("此处已经很薄，请降低力度或换一个位置。");
   const blocks=piece.sections.flatMap(s=>s.blocks), block=blocks.find(b=>b.id===contact.blockId) ?? blocks[0]!;
   const resistance=yieldStrengthMPa(block,piece.material);
-  const compression=Math.min(HAMMER_RULES.maximumCompression,
+  const requested=Math.min(HAMMER_RULES.maximumCompression,
     HAMMER_RULES.maximumCompression*operation.energy*105/Math.max(resistance,30))*contact.supportRatio;
-  const k=1-Math.sqrt(1-compression),radius=HAMMER_RULES.face/2;
+  const radius=HAMMER_RULES.face/2;
   const world=piece.geometry.nodes.map(n=>toAnvil(nodePoint(n),frame));
-  const base=world.map(p=>{
-    const dx=p.x-contact.point.x,dz=p.z-contact.point.z;
-    const s1=1-k*bump(dx/radius)*bump(dz/radius);
-    const x=p.x+spreadIntegral(dx,dz,k);
-    const nx=x-contact.point.x;
-    const s2=1-k*bump(nx/radius)*bump(dz/radius);
-    return {x,y:p.y*s1*s2,z:p.z+spreadIntegral(dz,nx,k)};
-  });
-  const makeNodes=(spread:number)=>base.map((p,i)=>{
-    const start=world[i]!,local=fromAnvil({x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread},frame);
-    return {...piece.geometry.nodes[i]!,axialPosition:local.x,verticalOffset:local.y,lateralOffset:local.z};
-  });
-  // The analytic flow is incompressible; finite lattice interpolation introduces
-  // quadrature error. Correct only the flow's lateral displacement, never mass.
   const beforeVolumes=geometryVolumes(piece),beforeTotal=[...beforeVolumes.values()].reduce((a,b)=>a+b,0);
-  let low=0,high=3,nodes=makeNodes(1),volumes=geometryVolumes(piece,{...piece.geometry,nodes});
-  for(let iteration=0;iteration<22;iteration++) {
-    const total=[...volumes.values()].reduce((a,b)=>a+b,0);
-    if(Math.abs(total/beforeTotal-1)<HAMMER_RULES.volumeTolerance)break;
-    const factor=iteration===0?1:(low+high)/2;
-    if(total<beforeTotal)low=factor;else high=factor;
-    nodes=makeNodes((low+high)/2);volumes=geometryVolumes(piece,{...piece.geometry,nodes});
-  }
-  if(Math.abs([...volumes.values()].reduce((a,b)=>a+b,0)/beforeTotal-1)>HAMMER_RULES.volumeTolerance*2)
-    throw new Error("此姿态的形变未通过体积检查，请换一个落点。");
-  // Absolute volumes alone can hide an inverted element. Preserve every
-  // tetrahedron's orientation, including the control lattice of cut solids.
-  piece.sections.forEach((section,a)=>section.blocks.forEach(block=>{
-    const indices=cellCorners(a,block,piece.geometry);
-    const before=indices.map(i=>nodePoint(piece.geometry.nodes[i]!));
-    const after=indices.map(i=>nodePoint(nodes[i]!));
-    for(const t of tetrahedra){
-      const determinant=(p:SolidPoint[])=>dot(sub(p[t[1]]!,p[t[0]]!),cross(sub(p[t[2]]!,p[t[0]]!),sub(p[t[3]]!,p[t[0]]!)));
-      const start=determinant(before),end=determinant(after);
-      if(!Number.isFinite(end)||Math.abs(start)<1e-12||end/start<1e-6)
-        throw new Error("此处形变过度，请降低力度或调整落点。");
+  // A full-strength blow can push a worked column past the orientation guard. The
+  // old code threw for that blow and then rejected *every* later blow at *every*
+  // position, so a long shaping session bricked the workpiece permanently. Soften
+  // this blow instead; only give up when even a minimal deformation would invert.
+  const attempt=(scale:number)=>{
+    const compression=requested*scale;
+    const k=1-Math.sqrt(1-compression);
+    const base=world.map(p=>{
+      const dx=p.x-contact.point.x,dz=p.z-contact.point.z;
+      const s1=1-k*bump(dx/radius)*bump(dz/radius);
+      const x=p.x+spreadIntegral(dx,dz,k);
+      const nx=x-contact.point.x;
+      const s2=1-k*bump(nx/radius)*bump(dz/radius);
+      return {x,y:p.y*s1*s2,z:p.z+spreadIntegral(dz,nx,k)};
+    });
+    const makeNodes=(spread:number)=>base.map((p,i)=>{
+      const start=world[i]!,local=fromAnvil({x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread},frame);
+      return {...piece.geometry.nodes[i]!,axialPosition:local.x,verticalOffset:local.y,lateralOffset:local.z};
+    });
+    // Absolute volumes alone can hide an inverted element. Preserve every
+    // tetrahedron's orientation, including the control lattice of cut solids,
+    // and keep each cell above a floor of its own undeformed volume so repeated
+    // blows cannot ratchet one into a degenerate state.
+    const collapses=(nodes:readonly WorkpieceNode[]):boolean=>{
+      let collapsed=false;
+      piece.sections.forEach((section,a)=>{
+        if(collapsed)return;
+        section.blocks.forEach(block=>{
+          if(collapsed)return;
+          const indices=cellCorners(a,block,piece.geometry);
+          const before=indices.map(i=>nodePoint(piece.geometry.nodes[i]!));
+          const after=indices.map(i=>nodePoint(nodes[i]!));
+          // Only cells this blow actually moves can have been collapsed by it. A
+          // cell that is already degenerate elsewhere must not veto a blow aimed
+          // at healthy material, or one exhausted spot would brick the workpiece.
+          const moved=before.some((p,i)=>Math.abs(p.x-after[i]!.x)>1e-9
+            ||Math.abs(p.y-after[i]!.y)>1e-9||Math.abs(p.z-after[i]!.z)>1e-9);
+          if(!moved)return;
+          const reference=block.volume;
+          for(const t of tetrahedra){
+            const determinant=(p:SolidPoint[])=>dot(sub(p[t[1]]!,p[t[0]]!),cross(sub(p[t[2]]!,p[t[0]]!),sub(p[t[3]]!,p[t[0]]!)));
+            const start=determinant(before),end=determinant(after);
+            if(!Number.isFinite(end)||Math.abs(start)<1e-12||end/start<1e-6
+              ||Math.abs(end)<reference*HAMMER_RULES.minimumCellVolumeFraction){collapsed=true;return;}
+          }
+        });
+      });
+      return collapsed;
+    };
+    // Cheap pre-check: a hit that already collapses an element at full flow will
+    // not survive the volume search either, so skip that search entirely.
+    if(collapses(makeNodes(1)))return null;
+    // The analytic flow is incompressible; finite lattice interpolation introduces
+    // quadrature error. Correct only the flow's lateral displacement, never mass.
+    let low=0,high=3,nodes=makeNodes(1),volumes=geometryVolumes(piece,{...piece.geometry,nodes});
+    for(let iteration=0;iteration<22;iteration++) {
+      const total=[...volumes.values()].reduce((a,b)=>a+b,0);
+      if(Math.abs(total/beforeTotal-1)<HAMMER_RULES.volumeTolerance)break;
+      const factor=iteration===0?1:(low+high)/2;
+      if(total<beforeTotal)low=factor;else high=factor;
+      nodes=makeNodes((low+high)/2);volumes=geometryVolumes(piece,{...piece.geometry,nodes});
     }
-  }));
-  return {nodes,contact,compression,frame};
+    if(Math.abs([...volumes.values()].reduce((a,b)=>a+b,0)/beforeTotal-1)>HAMMER_RULES.volumeTolerance*2)return null;
+    if(collapses(nodes))return null;
+    return {nodes,compression};
+  };
+  for(const scale of [1,0.75,0.5,0.35,0.25,0.15,0.1]){
+    const softened=attempt(scale);
+    if(softened)return {nodes:softened.nodes,contact,compression:softened.compression,frame};
+  }
+  throw new Error("此处形变过度，请降低力度或调整落点。");
 }
 
 /** Principal stretches of a material cell; rigid rotations create no strain. */

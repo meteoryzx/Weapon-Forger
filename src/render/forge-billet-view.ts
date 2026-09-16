@@ -47,7 +47,7 @@ import { thermalSteelAppearance } from "./thermal-color.ts";
 import { MaterialsStationView, materialsCameraFrame, weldCameraFrame } from "./materials-station-view.ts";
 import { SawStationView, SAW_ORIGIN, sawCameraFrame } from "./saw-station-view.ts";
 import { CUT_HOME, CUT_TABLE, type CutPose } from "../app/cut-placement.ts";
-import { FurnaceStationView, furnaceCameraFrame, FURNACE_ORIGIN, FURNACE } from "./furnace-station-view.ts";
+import { FurnaceStationView, furnaceCameraFrame, temperCameraFrame, FURNACE_ORIGIN, TEMPER_FURNACE_ORIGIN, FURNACE } from "./furnace-station-view.ts";
 import { HammerStationView, hammerCameraFrame, ANVIL } from "./hammer-station-view.ts";
 import { HAMMER_HOME, hammerSurface, type HammerPose } from "../forge/index.ts";
 import { QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM, WORKSHOP_STANDARD, WORKSHOP_LAYOUT, workshopUnits } from "../app/workshop-scale.ts";
@@ -108,7 +108,7 @@ const STATION_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [numbe
   weld: WORKSHOP_LAYOUT.materials!.origin,
   "quench-water": WORKSHOP_LAYOUT.quench!.origin,
   "quench-oil": WORKSHOP_LAYOUT["quench-oil"]!.origin,
-  temper: WORKSHOP_LAYOUT.furnace!.origin,
+  temper: WORKSHOP_LAYOUT.temper!.origin,
   grind: WORKSHOP_LAYOUT.grind!.origin,
 };
 
@@ -120,7 +120,7 @@ const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number
   weld: [WORKSHOP_LAYOUT.materials!.origin[0]-20, WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.materials!.origin[2]+16],
   "quench-water": [WORKSHOP_LAYOUT.quench!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT.quench!.origin[2]],
   "quench-oil": [WORKSHOP_LAYOUT["quench-oil"]!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT["quench-oil"]!.origin[2]],
-  temper: [WORKSHOP_LAYOUT.furnace!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.furnace!.origin[2]+FURNACE.front],
+  temper: [WORKSHOP_LAYOUT.temper!.origin[0], FURNACE.hearth, WORKSHOP_LAYOUT.temper!.origin[2]],
   grind: [WORKSHOP_LAYOUT.grind!.origin[0] + workshopUnits(GRINDER.frontX), WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.restY), WORKSHOP_LAYOUT.grind!.origin[2]],
 };
 
@@ -175,6 +175,7 @@ export class ForgeBilletView {
   private materialsView: MaterialsStationView | null = null;
   private readonly sawView: SawStationView;
   private readonly furnaceView: FurnaceStationView;
+  private readonly temperFurnaceView: FurnaceStationView;
   readonly hammerView: HammerStationView;
   private hammerPose:HammerPose=HAMMER_HOME;
   private cutPose: CutPose = CUT_HOME;
@@ -256,10 +257,12 @@ export class ForgeBilletView {
     this.createStationModels();
     this.createScaleReference();
     this.furnaceView = new FurnaceStationView(piece => createBilletGeometry(piece, null), FURNACE_ORIGIN, "heating-station");
-    this.temperControl=this.furnaceView.temperControl;
+    this.temperFurnaceView = new FurnaceStationView(piece => createBilletGeometry(piece, null), TEMPER_FURNACE_ORIGIN, "tempering-station", "temper");
+    this.temperControl=this.temperFurnaceView.temperControl;
     this.scene.add(this.furnaceView.group);
+    this.scene.add(this.temperFurnaceView.group);
     this.stationMeshes.set("furnace", this.furnaceView.target);
-    this.stationMeshes.set("temper", this.furnaceView.target);
+    this.stationMeshes.set("temper", this.temperFurnaceView.target);
     this.sawView=new SawStationView(piece=>createBilletGeometry(piece,null));
     this.scene.add(this.sawView.group);
     this.materialsView=new MaterialsStationView(piece=>createBilletGeometry(piece,null));
@@ -268,6 +271,7 @@ export class ForgeBilletView {
     this.stationRoots.set("materials",this.materialsView.group);
     this.stationRoots.set("cut",this.sawView.group);
     this.stationRoots.set("furnace",this.furnaceView.body);
+    this.stationRoots.set("temper",this.temperFurnaceView.body);
 
     this.hammerView=new HammerStationView();
     const anvil = this.hammerView.group;
@@ -310,7 +314,9 @@ export class ForgeBilletView {
     // The active station gets its moving workpiece; overview keeps the room
     // readable without duplicating the operation item.
     this.furnaceView.itemRig.visible = activeStation === "furnace";
+    this.temperFurnaceView.itemRig.visible = activeStation === "temper";
     this.furnaceView.body.visible = true;
+    this.temperFurnaceView.body.visible = true;
     this.hammerView.setActive(activeStation==="anvil"||activeStation==="overview");
     if(activeStation==="anvil"||activeStation==="overview"){
       if (activeStation === "anvil") this.hammerView.update(snapshot,this.hammerPose);
@@ -318,7 +324,8 @@ export class ForgeBilletView {
       this.updateStationEmphasis(activeStation);this.render();return;
     }
     if (activeStation === "furnace" || activeStation === "temper") {
-      this.furnaceView.update(snapshot);
+      const activeFurnace=activeStation==="temper"?this.temperFurnaceView:this.furnaceView;
+      activeFurnace.update(snapshot);
       this.temperControl.rotation.z=((temperPreviewC??snapshot.temperTemperatureC??220)-220)/160;
       this.updateStationEmphasis(activeStation);
       this.render();
@@ -429,6 +436,7 @@ export class ForgeBilletView {
     const materialMoved = this.materialsView?.tick(nowMs) ?? false;
     const sawMoved=this.sawView.tick(nowMs);
     const furnaceMoved = this.furnaceView.tick(nowMs);
+    const temperFurnaceMoved = this.temperFurnaceView.tick(nowMs);
     const hammerMoved=this.hammerView.tick(nowMs);
     this.grinderModel.tick(nowMs / 1000);
     const inQuench=this.station==="quench-water"||this.station==="quench-oil";
@@ -442,7 +450,7 @@ export class ForgeBilletView {
       const quenchRenderReady = this.station !== "quench-water" && this.station !== "quench-oil"
         ? false
         : this.quenchPoseDirty && nowMs - this.lastQuenchRenderMs >= 500;
-      if (materialMoved || sawMoved || furnaceMoved || hammerMoved || quenchMoved || quenchRenderReady || grindRenderReady || this.station === "grind") {
+      if (materialMoved || sawMoved || furnaceMoved || temperFurnaceMoved || hammerMoved || quenchMoved || quenchRenderReady || grindRenderReady || this.station === "grind") {
         this.quenchPoseDirty = false;
         if (this.station === "quench-water" || this.station === "quench-oil") this.lastQuenchRenderMs = nowMs;
         if (this.station === "quench-water" || this.station === "quench-oil") this.lastQuenchEffectRenderMs = nowMs;
@@ -532,13 +540,14 @@ export class ForgeBilletView {
   }
 
   pickFurnace(x: number, y: number): boolean {
-    return this.pickObject(x, y, [this.furnaceView.target, this.furnaceView.item], false) !== null;
+    const active=this.station==="temper"?this.temperFurnaceView:this.furnaceView;
+    return this.pickObject(x, y, [active.target, active.item], false) !== null;
   }
 
   setTemperInsertionOffset(offsetZ: number): void {
-    this.furnaceView.setManualOffset(offsetZ);
+    this.temperFurnaceView.setManualOffset(offsetZ);
     if (this.snapshot && this.station === "temper") {
-      this.furnaceView.update(this.snapshot);
+      this.temperFurnaceView.update(this.snapshot);
       this.render();
     }
   }
@@ -551,13 +560,23 @@ export class ForgeBilletView {
     }
   }
 
+  // The tempering furnace is serviced from the aisle on its left, so a
+  // screen-right drag pulls the workpiece toward the viewer instead of pushing
+  // it into the chamber. Heating keeps the opposite sign because its camera
+  // looks in from the right.
+  dragTemperInsertion(startOffset: number, deltaX: number): void {
+    this.setTemperInsertionOffset(startOffset + deltaX * 0.35);
+  }
+
   furnaceInsertionOffset(): number { return this.furnaceView.manualOffset(); }
   furnaceInsertionComplete(): boolean { return this.furnaceView.isFullyInside(); }
   furnaceInsertionOutside(): boolean { return this.furnaceView.isFullyOutside(); }
 
-  temperInsertionOffset(): number { return this.furnaceView.manualOffset(); }
+  temperInsertionOffset(): number { return this.temperFurnaceView.manualOffset(); }
+  temperInsertionComplete(): boolean { return this.temperFurnaceView.isFullyInside(); }
+  temperInsertionOutside(): boolean { return this.temperFurnaceView.isFullyOutside(); }
 
-  clearTemperInsertionOffset(): void { this.furnaceView.clearManualOffset(); }
+  clearTemperInsertionOffset(): void { this.temperFurnaceView.clearManualOffset(); }
 
   updateCut(pose: CutPose, valid: boolean | null, trayPage = 0): void {
     this.cutPose=pose; this.cutValid=valid;
@@ -809,7 +828,13 @@ export class ForgeBilletView {
       const p=world.clone().project(this.camera);
       return {x:(p.x+1)*this.viewport.width/2,y:(1-p.y)*this.viewport.height/2,world:world.toArray()};
     };
-    const inspectedBillet = this.station === "anvil" ? this.hammerView.item : this.billet;
+    const inspectedBillet = this.station === "anvil"
+      ? this.hammerView.item
+      : this.station === "furnace"
+        ? this.furnaceView.item
+        : this.station === "temper"
+          ? this.temperFurnaceView.item
+        : this.billet;
     const points:Record<string,ReturnType<typeof project>>={billet:project(inspectedBillet,true),hammer:project(this.hammerView.item,true),temper:project(this.temperControl)};
     for(const [name,object] of this.stationMeshes)points["station:"+name]=project(object);
     this.materialsView?.candidates.forEach(m=>points["material:"+m.userData.materialId]=project(m));
@@ -882,6 +907,8 @@ export class ForgeBilletView {
     this.stationMeshes.delete("anvil");this.hammerView.dispose();
     this.stationMeshes.delete("furnace");
     this.furnaceView.dispose();
+    this.stationMeshes.delete("temper");
+    this.temperFurnaceView.dispose();
     this.sawView.dispose();
     this.materialsView?.dispose();
     this.grinderModel.dispose();
@@ -1029,10 +1056,12 @@ export class ForgeBilletView {
     if(this.materialsView)this.materialsView.group.visible=true;
     this.sawView.group.visible=true;this.sawView.setActive(activeStation==="cut");
     this.furnaceView.group.visible=true;this.furnaceView.body.visible=true;
-    this.furnaceView.itemRig.visible=activeStation==="furnace"||activeStation==="temper";
+    this.furnaceView.itemRig.visible=activeStation==="furnace";
+    this.temperFurnaceView.group.visible=true;this.temperFurnaceView.body.visible=true;
+    this.temperFurnaceView.itemRig.visible=activeStation==="temper";
     this.anvilModel.visible=true;
     const power = this.stationRoots.get("power");
-    if (power) power.visible = true;
+    if (power) power.visible = activeStation !== "furnace" && activeStation !== "temper";
     this.hammerView.setActive(activeStation==="anvil");
     for(const mesh of this.materialMeshes.values())mesh.visible=false;
   }
@@ -1062,7 +1091,7 @@ export class ForgeBilletView {
     }
     if(station==="anvil")return hammerCameraFrame(this.camera.aspect);
     if (station === "furnace") return furnaceCameraFrame(this.camera.aspect, FURNACE_ORIGIN);
-    if (station === "temper") return furnaceCameraFrame(this.camera.aspect, FURNACE_ORIGIN);
+    if (station === "temper") return temperCameraFrame(this.camera.aspect);
     if(station==="cut")return sawCameraFrame(this.camera.aspect);
     if (station === "materials") return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
     if (station === "weld") return weldCameraFrame(this.camera.aspect);
