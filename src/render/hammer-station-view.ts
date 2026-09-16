@@ -124,7 +124,9 @@ export class HammerStationView {
   private positionTool(now:number):void {
     const p=this.aim?.point ?? {x:70,y:8,z:0};
     const rest=22+this.energy*18;
-    const lift=now-this.strikeAt<96?rest*(1-(now-this.strikeAt)/96):
+    // A queued animation frame can predate the pointer event that starts a blow.
+    const elapsed=Math.max(0,now-this.strikeAt);
+    const lift=elapsed<96?rest*(1-elapsed/96):
       now<this.releaseAt?0:rest*Math.min(1,(now-this.releaseAt)/150);
     this.tool.position.set(p.x*ANVIL.scale,ANVIL.surface+p.y*ANVIL.scale+lift,p.z*ANVIL.scale);
   }

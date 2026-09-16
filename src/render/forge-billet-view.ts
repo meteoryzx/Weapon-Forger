@@ -819,14 +819,18 @@ export class ForgeBilletView {
   }
 
   // Read-only browser diagnostics: tests still operate real pointer/keyboard inputs.
-  inspectScene() {
+  inspectScene(motionOnly=false) {
+    if(motionOnly)return {toolY:this.hammerView.tool.position.y};
     this.scene.updateMatrixWorld(true);this.camera.updateMatrixWorld(true);
+    const projectWorld=(world:Vector3)=>{
+      const p=world.clone().project(this.camera);
+      return {x:(p.x+1)*this.viewport.width/2,y:(1-p.y)*this.viewport.height/2,world:world.toArray()};
+    };
     const project=(o:Object3D,useBounds=false)=>{
       const world=useBounds
         ? new Box3().setFromObject(o).getCenter(new Vector3())
         : new Vector3().setFromMatrixPosition(o.matrixWorld);
-      const p=world.clone().project(this.camera);
-      return {x:(p.x+1)*this.viewport.width/2,y:(1-p.y)*this.viewport.height/2,world:world.toArray()};
+      return projectWorld(world);
     };
     const inspectedBillet = this.station === "anvil"
       ? this.hammerView.item
@@ -836,6 +840,11 @@ export class ForgeBilletView {
           ? this.temperFurnaceView.item
         : this.billet;
     const points:Record<string,ReturnType<typeof project>>={billet:project(inspectedBillet,true),hammer:project(this.hammerView.item,true),temper:project(this.temperControl)};
+    if(this.station==="anvil")for(const x of [0,100,105]){
+      const contact=this.hammerView.contact(x,0);
+      const point=new Vector3(x*ANVIL.scale,ANVIL.surface+(contact?.point.y??8)*ANVIL.scale,0);
+      points[`hammer:${x}`]=projectWorld(this.hammerView.group.localToWorld(point));
+    }
     for(const [name,object] of this.stationMeshes)points["station:"+name]=project(object);
     this.materialsView?.candidates.forEach(m=>points["material:"+m.userData.materialId]=project(m));
     this.materialsView?.tableItems.forEach((m,i)=>points["table:"+i]=project(m));
@@ -844,6 +853,20 @@ export class ForgeBilletView {
     return {station:this.station,transitioning:this.isTransitioning,points,camera:{position:this.camera.position.toArray(),target:this.cameraTarget.toArray(),fov:this.camera.fov},
       renderer:{calls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures},
       immersion:this.quenchImmersion(),
+      hammer:this.station==="anvil"&&this.snapshot?{
+        toolY:this.hammerView.tool.position.y,
+        bounds:new Box3().setFromObject(this.hammerView.item),
+        supportedMinY:this.snapshot.geometry.nodes.reduce((min,n)=>{
+          const p=this.hammerView.item.localToWorld(new Vector3(n.axialPosition,n.verticalOffset,n.lateralOffset));
+          return Math.abs(p.x)<=FORGE_RULES.anvilFaceLength*ANVIL.scale/2&&Math.abs(p.z)<=FORGE_RULES.anvilFaceWidth*ANVIL.scale/2?Math.min(min,p.y):min;
+        },Infinity),
+        midPlanes:[0.1,0.5,0.9].map(fraction=>{
+          const g=this.snapshot!.geometry,ring=(g.grid.widthBlocks+1)*(g.grid.heightBlocks+1);
+          const index=Math.round((g.nodes.length/ring-1)*fraction);
+          const ys=g.nodes.slice(index*ring,(index+1)*ring).map(n=>n.verticalOffset);
+          return (Math.min(...ys)+Math.max(...ys))/2;
+        }),
+      }:null,
       grind:this.station==="grind"?{pose:this.grindPose(),contact:this.grindContactTarget(),frame:this.grindContactPatch()?.frame,metrics:this.snapshot?.grindMetrics,
         billetBounds:new Box3().setFromObject(this.billet),restY:BILLET_ANCHORS.grind[1],frontX:BILLET_ANCHORS.grind[0],model:this.grinderModel.root.name,solids:this.snapshot?.geometry.solids?.length ?? 0,grid:this.snapshot?.geometry.grid,vertices:this.billet.geometry.getAttribute("position").count}:null};
   }

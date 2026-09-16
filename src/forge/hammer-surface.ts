@@ -23,6 +23,10 @@ export const HAMMER_RULES = {
   // How far one lateral direction may outweigh another. The free-surface rule is
   // only a bias, so a corner blow cannot fling metal out sideways.
   maximumFlowBias: 4,
+  // Reduced impact calibration: 1.6 kg at 5 m/s, 20 J at full input.
+  impactEnergyJ: 20,
+  contactSamples: 5,
+  maximumBendRadians: 0.04,
 } as const;
 export const HAMMER_HOME: HammerPose = { x: 0, z: 0, yaw: 0, roll: 0 };
 export interface HammerTriangle { readonly blockId: string; readonly points: readonly [SolidPoint, SolidPoint, SolidPoint] }
@@ -36,6 +40,32 @@ export interface HammerContact {
   readonly blockId: string;
   readonly supported: boolean;
   readonly supportRatio: number;
+  readonly thickness: number;
+  readonly edges: readonly HammerEdgeLoad[];
+}
+// Estimated load on a held strip crossing a planar anvil edge, not a general
+// contact manifold. Fractions use occupied footprint samples, not solved pressure.
+export interface HammerEdgeLoad {
+  readonly axis: "x" | "z";
+  readonly sign: -1 | 1;
+  readonly boundary: number;
+  readonly loadFraction: number;
+  readonly lever: number;
+  readonly width: number;
+  readonly thickness: number;
+  readonly neutralY: number;
+}
+
+function clipSurface(points: readonly SolidPoint[], axis:"x"|"z", boundary:number, sign:number): SolidPoint[] {
+  const result:SolidPoint[]=[];
+  for(let i=0;i<points.length;i++){
+    const a=points[i]!,b=points[(i+1)%points.length]!,da=sign*(a[axis]-boundary),db=sign*(b[axis]-boundary);
+    if(da<=0)result.push(a);
+    if((da<0&&db>0)||(da>0&&db<0)){
+      const t=da/(da-db);result.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t});
+    }
+  }
+  return result;
 }
 const surfaces = new WeakMap<WorkpieceGeometry, readonly HammerTriangle[]>();
 const tetrahedra = [[0,1,3,7],[0,3,2,7],[0,2,6,7],[0,6,4,7],[0,4,5,7],[0,5,1,7]] as const;
@@ -81,7 +111,17 @@ export function hammerFrame(g: WorkpieceGeometry,pose: HammerPose): HammerFrame 
   const points=g.solids?g.solids.flatMap(s=>s.vertices.map(v=>solidPoint(v,g))):g.nodes.map(nodePoint);
   for(const p of points){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
   const center={x:(minX+maxX)/2,y:0,z:(minZ+maxZ)/2};
-  for(const p of points) minY=Math.min(minY,rotateHammerPoint({x:p.x-center.x,y:p.y,z:p.z-center.z},pose).y);
+  const ungrounded={center,lift:0,pose};
+  // Only material above the finite face can establish the resting plane. A
+  // bent overhang is allowed below that plane instead of lifting the support.
+  for(const t of placedHammerSurface(g,ungrounded)){
+    let polygon:readonly SolidPoint[]=t.points;
+    for(const [axis,half] of [["x",FORGE_RULES.anvilFaceLength/2],["z",FORGE_RULES.anvilFaceWidth/2]] as const){
+      polygon=clipSurface(polygon,axis,half,1);polygon=clipSurface(polygon,axis,-half,-1);
+    }
+    for(const p of polygon)minY=Math.min(minY,p.y);
+  }
+  if(!Number.isFinite(minY))for(const p of points)minY=Math.min(minY,toAnvil(p,ungrounded).y);
   return {center,lift:-minY,pose};
 }
 export function toAnvil(p: SolidPoint,f: HammerFrame): SolidPoint {
@@ -109,15 +149,54 @@ export function hammerContact(surface: readonly HammerTriangle[],x: number,z: nu
   let top=-Infinity,bottom=Infinity,blockId="";
   for(const t of surface){const y=triangleHeight(t,x,z);if(y===null)continue;if(y>top){top=y;blockId=t.blockId;}bottom=Math.min(bottom,y);}
   if(!Number.isFinite(top) || top-bottom<1e-5)return null;
-  const onAnvil=Math.abs(x)<=FORGE_RULES.anvilFaceLength/2 && Math.abs(z)<=FORGE_RULES.anvilFaceWidth/2;
   // At an oblique roll the support is an edge, not the full lower face. Measure
   // distance to actual resting material within the finite anvil footprint.
   let distance=Infinity;
   for(const t of surface)for(const p of t.points)if(p.y<=HAMMER_RULES.supportTolerance &&
     Math.abs(p.x)<=FORGE_RULES.anvilFaceLength/2 && Math.abs(p.z)<=FORGE_RULES.anvilFaceWidth/2)
     distance=Math.min(distance,Math.hypot(p.x-x,p.z-z));
-  const supportRatio=onAnvil?Math.max(0,1-distance/(HAMMER_RULES.face*1.5)):0;
-  return {point:{x,y:top,z},blockId,supported:onAnvil&&supportRatio>0,supportRatio};
+  const radius=HAMMER_RULES.face/2;
+  const nearEdge=Math.abs(x)+radius>FORGE_RULES.anvilFaceLength/2 || Math.abs(z)+radius>FORGE_RULES.anvilFaceWidth/2;
+  const reach=Math.max(0,1-distance/(HAMMER_RULES.face*1.5));
+  const edges:HammerEdgeLoad[]=[];
+  let supportedFraction=1;
+  if(nearEdge){
+    const samples:SolidPoint[]=[];
+    let supported=0;
+    for(let i=0;i<HAMMER_RULES.contactSamples;i++)for(let j=0;j<HAMMER_RULES.contactSamples;j++){
+      const sx=x-radius+(i+0.5)*HAMMER_RULES.face/HAMMER_RULES.contactSamples;
+      const sz=z-radius+(j+0.5)*HAMMER_RULES.face/HAMMER_RULES.contactSamples;
+      let upper=-Infinity,lower=Infinity;
+      for(const t of surface){const y=triangleHeight(t,sx,sz);if(y!==null){upper=Math.max(upper,y);lower=Math.min(lower,y);}}
+      if(!Number.isFinite(upper)||upper-lower<1e-5)continue;
+      samples.push({x:sx,y:upper,z:sz});
+      if(Math.abs(sx)<=FORGE_RULES.anvilFaceLength/2&&Math.abs(sz)<=FORGE_RULES.anvilFaceWidth/2)supported++;
+    }
+    supportedFraction=samples.length?supported/samples.length:0;
+    for(const [axis,half] of [["x",FORGE_RULES.anvilFaceLength/2],["z",FORGE_RULES.anvilFaceWidth/2]] as const)for(const sign of [-1,1] as const){
+      const boundary=sign*half,loaded=samples.filter(p=>sign*(p[axis]-boundary)>0);
+      if(!loaded.length)continue;
+      const transverse=axis==="x"?"z":"x";
+      // Read the material cross-section at the edge, not the billet envelope.
+      // No bridge across the edge means this cantilever approximation cannot apply.
+      const section:SolidPoint[]=[];
+      for(const triangle of surface)for(let i=0;i<3;i++){
+        const a=triangle.points[i]!,b=triangle.points[(i+1)%3]!,da=a[axis]-boundary,db=b[axis]-boundary;
+        if(da*db>0||Math.abs(da-db)<1e-9)continue;
+        const t=da/(da-db),p={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t};
+        if(Math.abs(p[transverse]-(transverse==="x"?x:z))<=radius)section.push(p);
+      }
+      if(section.length<2)continue;
+      const lo=Math.min(...section.map(p=>p.y)),hi=Math.max(...section.map(p=>p.y));
+      const width=Math.max(...section.map(p=>p[transverse]))-Math.min(...section.map(p=>p[transverse]));
+      if(hi-lo<1e-5||width<1e-5||lo>HAMMER_RULES.supportTolerance)continue;
+      edges.push({axis,sign,boundary,loadFraction:loaded.length/samples.length,
+        lever:loaded.reduce((s,p)=>s+sign*(p[axis]-boundary),0)/loaded.length,
+        width,thickness:hi-lo,neutralY:(hi+lo)/2});
+    }
+  }
+  const supportRatio=supportedFraction*reach;
+  return {point:{x,y:top,z},blockId,supported:supportRatio>0,supportRatio,thickness:top-bottom,edges};
 }
 // Metal leaves the hammer face towards whatever free surface is closest. A blow
 // mid-bar finds the width edges far nearer than the ends, so it spreads; a blow
@@ -206,7 +285,7 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
   const contact=hammerContact(surface,operation.target.x,operation.target.z);
   if(!contact)throw new Error("落点没有金属，请瞄准材料表面。");
   if(!contact.supported)throw new Error("落点缺少砧面支撑，请把受敲部位移到砧面上。");
-  if(contact.point.y<HAMMER_RULES.minimumHeight)throw new Error("此处已经很薄，请降低力度或换一个位置。");
+  if(contact.thickness<HAMMER_RULES.minimumHeight)throw new Error("此处已经很薄，请降低力度或换一个位置。");
   const blocks=piece.sections.flatMap(s=>s.blocks), block=blocks.find(b=>b.id===contact.blockId) ?? blocks[0]!;
   const resistance=yieldStrengthMPa(block,piece.material);
   const requested=Math.min(HAMMER_RULES.maximumCompression,
@@ -216,6 +295,20 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
   // Read the free surfaces once: they do not depend on how hard this blow lands.
   const flow=lateralFlowWeights(freeSurfaceReach(surface,contact.point.x,contact.point.z,radius));
   const beforeVolumes=geometryVolumes(piece),beforeTotal=[...beforeVolumes.values()].reduce((a,b)=>a+b,0);
+  // A held, supported strip acts as a short elastoplastic cantilever. Residual
+  // rotation requires moment above its plastic section capacity (sigma*b*h^2/4).
+  // Work is allocated once across edges; temperature enters through flow stress.
+  const impactWork=operation.energy*HAMMER_RULES.impactEnergyJ*1000;
+  const force=impactWork/FORGE_RULES.hammerMaximumTravel;
+  const edgeWeight=contact.edges.reduce((sum,e)=>sum+e.loadFraction*e.lever/radius,0);
+  const bends=contact.edges.map(edge=>{
+    const moment=force*edge.loadFraction*edge.lever;
+    const capacity=resistance*edge.width*edge.thickness**2/4;
+    const available=impactWork*(edge.loadFraction*edge.lever/radius)/Math.max(1,edgeWeight);
+    const angle=Math.min(HAMMER_RULES.maximumBendRadians,FORGE_RULES.hammerMaximumTravel/edge.lever,
+      available/Math.max(capacity,1)*(Math.max(0,1-capacity/Math.max(moment,1))));
+    return {...edge,angle,length:Math.max(2*edge.thickness,2*FORGE_RULES.simulationCellSize)};
+  });
   // A full-strength blow can push a worked column past the orientation guard. The
   // old code threw for that blow and then rejected *every* later blow at *every*
   // position, so a long shaping session bricked the workpiece permanently. Soften
@@ -236,7 +329,20 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
       };
     });
     const makeNodes=(spread:number)=>base.map((p,i)=>{
-      const start=world[i]!,local=fromAnvil({x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread},frame);
+      const start=world[i]!;
+      let bent={x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread};
+      for(const bend of bends){
+        const distance=bend.sign*(bent[bend.axis]-bend.boundary),angle=bend.angle*scale;
+        if(distance<=0||angle<1e-9)continue;
+        // Circular bending over a finite hinge length, then rigid rotation of
+        // the remaining strip. This gives continuous position and tangent at
+        // the edge. The existing cell guard and volume correction remain active.
+        const curvature=angle/bend.length,a=curvature*Math.min(distance,bend.length);
+        const beyond=Math.max(0,distance-bend.length),v=bent.y-bend.neutralY;
+        bent={...bent,[bend.axis]:bend.boundary+bend.sign*((1/curvature+v)*Math.sin(a)+beyond*Math.cos(a)),
+          y:bend.neutralY+v*Math.cos(a)-2*Math.sin(a/2)**2/curvature-beyond*Math.sin(a)};
+      }
+      const local=fromAnvil(bent,frame);
       return {...piece.geometry.nodes[i]!,axialPosition:local.x,verticalOffset:local.y,lateralOffset:local.z};
     });
     // Only cells whose shape changes can be collapsed by this blow: rigid

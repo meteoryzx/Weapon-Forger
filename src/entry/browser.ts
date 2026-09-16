@@ -169,13 +169,8 @@ function hammerDimensions():string {
 function aimHammer(point:{x:number;z:number}|null):void {
   hammerAim=point;const hit=view?.aimHammer(point,hammerEnergy);
   hammerStatus.textContent=hammerPlacing?"摆放模式：拖动金属，完成后再次点击“拖动摆放”返回落锤。":
-    hit ? hit.supported?`${hammerShapeHint(point!)} · 力度 ${Math.round(hammerEnergy*100)}% · 支撑 ${Math.round(hit.supportRatio*100)}%`:
+    hit ? hit.supported?`有效接触 · 力度 ${Math.round(hammerEnergy*100)}% · 砧面支撑 ${Math.round(hit.supportRatio*100)}%`:
       "该落点缺少砧面支撑，请移动工件。":"瞄准金属表面 · 单击落锤 · 滚轮调力度";
-}
-function hammerShapeHint(point:{x:number;z:number}):string {
-  const values=latestSnapshot.geometry.nodes.map(n=>n.axialPosition);
-  const length=Math.max(...values)-Math.min(...values);
-  return Math.abs(point.x)>length*0.28?"端部落点：压薄并向端部延展":"中心落点：压薄并向两侧展宽";
 }
 async function strikeHammer(point:{x:number;z:number}):Promise<void> {
   if(!view || hammerPending || view.hammerView.busy)return;
@@ -887,7 +882,7 @@ inspectionButtons.forEach(button => button.addEventListener("click", () => {
   inspectionButtons.forEach(candidate => candidate.setAttribute("aria-pressed", candidate === button ? "true" : "false"));
 }));
 if (["127.0.0.1","localhost","::1"].includes(window.location.hostname)) {
-  (window as unknown as {__forgeInspect:()=>unknown}).__forgeInspect=()=>view?.inspectScene();
+  (window as unknown as {__forgeInspect:(motionOnly?:boolean)=>unknown}).__forgeInspect=(motionOnly=false)=>view?.inspectScene(motionOnly);
   Object.defineProperty(window,"__THREE_GAME_DIAGNOSTICS__",{get:()=>view?.inspectScene()});
 }
 activeStation = acceptanceStation ?? "overview";

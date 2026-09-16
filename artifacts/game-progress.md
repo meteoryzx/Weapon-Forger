@@ -1,11 +1,37 @@
 # Workshop reconstruction
 
+## 2026-09-17 end-of-day checkpoint
+
+- Author requested Git checkpointing and will resume tomorrow. Branch: `feat/R1-shaping-flow`; workspace: `D:/打了个铁/Weapon-Forger-hammer`. Preserve this branch as the continuing development line; the new contact-foundation implementation has not received author experience acceptance yet.
+- Resume from `docs/HAMMERING_HANDOFF.md` (current technical positioning) and the verified implementation below. First reproduce the existing center/edge hammer contrast, then extend reusable contact/load/support facts for further strike-driven bending. Keep the fixed square hammer; no face-aspect control or target-shape shortcut.
+- Experience: `http://127.0.0.1:4199/?accept=hammer`. If the server stopped after shutdown, run `npm run dev:codex` from this workspace. Local screenshots/measurement JSON remain under `output/playwright`; verification conclusions are recorded below.
+- This checkpoint archives source, focused regressions and handoff documentation on the feature branch. No merge or release is part of the end-of-day request.
+
+## 2026-09-17 finite support: first contact-foundation case
+
+- Author clarified that impact/contact feedback is underlying technology for future player-driven bending and other deformation. The edge case below validates one boundary condition; it does not complete general bending or introduce a selectable bend mode. Keep the fixed 48 x 48 mm hammer.
+- `hammerContact` now exposes contact thickness and estimated edge loads from occupied footprint samples and edge cross-sections. `deformSurfaceHammer` uses temperature-dependent yield, section capacity and a bounded residual beam rotation. `hammerFrame` grounds only material over the finite anvil rectangle, so a hanging tip no longer lifts the supported work off the anvil. Geometry guards and volume correction remain active.
+- Added five support regressions: hot/heavy versus light/cold, unloaded/fully supported strikes, opposite/yawed edges, finite-cut preservation, repeated grounding/repositioning/conservation/save/replay. Parameter version is `physics-6`; state structure stays `forge-state-5`, with no old-version physics replayer.
+- Corrected benchmark counting so T1's 40 blows really means 40; it remains informational. Full bench: T2/T3/T4/T5/T6 pass. T1 span 8.00 -> 6.86 mm, T6 one hot high-carbon edge blow gives 1.098 mm relative tip drop with 0.00049% volume drift; 40-blow T4 drift 0.004%, deterministic replay.
+- Browser verification uses actual arrow keys, wheel, pointer clicks and reposition button on 1280 x 720 and 390 x 844. Three 80% edge blows on the acceptance sample give approximately 0.774 mm relative tip drop, unchanged material volume and preserved geometry after repositioning. Fixed a narrow CSS override that extended the canvas behind controls; fixed a pre-event animation-frame timestamp causing upward hammer overshoot at strike start.
+- Verification: governance/typecheck/24 unit files (136 tests)/Web and WeChat builds pass. E2E initially passed 20/22 while concurrent browser instrumentation was running; the failed grinding and complete-workflow paths each passed in isolated reruns without product or test changes. Dedicated desktop/narrow hammer input, layout, animation and canvas checks cover the final scoped changes. Captures and measurements: `output/playwright/support-{desktop,narrow}-{before,after,repositioned}.png`, `support-evidence.json` and `support-verification.log`.
+- Limits: stable holding, sampled footprint and rectangular section-capacity approximation; no dynamic contact pressure, friction, elastic rebound, arbitrary supports, horn/body collision or exact deeply notched/wide-plate stiffness. Impact energy is a reduced calibration, not a solved energy balance for compression plus bending. Existing bundle warnings remain; WeChat is build-checked only. Narrow rendering is above the skill's initial 150-call/200-geometry budget in calls only (176 calls, 160 geometries); draw-call optimization is not part of this physics change.
+- Next: extend the contact/load/support description with material-path and contact-normal evidence, then validate additional strike-driven bending cases and physical motion/contact timing. Do not revive face-aspect controls or erase accumulated plastic-strain history. Furnace layout preserved; subsequent Git checkpointing is recorded above.
+
+## 2026-09-16 shaping direction correction: fixed hammer, physical boundaries
+
+- Author rejected tool-face aspect or a rectangular hammer as a control for choosing draw-out versus spread. The hammer remains one fixed traditional flat-faced tool; face aspect and face orientation are not gameplay variables.
+- Direction must emerge from physical boundary conditions: strike position, workpiece pose, temperature, impact energy, contact/friction, finite anvil support and nearby free surfaces. The solver must not steer material toward a requested product dimension.
+- The old T1 target (40 blows must thin 120 mm to 5 mm) is now an experience measurement, not permission to distort the flow rule. T2 is evidence of different free-surface boundary responses, not a direct directional control. T3 truthfulness, T4 conservation/replay and T5 locality remain hard constraints.
+- The existing uncommitted T6 benchmark for anvil reaction is preserved. Next implementation target: replace the current boolean support gate with a finite support reaction so a supported blow compresses against the anvil while an overhang responds at the anvil edge. Feedback must display the resulting contact and motion rather than a synthetic direction cue.
+- Accumulated plastic strain remains a history fact and must not be erased on heating. If repeated hot work is too resistant, dynamic recovery/recrystallization must reduce its contribution to hot flow stress without deleting deformation history.
+
 ## 2026-09-16 shaping branch: radial flow (author feedback)
 
 - Author found that hammering one middle spot kept extending the sides. Measured cause: the flow kernel was separable, so lateral displacement depended only on the axial offset and every blow translated the whole axial band outwards. 40 blows at one spot took the local width 48.0 -> 96.9 mm while the thickness span never moved.
 - Fix: the flow is a radial isochoric map, compression as a function of radius with the outward displacement satisfying `(r+u)^2 = r^2 + 2*integral((1/s-1)*r dr)`, so it decays like 1/r. Same 40 blows now give 48.0 -> 57.5 mm with falling increments, and the station 40 mm away moves only to 50.8 mm.
 - Trade-off: T1 is red again (120 mm span 8.00 -> 6.84 mm in 40 blows, was 4.90). Part of the old speed was the non-physical far-field translation. T2 separation 98%, T3 feedback 0.00% error, T4 drift 0.005% with byte-identical replay, T5 locality ratio 0.03.
-- Next: tool-face aspect (a narrow axial footprint draws material along the length) is the mechanism expected to bring T1 back without losing T5.
+- Superseded: tool-face aspect was proposed to bring T1 back without losing T5, but the author rejected that control scheme. Continue with finite anvil reaction and physically grounded hot-flow calibration.
 
 ## 2026-09-16 shaping branch: free-surface flow
 

@@ -8,7 +8,9 @@ describe("hammer animation recovery",()=>{
     view.update(createForgeSnapshot(createForgeState({sectionCount:24})),HAMMER_HOME);
     view.setAim({x:0,z:0},0.55);
     const restingHeight=view.tool.position.y;
-    view.strike(100);view.tick(196);
+    view.strike(100);view.tick(95);
+    expect(view.tool.position.y).toBeCloseTo(restingHeight,10);
+    view.tick(196);
     expect(view.tool.position.y).toBeLessThan(restingHeight);
     view.finishStrike(1000);
     expect(view.tick(3000)).toBe(true);

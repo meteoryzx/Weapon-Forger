@@ -52,7 +52,7 @@ describe("surface hammer",()=>{
     const s=hot(),old=deserializeForgeState(JSON.stringify({...s,stateVersion:"forge-state-4",parameterVersion:"physics-3"}));
     expect(old.stateVersion).toBe("forge-state-5");
     expect(old.parameterVersion).toBe("physics-3");
-    expect(applyForgeOperation(old,strike()).parameterVersion).toBe("physics-5");
+    expect(applyForgeOperation(old,strike()).parameterVersion).toBe("physics-6");
     const invalid={...s,operations:[{...strike(),energy:2}]};
     expect(()=>deserializeForgeState(JSON.stringify(invalid))).toThrow(/energy/);
   });
