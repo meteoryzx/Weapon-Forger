@@ -12,6 +12,9 @@ export const HAMMER_RULES = {
   // until it is degenerate, and at that point every later blow fails forever.
   // Keep each cell above a floor of its own undeformed volume too.
   minimumCellVolumeFraction: 0.02,
+  // How far one lateral direction may outweigh another. The free-surface rule is
+  // only a bias, so a corner blow cannot fling metal out sideways.
+  maximumFlowBias: 4,
 } as const;
 export const HAMMER_HOME: HammerPose = { x: 0, z: 0, yaw: 0, roll: 0 };
 export interface HammerTriangle { readonly blockId: string; readonly points: readonly [SolidPoint, SolidPoint, SolidPoint] }
@@ -108,6 +111,32 @@ export function hammerContact(surface: readonly HammerTriangle[],x: number,z: nu
   const supportRatio=onAnvil?Math.max(0,1-distance/(HAMMER_RULES.face*1.5)):0;
   return {point:{x,y:top,z},blockId,supported:onAnvil&&supportRatio>0,supportRatio};
 }
+// Metal leaves the hammer face towards whatever free surface is closest. A blow
+// mid-bar finds the width edges far nearer than the ends, so it spreads; a blow
+// next to an end finds that end nearer than the sides, so it draws out. These
+// distances are read from the placed surface, so the choice belongs to the
+// player's placement rather than to a hard-coded product shape.
+export interface LateralFlowWeights { readonly plusX:number; readonly minusX:number; readonly plusZ:number; readonly minusZ:number }
+export function freeSurfaceReach(surface: readonly HammerTriangle[],x: number,z: number,band: number) {
+  let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+  for(const t of surface)for(const p of t.points){
+    if(Math.abs(p.z-z)<=band){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);}
+    if(Math.abs(p.x-x)<=band){minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
+  }
+  return {
+    plusX:Number.isFinite(maxX)?maxX-x:HAMMER_RULES.face,
+    minusX:Number.isFinite(minX)?x-minX:HAMMER_RULES.face,
+    plusZ:Number.isFinite(maxZ)?maxZ-z:HAMMER_RULES.face,
+    minusZ:Number.isFinite(minZ)?z-minZ:HAMMER_RULES.face,
+  };
+}
+export function lateralFlowWeights(reach: ReturnType<typeof freeSurfaceReach>): LateralFlowWeights {
+  const floor=HAMMER_RULES.face/4;
+  const raw=[reach.plusX,reach.minusX,reach.plusZ,reach.minusZ].map(distance=>1/Math.max(distance,floor));
+  const mean=raw.reduce((sum,value)=>sum+value,0)/raw.length;
+  const bounded=raw.map(value=>Math.min(HAMMER_RULES.maximumFlowBias,Math.max(1/HAMMER_RULES.maximumFlowBias,value/mean)));
+  return {plusX:bounded[0]!,minusX:bounded[1]!,plusZ:bounded[2]!,minusZ:bounded[3]!};
+}
 export function geometryVolumes(piece: WorkpieceState,g=piece.geometry): Map<string,number> {
   if(g.solids)return solidVolumesByBlock(g.solids,g);
   const result=new Map<string,number>();
@@ -147,6 +176,8 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
     HAMMER_RULES.maximumCompression*operation.energy*105/Math.max(resistance,30))*contact.supportRatio;
   const radius=HAMMER_RULES.face/2;
   const world=piece.geometry.nodes.map(n=>toAnvil(nodePoint(n),frame));
+  // Read the free surfaces once: they do not depend on how hard this blow lands.
+  const flow=lateralFlowWeights(freeSurfaceReach(surface,contact.point.x,contact.point.z,radius));
   const beforeVolumes=geometryVolumes(piece),beforeTotal=[...beforeVolumes.values()].reduce((a,b)=>a+b,0);
   // A full-strength blow can push a worked column past the orientation guard. The
   // old code threw for that blow and then rejected *every* later blow at *every*
@@ -158,10 +189,10 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
     const base=world.map(p=>{
       const dx=p.x-contact.point.x,dz=p.z-contact.point.z;
       const s1=1-k*bump(dx/radius)*bump(dz/radius);
-      const x=p.x+spreadIntegral(dx,dz,k);
+      const x=p.x+spreadIntegral(dx,dz,k)*(dx>0?flow.plusX:flow.minusX);
       const nx=x-contact.point.x;
       const s2=1-k*bump(nx/radius)*bump(dz/radius);
-      return {x,y:p.y*s1*s2,z:p.z+spreadIntegral(dz,nx,k)};
+      return {x,y:p.y*s1*s2,z:p.z+spreadIntegral(dz,nx,k)*(dz>0?flow.plusZ:flow.minusZ)};
     });
     const makeNodes=(spread:number)=>base.map((p,i)=>{
       const start=world[i]!,local=fromAnvil({x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread},frame);

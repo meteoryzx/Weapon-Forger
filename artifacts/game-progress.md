@@ -1,5 +1,13 @@
 # Workshop reconstruction
 
+## 2026-09-16 shaping branch: free-surface flow
+
+- Frozen state: commit `cdd13ed` on `feat/R1-hammer-continuous` (dual furnace, truthful facts, non-bricking hammer guard, capability loop). New work happens on `feat/R1-shaping-flow`.
+- `npm run bench:hammer` is the capability loop: T1 shaping speed, T2 directional freedom, T3 feedback accuracy, T4 conservation/replay. A non-zero exit means a target is unmet; it is a target gauge, not part of `npm run check`.
+- Change: the blow's lateral outflow now aims at the nearest free surface, read from the placed surface at the contact (`freeSurfaceReach`/`lateralFlowWeights` in `hammer-surface.ts`). Placement therefore selects the flow direction instead of the model picking one shape.
+- Measured (`npm run bench:hammer`): mid-bar blow dL/dW = 0.14 (dL +0.41, dW +2.90 mm) - spreads; near-free-end blow dL/dW = 1.04 (dL +1.61, dW +1.54 mm) - draws out; separation 86% against a 25% target. T2 now passes; T3 (length error 0.00%, span thickness error 0.24%) and T4 (geometric drift 0.003%, byte-identical replay) still pass.
+- Still red: T1 - 40 deliberate blows take a 120 mm span from 8.00 to 6.38 mm in 8.2 s (204 ms/blow). Likely cause: `plasticStrain` never recovers on reheat (`applyHeat` restores only stress and elasticStrain), so each blow after the first moves less material, and the per-blow cost is unchanged. Next candidates: work-hardening recovery on reheat, then tool-face aspect, then anvil support/overhang, then per-blow cost.
+
 ## 2026-09-16 hammer facts correction (shape must agree with numbers)
 
 Measured on the current rules layer (high-carbon steel, heated to 1050 C, default 168-section billet):
