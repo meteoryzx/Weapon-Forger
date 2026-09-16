@@ -74,6 +74,24 @@ function centre(state) {
   return positions.length ? (Math.min(...positions) + Math.max(...positions)) / 2 : 0;
 }
 
+// Lateral extent of the material ring at a station, addressed as a fraction of
+// the occupied length (0 = one end, 1 = the other).
+function sectionWidth(state, fraction) {
+  const occupied = state.workpiece.sections
+    .map((section, index) => ({ section, index }))
+    .filter(entry => entry.section.blocks.length > 0);
+  if (occupied.length === 0) return 0;
+  const at = occupied[Math.min(occupied.length - 1, Math.max(0, Math.round(fraction * (occupied.length - 1))))];
+  const { grid, nodes } = state.workpiece.geometry;
+  const stride = grid.widthBlocks + 1, ring = stride * (grid.heightBlocks + 1);
+  let min = Infinity, max = -Infinity;
+  for (let offset = 0; offset < ring; offset += 1) {
+    const value = nodes[at.index * ring + offset].lateralOffset;
+    min = Math.min(min, value); max = Math.max(max, value);
+  }
+  return max - min;
+}
+
 function passAlong(state, offsets) {
   let next = state;
   let applied = 0;
@@ -134,6 +152,26 @@ const separation = Math.abs(midRatio - endRatio) / Math.max(Math.abs(midRatio), 
 check("T2", "blow placement decides draw-out vs spread",
   Number.isFinite(midRatio) && Number.isFinite(endRatio) && separation > 0.25,
   `mid-bar dL/dW=${midRatio.toFixed(2)} (dL ${midBlow.length.toFixed(2)} dW ${midBlow.width.toFixed(2)}) | near free end dL/dW=${endRatio.toFixed(2)} (dL ${endBlow.length.toFixed(2)} dW ${endBlow.width.toFixed(2)}) | separation ${(separation * 100).toFixed(0)}% (needs >25%)`);
+
+// ------------------------------------------------------------ T5: locality
+// A blow may not shove the whole bar sideways: the work has to change where the
+// hammer landed and fade out from there. The first implementation translated
+// everything outside the kernel rigidly, so the entire side edge walked outwards
+// on every blow no matter where it landed.
+const locality = (() => {
+  let state = heat(HIGH_CARBON_STEEL, PERFORMANCE.temperatureC);
+  const before = [0.1, 0.5, 0.9].map(fraction => sectionWidth(state, fraction));
+  for (let i = 0; i < 10; i += 1) {
+    try { state = applyForgeOperation(state, strike({ ...HAMMER_HOME, x: 0 })); } catch { break; }
+  }
+  const after = [0.1, 0.5, 0.9].map(fraction => sectionWidth(state, fraction));
+  const centreGain = after[1] - before[1];
+  const endGain = Math.max(after[0] - before[0], after[2] - before[2]);
+  return { centreGain, endGain, ratio: centreGain > 1e-6 ? endGain / centreGain : Infinity };
+})();
+check("T5", "a blow changes the work where it landed, not the whole bar",
+  Number.isFinite(locality.ratio) && locality.ratio < 0.35,
+  `width gain at the ends ${locality.endGain.toFixed(2)} mm vs ${locality.centreGain.toFixed(2)} mm at the blow (ratio ${locality.ratio.toFixed(2)}, needs <0.35)`);
 
 // ------------------------------------------------------------ T3: feedback
 const facts = createForgeFacts(training);

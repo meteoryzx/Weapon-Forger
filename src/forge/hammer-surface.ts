@@ -179,15 +179,24 @@ function cellVolume(nodes:readonly WorkpieceNode[],cell:readonly number[]):numbe
   for(const t of tetrahedra)volume+=Math.abs(det4(nodes,cell,t))/6;
   return volume;
 }
-// A smooth compression and its reciprocal lateral integral form an isochoric
-// map (Jacobian determinant one). Distant material translates instead of growing.
-function spreadIntegral(offset:number, other:number,k:number):number {
-  const radius=HAMMER_RULES.face/2, extent=Math.min(Math.abs(offset),radius),strength=k*bump(other/radius);
-  if(strength===0||extent===0)return 0;
-  const n=HAMMER_RULES.integrationSteps,step=extent/n;
-  let total=0;
-  for(let i=0;i<=n;i++){const s=1-strength*bump((i*step)/radius);total+=(i===0||i===n?1:i%2===0?2:4)*(1/s-1);}
-  return Math.sign(offset)*total*step/3;
+// A smooth compression and its reciprocal radial flow form an isochoric map.
+// Working in radius rather than as two separable one-dimensional profiles is
+// what keeps a blow local: a separable kernel translates everything in its
+// axial band outwards forever, so hammering one spot widened the bar without
+// limit while its thickness never changed.
+function radialFlow(distance:number,k:number,radius:number,steps:number):number {
+  if(distance<=0||k<=0)return 0;
+  const step=distance/steps;
+  let integral=0;
+  for(let i=0;i<=steps;i++){
+    const r=i*step;
+    const s=1-k*bump(r/radius);
+    const weight=(i===0||i===steps)?1:(i%2===0?2:4);
+    integral+=weight*(1/s-1)*r;
+  }
+  integral*=step/3;
+  // Cylindrical volume of a ring is preserved when (r+u)^2 = r^2 + 2*integral.
+  return Math.sqrt(distance*distance+2*integral)-distance;
 }
 export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammerOperation) {
   assertHammerPose(operation.pose);
@@ -216,11 +225,15 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
     const k=1-Math.sqrt(1-compression);
     const base=world.map(p=>{
       const dx=p.x-contact.point.x,dz=p.z-contact.point.z;
-      const s1=1-k*bump(dx/radius)*bump(dz/radius);
-      const x=p.x+spreadIntegral(dx,dz,k)*(dx>0?flow.plusX:flow.minusX);
-      const nx=x-contact.point.x;
-      const s2=1-k*bump(nx/radius)*bump(dz/radius);
-      return {x,y:p.y*s1*s2,z:p.z+spreadIntegral(dz,nx,k)*(dz>0?flow.plusZ:flow.minusZ)};
+      const distance=Math.hypot(dx,dz);
+      const compression=1-k*bump(distance/radius);
+      if(distance<=0)return {x:p.x,y:p.y*compression,z:p.z};
+      const outward=radialFlow(distance,k,radius,HAMMER_RULES.integrationSteps)/distance;
+      return {
+        x:p.x+dx*outward*(dx>0?flow.plusX:flow.minusX),
+        y:p.y*compression,
+        z:p.z+dz*outward*(dz>0?flow.plusZ:flow.minusZ),
+      };
     });
     const makeNodes=(spread:number)=>base.map((p,i)=>{
       const start=world[i]!,local=fromAnvil({x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread},frame);

@@ -1,5 +1,12 @@
 # Workshop reconstruction
 
+## 2026-09-16 shaping branch: radial flow (author feedback)
+
+- Author found that hammering one middle spot kept extending the sides. Measured cause: the flow kernel was separable, so lateral displacement depended only on the axial offset and every blow translated the whole axial band outwards. 40 blows at one spot took the local width 48.0 -> 96.9 mm while the thickness span never moved.
+- Fix: the flow is a radial isochoric map, compression as a function of radius with the outward displacement satisfying `(r+u)^2 = r^2 + 2*integral((1/s-1)*r dr)`, so it decays like 1/r. Same 40 blows now give 48.0 -> 57.5 mm with falling increments, and the station 40 mm away moves only to 50.8 mm.
+- Trade-off: T1 is red again (120 mm span 8.00 -> 6.84 mm in 40 blows, was 4.90). Part of the old speed was the non-physical far-field translation. T2 separation 98%, T3 feedback 0.00% error, T4 drift 0.005% with byte-identical replay, T5 locality ratio 0.03.
+- Next: tool-face aspect (a narrow axial footprint draws material along the length) is the mechanism expected to bring T1 back without losing T5.
+
 ## 2026-09-16 shaping branch: free-surface flow
 
 - Frozen state: commit `cdd13ed` on `feat/R1-hammer-continuous` (dual furnace, truthful facts, non-bricking hammer guard, capability loop). New work happens on `feat/R1-shaping-flow`.
