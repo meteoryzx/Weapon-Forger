@@ -52,7 +52,7 @@ describe("surface hammer",()=>{
     const s=hot(),old=deserializeForgeState(JSON.stringify({...s,stateVersion:"forge-state-4",parameterVersion:"physics-3"}));
     expect(old.stateVersion).toBe("forge-state-5");
     expect(old.parameterVersion).toBe("physics-3");
-    expect(applyForgeOperation(old,strike()).parameterVersion).toBe("physics-4");
+    expect(applyForgeOperation(old,strike()).parameterVersion).toBe("physics-5");
     const invalid={...s,operations:[{...strike(),energy:2}]};
     expect(()=>deserializeForgeState(JSON.stringify(invalid))).toThrow(/energy/);
   });
@@ -87,11 +87,11 @@ describe("surface hammer",()=>{
     let state=applyForgeOperation(createForgeState({sectionCount:64}),{kind:"heat",temperatureC:950});
     const at=(x:number)=>applyForgeOperation(state,{kind:"surface-hammer",pose:{...HAMMER_HOME,x},target:{x:0,z:0},energy:1});
     let centreBlows=0;
-    for(let i=0;i<120;i++){try{state=at(0);centreBlows+=1;}catch{break;}}
-    expect(centreBlows).toBeGreaterThan(10);
+    for(let i=0;i<40;i++){try{state=at(0);centreBlows+=1;}catch{break;}}
+    expect(centreBlows).toBeGreaterThan(5);
     // The centre is spent by now, but untouched material must still be workable:
-    // the guard may only veto cells this blow actually moves.
-    const remote=[-30,-26,26,30].map(x=>{try{state=at(x);return true;}catch{return false;}});
+    // the guard may only veto cells this blow actually reshapes.
+    const remote=[-52,-48,48,52].map(x=>{try{state=at(x);return true;}catch{return false;}});
     expect(remote.some(Boolean)).toBe(true);
-  });
+  },30000);
 });

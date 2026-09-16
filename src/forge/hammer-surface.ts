@@ -4,9 +4,17 @@ import { yieldStrengthMPa } from "./forge-physics.ts";
 import type { BladeBlock, HammerPose, SurfaceHammerOperation, WorkpieceGeometry, WorkpieceNode, WorkpieceState } from "./forge-types.ts";
 
 export const HAMMER_RULES = {
-  face: 32, defaultEnergy: 0.55, minimumEnergy: 0.1, energyStep: 0.05,
-  // Increase visible change per deliberate hot blow while keeping the cap conservative.
-  maximumCompression: 0.17, supportTolerance: 2, minimumHeight: 0.4,
+  // One source of truth for the tool face. This used to be a separate 32 while
+  // FORGE_RULES declared a 48 mm face, so the flow kernel worked a narrower
+  // patch than the tool the player sees and the billet's outer strips were
+  // never reached.
+  face: FORGE_RULES.hammerFaceLength, defaultEnergy: 0.55, minimumEnergy: 0.1, energyStep: 0.05,
+  // Calibrated with `npm run bench:hammer`: at 0.17 a hot high-carbon billet was
+  // limited to ~11% contact compression by its 90 MPa hot yield, so 40 blows
+  // barely moved the work. The element guard (absolute cell floor plus automatic
+  // softening) now absorbs an over-hard blow, so the cap can sit where a hot
+  // forging pass really sits.
+  maximumCompression: 0.26, supportTolerance: 2, minimumHeight: 0.4,
   volumeTolerance: 0.00001, integrationSteps: 24,
   // A relative before/after check still lets a cell ratchet down over many blows
   // until it is degenerate, and at that point every later blow fails forever.
@@ -151,6 +159,26 @@ function sub(a:SolidPoint,b:SolidPoint):SolidPoint{return{x:a.x-b.x,y:a.y-b.y,z:
 function cross(a:SolidPoint,b:SolidPoint):SolidPoint{return{x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x};}
 function dot(a:SolidPoint,b:SolidPoint):number{return a.x*b.x+a.y*b.y+a.z*b.z;}
 function bump(t:number):number {return Math.abs(t)>=1?0:(1-t*t)**2;}
+// Cell-corner helper used by the deformation guard. Kept allocation-free because
+// it runs over every affected cell of a 16k-cell lattice, several times per blow.
+function sameEdge(ap:WorkpieceNode,aq:WorkpieceNode,bp:WorkpieceNode,bq:WorkpieceNode):boolean {
+  return Math.abs((aq.axialPosition-ap.axialPosition)-(bq.axialPosition-bp.axialPosition))<1e-9
+    &&Math.abs((aq.verticalOffset-ap.verticalOffset)-(bq.verticalOffset-bp.verticalOffset))<1e-9
+    &&Math.abs((aq.lateralOffset-ap.lateralOffset)-(bq.lateralOffset-bp.lateralOffset))<1e-9;
+}
+function det4(nodes:readonly WorkpieceNode[],cell:readonly number[],tetrahedron:readonly number[]):number {
+  const at=(k:number)=>nodes[cell[tetrahedron[k]!]!]!;
+  const o=at(0),a=at(1),b=at(2),c=at(3);
+  const ux=a.axialPosition-o.axialPosition,uy=a.verticalOffset-o.verticalOffset,uz=a.lateralOffset-o.lateralOffset;
+  const vx=b.axialPosition-o.axialPosition,vy=b.verticalOffset-o.verticalOffset,vz=b.lateralOffset-o.lateralOffset;
+  const wx=c.axialPosition-o.axialPosition,wy=c.verticalOffset-o.verticalOffset,wz=c.lateralOffset-o.lateralOffset;
+  return ux*(vy*wz-vz*wy)+uy*(vz*wx-vx*wz)+uz*(vx*wy-vy*wx);
+}
+function cellVolume(nodes:readonly WorkpieceNode[],cell:readonly number[]):number {
+  let volume=0;
+  for(const t of tetrahedra)volume+=Math.abs(det4(nodes,cell,t))/6;
+  return volume;
+}
 // A smooth compression and its reciprocal lateral integral form an isochoric
 // map (Jacobian determinant one). Distant material translates instead of growing.
 function spreadIntegral(offset:number, other:number,k:number):number {
@@ -198,51 +226,56 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
       const start=world[i]!,local=fromAnvil({x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread},frame);
       return {...piece.geometry.nodes[i]!,axialPosition:local.x,verticalOffset:local.y,lateralOffset:local.z};
     });
-    // Absolute volumes alone can hide an inverted element. Preserve every
-    // tetrahedron's orientation, including the control lattice of cut solids,
-    // and keep each cell above a floor of its own undeformed volume so repeated
-    // blows cannot ratchet one into a degenerate state.
-    const collapses=(nodes:readonly WorkpieceNode[]):boolean=>{
-      let collapsed=false;
-      piece.sections.forEach((section,a)=>{
+    // Only cells whose shape changes can be collapsed by this blow: rigid
+    // translation leaves every determinant untouched, and outside the kernel the
+    // flow is a constant translation. Collecting them once lets the volume
+    // correction and the guard touch a fraction of the 16k-cell lattice instead
+    // of walking all of it up to 22 times per attempt.
+    const source=piece.geometry.nodes, probe=makeNodes(1);
+    const affected:{cell:number[];volume:number;reference:number}[]=[];
+    let collapsed=false;
+    piece.sections.forEach((section,index)=>{
+      if(collapsed)return;
+      for(const block of section.blocks){
         if(collapsed)return;
-        section.blocks.forEach(block=>{
-          if(collapsed)return;
-          const indices=cellCorners(a,block,piece.geometry);
-          const before=indices.map(i=>nodePoint(piece.geometry.nodes[i]!));
-          const after=indices.map(i=>nodePoint(nodes[i]!));
-          // Only cells this blow actually moves can have been collapsed by it. A
-          // cell that is already degenerate elsewhere must not veto a blow aimed
-          // at healthy material, or one exhausted spot would brick the workpiece.
-          const moved=before.some((p,i)=>Math.abs(p.x-after[i]!.x)>1e-9
-            ||Math.abs(p.y-after[i]!.y)>1e-9||Math.abs(p.z-after[i]!.z)>1e-9);
-          if(!moved)return;
-          const reference=block.volume;
-          for(const t of tetrahedra){
-            const determinant=(p:SolidPoint[])=>dot(sub(p[t[1]]!,p[t[0]]!),cross(sub(p[t[2]]!,p[t[0]]!),sub(p[t[3]]!,p[t[0]]!)));
-            const start=determinant(before),end=determinant(after);
-            if(!Number.isFinite(end)||Math.abs(start)<1e-12||end/start<1e-6
-              ||Math.abs(end)<reference*HAMMER_RULES.minimumCellVolumeFraction){collapsed=true;return;}
-          }
-        });
-      });
-      return collapsed;
-    };
-    // Cheap pre-check: a hit that already collapses an element at full flow will
-    // not survive the volume search either, so skip that search entirely.
-    if(collapses(makeNodes(1)))return null;
+        const cell=cellCorners(index,block,piece.geometry);
+        // Two opposite corners pin all eight: if both sets of edges are unchanged
+        // the whole cell is rigidly translated and its determinant cannot flip.
+        const rigid=[[0,1],[0,2],[0,4],[7,6],[7,5],[7,3]].every(pair=>sameEdge(
+          source[cell[pair[0]!]!]!,source[cell[pair[1]!]!]!,
+          probe[cell[pair[0]!]!]!,probe[cell[pair[1]!]!]!));
+        if(rigid)continue;
+        for(const t of tetrahedra){
+          const start=det4(source,cell,t),end=det4(probe,cell,t);
+          if(!Number.isFinite(end)||Math.abs(start)<1e-12||end/start<1e-6
+            ||Math.abs(end)<block.volume*HAMMER_RULES.minimumCellVolumeFraction){collapsed=true;return;}
+        }
+        affected.push({cell,volume:cellVolume(source,cell),reference:block.volume});
+      }
+    });
+    if(collapsed)return null;
+    const beforeAffected=affected.reduce((sum,entry)=>sum+entry.volume,0);
+    // A cut or ground piece reports volume per clipped solid, so the lattice sum
+    // above would not match its total; those pieces keep the full recomputation.
+    const targeted=!piece.geometry.solids;
+    const totalOf=(nodes:readonly WorkpieceNode[])=>targeted
+      ? beforeTotal-beforeAffected+affected.reduce((sum,entry)=>sum+cellVolume(nodes,entry.cell),0)
+      : [...geometryVolumes(piece,{...piece.geometry,nodes}).values()].reduce((a,b)=>a+b,0);
     // The analytic flow is incompressible; finite lattice interpolation introduces
     // quadrature error. Correct only the flow's lateral displacement, never mass.
-    let low=0,high=3,nodes=makeNodes(1),volumes=geometryVolumes(piece,{...piece.geometry,nodes});
+    let low=0,high=3,nodes=probe,total=totalOf(probe);
     for(let iteration=0;iteration<22;iteration++) {
-      const total=[...volumes.values()].reduce((a,b)=>a+b,0);
       if(Math.abs(total/beforeTotal-1)<HAMMER_RULES.volumeTolerance)break;
       const factor=iteration===0?1:(low+high)/2;
       if(total<beforeTotal)low=factor;else high=factor;
-      nodes=makeNodes((low+high)/2);volumes=geometryVolumes(piece,{...piece.geometry,nodes});
+      nodes=makeNodes((low+high)/2);total=totalOf(nodes);
     }
-    if(Math.abs([...volumes.values()].reduce((a,b)=>a+b,0)/beforeTotal-1)>HAMMER_RULES.volumeTolerance*2)return null;
-    if(collapses(nodes))return null;
+    if(Math.abs(total/beforeTotal-1)>HAMMER_RULES.volumeTolerance*2)return null;
+    for(const entry of affected)for(const t of tetrahedra){
+      const start=det4(source,entry.cell,t),end=det4(nodes,entry.cell,t);
+      if(!Number.isFinite(end)||Math.abs(start)<1e-12||end/start<1e-6
+        ||Math.abs(end)<entry.reference*HAMMER_RULES.minimumCellVolumeFraction){return null;}
+    }
     return {nodes,compression};
   };
   for(const scale of [1,0.75,0.5,0.35,0.25,0.15,0.1]){
