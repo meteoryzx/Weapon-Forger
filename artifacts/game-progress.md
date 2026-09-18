@@ -1,5 +1,12 @@
 # Workshop reconstruction
 
+## 2026-09-18 author-specified reference-first equipment pipeline
+
+- Author corrected the equipment sequence: image prompt -> generated reference -> img2threejs modeling -> operation/physics/feel. Apply this to both power hammer and hydraulic forging press, power hammer first. Reference modeling is a prerequisite, not deferred final art.
+- Git checkpoints remain 87d8882 (physics-9 code) and c243270 (equipment design). Current changes only update workflow documents and create assets/concepts/power-hammer-reference-prompt.md. No new model or gameplay implementation.
+- Main reference prompt uses one complete three-quarter object view, neutral background, visible mechanism and dies. Additional views must follow the same design. Shared scale dimensions are distinguished from provisional dimensions inherited from the placeholder.
+- Reference generation has not run: uv and bash are unavailable, Python 3.11.3 works, but GEMINI_API_KEY is missing from the process environment. Do not claim a reference exists or begin img2threejs without one. The user's requested model route is procedural img2threejs, not Tripo or a downloaded substitute.
+
 ## 2026-09-18 requested Git checkpoint before powered equipment
 
 - Author requested saving the current version to Git and continuing, and asked whether power-hammer/hydraulic equipment can begin. Archive the complete current physics-9 development state on feat/R1-shaping-flow, including prior contact facts and the previously recorded grinding E2E wait correction. No merge or release is implied.
