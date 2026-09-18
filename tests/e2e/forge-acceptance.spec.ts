@@ -88,6 +88,47 @@ test("hammer force, free placement, continuous roll and click deformation preser
   expect(errors).toEqual([]);
 });
 
+test("a local blow on a half-width overhang does not bend the whole billet",async({page})=>{
+  await page.goto("/?accept=hammer");
+  const body=page.locator("body"),canvas=page.locator("#game");
+  await expect(body).toHaveAttribute("data-camera-state","settled");
+  await canvas.focus();
+  for(let i=0;i<10;i++)await page.keyboard.press("ArrowDown");
+  await expect(body).toHaveAttribute("data-hammer-z","40");
+  const before=await page.evaluate(()=>(window as unknown as {__forgeInspect:()=>{hammer:{overhangMidPlanes:(number|null)[]}}}).__forgeInspect().hammer.overhangMidPlanes);
+  const p=await scenePoint(page,"hammer:0:58");
+  await page.mouse.move(p.x,p.y);
+  for(let i=0;i<5;i++)await page.mouse.wheel(0,-100);
+  await expect(body).toHaveAttribute("data-hammer-energy","0.8");
+  await page.mouse.click(p.x,p.y);
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","1");
+  const after=await page.evaluate(()=>(window as unknown as {__forgeInspect:()=>{hammer:{overhangMidPlanes:(number|null)[]}}}).__forgeInspect().hammer.overhangMidPlanes);
+  expect(after[1]!-before[1]!).toBeLessThan(-0.05);
+  expect(Math.abs(after[0]!-before[0]!)).toBeLessThan(0.02);
+});
+
+test("a corner strike exposes two finite support paths and deforms through real input",async({page})=>{
+  await page.goto("/?accept=hammer");
+  const body=page.locator("body"),canvas=page.locator("#game");
+  await expect(body).toHaveAttribute("data-camera-state","settled");
+  await canvas.focus();
+  for(let i=0;i<25;i++)await page.keyboard.press("ArrowRight");
+  for(let i=0;i<10;i++)await page.keyboard.press("ArrowDown");
+  const p=await scenePoint(page,"hammer:105:58");
+  await page.mouse.move(p.x,p.y);
+  const contact=await page.evaluate(()=>(window as unknown as {__forgeInspect:()=>{hammer:{aim:{
+    impactNormal:{x:number;y:number;z:number};edges:{boundaryNormal:{x:number;y:number;z:number};loadPath:unknown;supportPath:unknown}[]
+  }}}}).__forgeInspect().hammer.aim);
+  expect(contact.impactNormal).toEqual({x:0,y:-1,z:0});
+  expect(contact.edges.map(edge=>edge.boundaryNormal)).toEqual([{x:1,y:0,z:0},{x:0,y:0,z:1}]);
+  expect(contact.edges.every(edge=>edge.loadPath&&edge.supportPath)).toBe(true);
+  const volume=await body.getAttribute("data-total-material-volume");
+  await page.mouse.click(p.x,p.y);
+  await expect(body).toHaveAttribute("data-acceptance-operation-count","1");
+  await expect.poll(async()=>Number(await body.getAttribute("data-hammer-minimum-thickness"))).toBeLessThan(8);
+  await expect(body).toHaveAttribute("data-total-material-volume",volume!);
+});
+
 test("grind contact commits real material removal", async ({ page }) => {
   await page.goto("/?accept=grind");
   const body = page.locator("body");

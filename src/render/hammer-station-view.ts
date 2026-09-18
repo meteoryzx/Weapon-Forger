@@ -80,6 +80,7 @@ export class HammerStationView {
   }
   setActive(active:boolean):void {this.item.visible=active;this.tool.visible=active;this.footprint.visible=active&&this.aim!==null;}
   contact(x:number,z:number):HammerContact|null{return hammerContact(this.surface,x,z);}
+  get aimContact():HammerContact|null{return this.aim;}
   setAim(point:{x:number;z:number}|null,energy:number):HammerContact|null {
     this.energy=energy;this.aim=point?this.contact(point.x,point.z):null;
     this.footprint.visible=this.aim!==null;

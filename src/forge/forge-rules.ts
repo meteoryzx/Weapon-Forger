@@ -1,6 +1,6 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
-export const FORGE_PARAMETER_VERSION = "physics-6";
+export const FORGE_PARAMETER_VERSION = "physics-9";
 export const FORGE_STATE_VERSION = "forge-state-5";
 
 const WORKPIECE_LENGTH = 336;

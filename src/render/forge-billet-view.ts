@@ -840,10 +840,12 @@ export class ForgeBilletView {
           ? this.temperFurnaceView.item
         : this.billet;
     const points:Record<string,ReturnType<typeof project>>={billet:project(inspectedBillet,true),hammer:project(this.hammerView.item,true),temper:project(this.temperControl)};
-    if(this.station==="anvil")for(const x of [0,100,105]){
-      const contact=this.hammerView.contact(x,0);
-      const point=new Vector3(x*ANVIL.scale,ANVIL.surface+(contact?.point.y??8)*ANVIL.scale,0);
-      points[`hammer:${x}`]=projectWorld(this.hammerView.group.localToWorld(point));
+    if(this.station==="anvil")for(const [x,z] of [[0,0],[100,0],[105,0],[105,18],[105,-18],[0,58],[105,58]] as const){
+      const contact=this.hammerView.contact(x,z);
+      const point=new Vector3(x*ANVIL.scale,ANVIL.surface+(contact?.point.y??8)*ANVIL.scale,z*ANVIL.scale);
+      const projected=projectWorld(this.hammerView.group.localToWorld(point));
+      points[`hammer:${x}:${z}`]=projected;
+      if(z===0)points[`hammer:${x}`]=projected;
     }
     for(const [name,object] of this.stationMeshes)points["station:"+name]=project(object);
     this.materialsView?.candidates.forEach(m=>points["material:"+m.userData.materialId]=project(m));
@@ -854,8 +856,21 @@ export class ForgeBilletView {
       renderer:{calls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures},
       immersion:this.quenchImmersion(),
       hammer:this.station==="anvil"&&this.snapshot?{
+        busy:this.hammerView.busy,
+        tailSections:[0.7,0.85,1].map(fraction=>{
+          const g=this.snapshot!.geometry,ring=(g.grid.widthBlocks+1)*(g.grid.heightBlocks+1);
+          const index=Math.round((g.nodes.length/ring-1)*fraction);
+          const widthProfile=Array.from({length:g.grid.widthBlocks+1},(_,width)=>{
+            const node=g.nodes[index*ring+Math.floor(g.grid.heightBlocks/2)*(g.grid.widthBlocks+1)+width]!;
+            return {x:node.axialPosition,y:node.verticalOffset,z:node.lateralOffset};
+          });
+          const points=[widthProfile[0]!,widthProfile[Math.floor(g.grid.widthBlocks/2)]!,widthProfile.at(-1)!];
+          return {points,widthProfile,cup:(points[0]!.y+points[2]!.y)/2-points[1]!.y};
+        }),
         toolY:this.hammerView.tool.position.y,
         bounds:new Box3().setFromObject(this.hammerView.item),
+        contactProbes:([[0,0],[100,0],[105,0],[0,58],[105,58]] as const).map(([x,z])=>({x,z,contact:this.hammerView.contact(x,z)})),
+        aim:this.hammerView.aimContact,
         supportedMinY:this.snapshot.geometry.nodes.reduce((min,n)=>{
           const p=this.hammerView.item.localToWorld(new Vector3(n.axialPosition,n.verticalOffset,n.lateralOffset));
           return Math.abs(p.x)<=FORGE_RULES.anvilFaceLength*ANVIL.scale/2&&Math.abs(p.z)<=FORGE_RULES.anvilFaceWidth*ANVIL.scale/2?Math.min(min,p.y):min;
@@ -865,6 +880,12 @@ export class ForgeBilletView {
           const index=Math.round((g.nodes.length/ring-1)*fraction);
           const ys=g.nodes.slice(index*ring,(index+1)*ring).map(n=>n.verticalOffset);
           return (Math.min(...ys)+Math.max(...ys))/2;
+        }),
+        overhangMidPlanes:[0.1,0.5,0.9].map(fraction=>{
+          const g=this.snapshot!.geometry,ring=(g.grid.widthBlocks+1)*(g.grid.heightBlocks+1);
+          const index=Math.round((g.nodes.length/ring-1)*fraction);
+          const ys=g.nodes.slice(index*ring,(index+1)*ring).filter(n=>n.lateralOffset>12).map(n=>n.verticalOffset);
+          return ys.length?(Math.min(...ys)+Math.max(...ys))/2:null;
         }),
       }:null,
       grind:this.station==="grind"?{pose:this.grindPose(),contact:this.grindContactTarget(),frame:this.grindContactPatch()?.frame,metrics:this.snapshot?.grindMetrics,

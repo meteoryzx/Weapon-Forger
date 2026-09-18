@@ -1,6 +1,7 @@
 import { FORGE_RULES } from "./forge-rules.ts";
 import { solidPoint, solidSurface, solidVolumesByBlock, type SolidPoint } from "./solid-geometry.ts";
 import { yieldStrengthMPa } from "./forge-physics.ts";
+import { bendingIntegral, bendingProfile, torsionalCapacity, torsionProfile, torsionRotation } from "./hammer-bending.ts";
 import type { BladeBlock, HammerPose, SurfaceHammerOperation, WorkpieceGeometry, WorkpieceNode, WorkpieceState } from "./forge-types.ts";
 
 export const HAMMER_RULES = {
@@ -38,6 +39,8 @@ export interface HammerFrame {
 export interface HammerContact {
   readonly point: SolidPoint;
   readonly blockId: string;
+  /** Direction of the tool impulse in anvil coordinates. */
+  readonly impactNormal: SolidPoint;
   readonly supported: boolean;
   readonly supportRatio: number;
   readonly thickness: number;
@@ -54,7 +57,27 @@ export interface HammerEdgeLoad {
   readonly width: number;
   readonly thickness: number;
   readonly neutralY: number;
+  /** Furthest occupied hammer sample beyond the support edge. */
+  readonly normalReach: number;
+  readonly loadedDistances: readonly number[];
+  readonly loadedPoints: readonly SolidPoint[];
+  /** Full support section and geometry-based beam/plate transition, independent of aim. */
+  readonly coherentSection: {
+    readonly width:number; readonly thickness:number; readonly center:number;
+    readonly neutralY:number; readonly beamWeight:number;
+  };
+  /** Center and half-span of the loaded footprint along the edge. */
+  readonly tangentCenter: number;
+  readonly tangentHalfWidth: number;
+  /** Outward support-boundary normal and tangent in anvil coordinates. */
+  readonly boundaryNormal: SolidPoint;
+  readonly boundaryTangent: SolidPoint;
+  /** Resultant path from the support boundary toward the loaded footprint. */
+  readonly loadPath: HammerContactPath;
+  /** Actual material cross-section carried along the support boundary. */
+  readonly supportPath: HammerContactPath;
 }
+export interface HammerContactPath { readonly start: SolidPoint; readonly end: SolidPoint }
 
 function clipSurface(points: readonly SolidPoint[], axis:"x"|"z", boundary:number, sign:number): SolidPoint[] {
   const result:SolidPoint[]=[];
@@ -179,24 +202,57 @@ export function hammerContact(surface: readonly HammerTriangle[],x: number,z: nu
       const transverse=axis==="x"?"z":"x";
       // Read the material cross-section at the edge, not the billet envelope.
       // No bridge across the edge means this cantilever approximation cannot apply.
-      const section:SolidPoint[]=[];
-      for(const triangle of surface)for(let i=0;i<3;i++){
-        const a=triangle.points[i]!,b=triangle.points[(i+1)%3]!,da=a[axis]-boundary,db=b[axis]-boundary;
-        if(da*db>0||Math.abs(da-db)<1e-9)continue;
-        const t=da/(da-db),p={x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t};
-        if(Math.abs(p[transverse]-(transverse==="x"?x:z))<=radius)section.push(p);
+      const section:SolidPoint[]=[],fullSection:SolidPoint[]=[];
+      for(const triangle of surface){
+        const intersections:SolidPoint[]=[];
+        for(let i=0;i<3;i++){
+          const a=triangle.points[i]!,b=triangle.points[(i+1)%3]!,da=a[axis]-boundary,db=b[axis]-boundary;
+          if(da*db>0||Math.abs(da-db)<1e-9)continue;
+          const t=da/(da-db);
+          intersections.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t});
+        }
+        fullSection.push(...intersections);
+        // Clip intersection segments, not just their endpoints: moving the face
+        // across a lattice vertex must not jump the effective section width.
+        const center=transverse==="x"?x:z;
+        section.push(...clipSurface(clipSurface(intersections,transverse,center+radius,1),transverse,center-radius,-1));
       }
       if(section.length<2)continue;
       const lo=Math.min(...section.map(p=>p.y)),hi=Math.max(...section.map(p=>p.y));
       const width=Math.max(...section.map(p=>p[transverse]))-Math.min(...section.map(p=>p[transverse]));
       if(hi-lo<1e-5||width<1e-5||lo>HAMMER_RULES.supportTolerance)continue;
+      const tangentValues=loaded.map(p=>p[transverse]);
+      const tangentMin=Math.min(...tangentValues),tangentMax=Math.max(...tangentValues);
+      const sectionMin=Math.min(...section.map(p=>p[transverse])),sectionMax=Math.max(...section.map(p=>p[transverse]));
+      const fullMin=Math.min(...fullSection.map(p=>p[transverse])),fullMax=Math.max(...fullSection.map(p=>p[transverse]));
+      const fullLo=Math.min(...fullSection.map(p=>p.y)),fullHi=Math.max(...fullSection.map(p=>p.y));
+      const overhang=surface.reduce((extent,triangle)=>Math.max(extent,...triangle.points.map(p=>sign*(p[axis]-boundary))),0);
+      // A long narrow overhang carries load through a coherent beam section.
+      // Broad, short plate overhangs retain the local-strip approximation, with
+      // a smooth geometry-only transition for aspect ratios between 0.5 and 1.
+      const slenderness=Math.max(0,Math.min(1,2*overhang/(fullMax-fullMin)-1));
+      const coherentSection={width:fullMax-fullMin,thickness:fullHi-fullLo,center:(fullMin+fullMax)/2,
+        neutralY:(fullLo+fullHi)/2,beamWeight:slenderness*slenderness*(3-2*slenderness)};
+      const lever=loaded.reduce((s,p)=>s+sign*(p[axis]-boundary),0)/loaded.length;
+      const tangentCenter=(tangentMin+tangentMax)/2;
+      const boundaryNormal:SolidPoint=axis==="x"?{x:sign,y:0,z:0}:{x:0,y:0,z:sign};
+      const boundaryTangent:SolidPoint=axis==="x"?{x:0,y:0,z:1}:{x:1,y:0,z:0};
+      const pathPoint=(normalDistance:number,tangent:number,y:number):SolidPoint=>axis==="x"
+        ? {x:boundary+sign*normalDistance,y,z:tangent}
+        : {x:tangent,y,z:boundary+sign*normalDistance};
       edges.push({axis,sign,boundary,loadFraction:loaded.length/samples.length,
-        lever:loaded.reduce((s,p)=>s+sign*(p[axis]-boundary),0)/loaded.length,
-        width,thickness:hi-lo,neutralY:(hi+lo)/2});
+        lever,
+        width,thickness:hi-lo,neutralY:(hi+lo)/2,
+        normalReach:Math.max(...loaded.map(p=>sign*(p[axis]-boundary))),
+        loadedDistances:loaded.map(p=>sign*(p[axis]-boundary)),loadedPoints:loaded,coherentSection,
+        tangentCenter,tangentHalfWidth:(tangentMax-tangentMin)/2+HAMMER_RULES.face/HAMMER_RULES.contactSamples/2,
+        boundaryNormal,boundaryTangent,
+        loadPath:{start:pathPoint(0,tangentCenter,(hi+lo)/2),end:pathPoint(lever,tangentCenter,loaded.reduce((sum,p)=>sum+p.y,0)/loaded.length)},
+        supportPath:{start:pathPoint(0,sectionMin,(hi+lo)/2),end:pathPoint(0,sectionMax,(hi+lo)/2)}});
     }
   }
   const supportRatio=supportedFraction*reach;
-  return {point:{x,y:top,z},blockId,supported:supportRatio>0,supportRatio,thickness:top-bottom,edges};
+  return {point:{x,y:top,z},blockId,impactNormal:{x:0,y:-1,z:0},supported:supportRatio>0,supportRatio,thickness:top-bottom,edges};
 }
 // Metal leaves the hammer face towards whatever free surface is closest. A blow
 // mid-bar finds the width edges far nearer than the ends, so it spreads; a blow
@@ -296,18 +352,35 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
   const flow=lateralFlowWeights(freeSurfaceReach(surface,contact.point.x,contact.point.z,radius));
   const beforeVolumes=geometryVolumes(piece),beforeTotal=[...beforeVolumes.values()].reduce((a,b)=>a+b,0);
   // A held, supported strip acts as a short elastoplastic cantilever. Residual
-  // rotation requires moment above its plastic section capacity (sigma*b*h^2/4).
+  // deflection requires moment above its plastic section capacity (sigma*b*h^2/4).
   // Work is allocated once across edges; temperature enters through flow stress.
   const impactWork=operation.energy*HAMMER_RULES.impactEnergyJ*1000;
   const force=impactWork/FORGE_RULES.hammerMaximumTravel;
   const edgeWeight=contact.edges.reduce((sum,e)=>sum+e.loadFraction*e.lever/radius,0);
   const bends=contact.edges.map(edge=>{
-    const moment=force*edge.loadFraction*edge.lever;
     const capacity=resistance*edge.width*edge.thickness**2/4;
     const available=impactWork*(edge.loadFraction*edge.lever/radius)/Math.max(1,edgeWeight);
-    const angle=Math.min(HAMMER_RULES.maximumBendRadians,FORGE_RULES.hammerMaximumTravel/edge.lever,
-      available/Math.max(capacity,1)*(Math.max(0,1-capacity/Math.max(moment,1))));
-    return {...edge,angle,length:Math.max(2*edge.thickness,2*FORGE_RULES.simulationCellSize)};
+    const profile=bendingProfile(edge.loadedDistances.map(distance=>({distance,
+      force:force*edge.loadFraction/edge.loadedDistances.length})),capacity,available,
+      FORGE_RULES.hammerMaximumTravel*operation.energy,HAMMER_RULES.maximumBendRadians,FORGE_RULES.simulationCellSize);
+    const section=edge.coherentSection;
+    const samples=edge.loadedPoints.map(point=>({distance:dot(sub(point,edge.loadPath.start),edge.boundaryNormal),
+      force:force*edge.loadFraction/edge.loadedPoints.length,
+      eccentricity:dot(point,edge.boundaryTangent)-section.center}));
+    const beamCapacity=resistance*section.width*section.thickness**2/4;
+    const twistCapacity=torsionalCapacity(section.width,section.thickness,resistance);
+    const moment=samples.reduce((sum,sample)=>sum+sample.force*sample.distance,0);
+    const torque=samples.reduce((sum,sample)=>sum+sample.force*sample.eccentricity,0);
+    const bendDemand=Math.max(0,moment/beamCapacity-1),twistDemand=Math.max(0,Math.abs(torque)/twistCapacity-1);
+    // Share the existing work/travel allowance; adding torsion does not give
+    // eccentric strikes a second full impact budget.
+    const bendShare=bendDemand+twistDemand>0?bendDemand/(bendDemand+twistDemand):1;
+    const travel=FORGE_RULES.hammerMaximumTravel*operation.energy;
+    const beamProfile=bendingProfile(samples,beamCapacity,available*bendShare,travel*bendShare,
+      HAMMER_RULES.maximumBendRadians,FORGE_RULES.simulationCellSize);
+    const twistProfile=torsionProfile(samples,twistCapacity,available*(1-bendShare),travel*(1-bendShare),
+      HAMMER_RULES.maximumBendRadians,Math.hypot(section.width,section.thickness)/2,FORGE_RULES.simulationCellSize);
+    return {...edge,profile,beamProfile,twistProfile};
   });
   // A full-strength blow can push a worked column past the orientation guard. The
   // old code threw for that blow and then rejected *every* later blow at *every*
@@ -332,15 +405,32 @@ export function deformSurfaceHammer(piece:WorkpieceState,operation:SurfaceHammer
       const start=world[i]!;
       let bent={x:start.x+(p.x-start.x)*spread,y:p.y,z:start.z+(p.z-start.z)*spread};
       for(const bend of bends){
-        const distance=bend.sign*(bent[bend.axis]-bend.boundary),angle=bend.angle*scale;
-        if(distance<=0||angle<1e-9)continue;
-        // Circular bending over a finite hinge length, then rigid rotation of
-        // the remaining strip. This gives continuous position and tangent at
-        // the edge. The existing cell guard and volume correction remain active.
-        const curvature=angle/bend.length,a=curvature*Math.min(distance,bend.length);
-        const beyond=Math.max(0,distance-bend.length),v=bent.y-bend.neutralY;
-        bent={...bent,[bend.axis]:bend.boundary+bend.sign*((1/curvature+v)*Math.sin(a)+beyond*Math.cos(a)),
-          y:bend.neutralY+v*Math.cos(a)-2*Math.sin(a/2)**2/curvature-beyond*Math.sin(a)};
+        const relative=sub(bent,bend.loadPath.start);
+        const distance=dot(relative,bend.boundaryNormal);
+        if(distance<=0)continue;
+        const tangentDistance=Math.abs(dot(relative,bend.boundaryTangent));
+        const transition=Math.max(2*bend.thickness,FORGE_RULES.simulationCellSize);
+        const tangentOutside=Math.max(0,tangentDistance-bend.tangentHalfWidth);
+        const tangentWeight=tangentOutside>=transition?0:bump(tangentOutside/transition);
+        // Integrate only yielded curvature. The unloaded tail inherits position
+        // and tangent, not further curvature or a forced return to its old height.
+        const section=bend.coherentSection,beamWeight=section.beamWeight;
+        const amplitude=bend.profile.angle*scale*tangentWeight,integral=bendingIntegral(bend.profile,distance);
+        const beamAmplitude=bend.beamProfile.angle*scale,beamIntegral=bendingIntegral(bend.beamProfile,distance);
+        const localAngle=(1-beamWeight)*amplitude*integral.rotation+beamWeight*beamAmplitude*beamIntegral.rotation;
+        const neutralY=(1-beamWeight)*bend.neutralY+beamWeight*section.neutralY;
+        const twist=beamWeight*scale*torsionRotation(bend.twistProfile,distance);
+        const u=dot(bent,bend.boundaryTangent)-section.center,v=bent.y-neutralY;
+        // A section rotates as a connected cross-section. Both transverse and
+        // vertical coordinates move; a scalar height mask would shear it apart.
+        const vertical=v*Math.cos(twist)-u*Math.sin(twist);
+        const tangentShift=u*(Math.cos(twist)-1)+v*Math.sin(twist);
+        const centerY=-(1-beamWeight)*amplitude*integral.deflection-beamWeight*beamAmplitude*beamIntegral.deflection;
+        const normalShift=-((1-beamWeight)*amplitude**2*integral.shortening+beamWeight*beamAmplitude**2*beamIntegral.shortening)/2
+          +vertical*Math.sin(localAngle);
+        bent={x:bent.x+bend.boundaryNormal.x*normalShift,
+          y:neutralY+centerY+vertical*Math.cos(localAngle),z:bent.z+bend.boundaryNormal.z*normalShift};
+        bent={x:bent.x+bend.boundaryTangent.x*tangentShift,y:bent.y,z:bent.z+bend.boundaryTangent.z*tangentShift};
       }
       const local=fromAnvil(bent,frame);
       return {...piece.geometry.nodes[i]!,axialPosition:local.x,verticalOffset:local.y,lateralOffset:local.z};

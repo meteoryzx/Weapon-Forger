@@ -64,11 +64,19 @@ test("authored stations preserve the continuous forge workflow and workpiece fac
   await expect(body).toHaveAttribute("data-completed-verbs",/temper/);
 
   await visit("grind");
+  const removedBeforeGrinding=Number(await body.getAttribute("data-removed-volume"));
   const grindPoint=await scenePoint(page,"billet");
   await page.mouse.move(grindPoint.x,grindPoint.y);
   await page.mouse.down();
-  for(let i=0;i<8;i++)await page.keyboard.press("w");
-  await page.mouse.up();
+  try {
+    for(let i=0;i<8;i++)await page.keyboard.press("w");
+    // Grinding advances on held-contact ticks; releasing after input delivery
+    // can cancel contact before the first tick submits any material removal.
+    await expect.poll(async()=>Number(await body.getAttribute("data-removed-volume")),{timeout:15000})
+      .toBeGreaterThan(removedBeforeGrinding);
+  } finally {
+    await page.mouse.up();
+  }
   await expect(body).toHaveAttribute("data-completed-verbs",/grind/,{timeout:15000});
   await expect(body).toHaveAttribute("data-workpiece-id",identity!);
   expect(errors).toEqual([]);
