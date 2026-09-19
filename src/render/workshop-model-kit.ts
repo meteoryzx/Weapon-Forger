@@ -3,7 +3,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { WORKSHOP_FLOOR_Y, workshopUnits as u } from "../app/workshop-scale.ts";
 
-export type MaterialRole = "wood" | "endgrain" | "iron" | "steel" | "stone" | "brick" | "brass" | "belt" | "dark";
+export type MaterialRole = "wood" | "endgrain" | "iron" | "painted-iron" | "steel" | "stone" | "brick" | "brass" | "belt" | "dark";
 
 // Small deterministic bitmap surfaces also work without DOM/canvas on WeChat.
 function surfaceTexture(wood: boolean) {
@@ -30,7 +30,7 @@ export class WorkshopModelKit {
   readonly materials: Record<MaterialRole,MeshStandardMaterial>;
   constructor() {
     const make=(color:string,metalness:number,roughness:number,wood=false)=>new MeshStandardMaterial({color,metalness,roughness,map:wood?this.woodTexture:this.mineralTexture});
-    this.materials={wood:make("#8b6541",0,0.85,true),endgrain:make("#513e30",0,0.93,true),iron:make("#252a2a",0.72,0.58),steel:make("#a3a9a6",0.85,0.32),stone:make("#85877f",0,0.93),brick:make("#ad9275",0,0.98),brass:make("#b59755",0.72,0.44),belt:make("#c64d29",0.15,0.7),dark:make("#171c1c",0.25,0.9)};
+    this.materials={wood:make("#8b6541",0,0.85,true),endgrain:make("#513e30",0,0.93,true),iron:make("#252a2a",0.72,0.58),"painted-iron":make("#29443a",0.68,0.61),steel:make("#a3a9a6",0.85,0.32),stone:make("#85877f",0,0.93),brick:make("#ad9275",0,0.98),brass:make("#b59755",0.72,0.44),belt:make("#c64d29",0.15,0.7),dark:make("#171c1c",0.25,0.9)};
   }
   mesh(parent:Group,name:string,geometry:BufferGeometry,at:readonly number[],role:MaterialRole) {
     const m=new Mesh(geometry,this.materials[role]);m.name=name;

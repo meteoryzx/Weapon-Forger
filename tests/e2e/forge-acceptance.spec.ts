@@ -7,6 +7,8 @@ const acceptanceSlices = [
   ["weld", "weld", "焊合台 · 焊合"],
   ["heat", "furnace", "火炉 · 加热"],
   ["hammer", "anvil", "铁砧 · 锤击"],
+  ["power", "power", "动力锤 · 快速塑形"],
+  ["press", "press", "锻造压力机 · 压下延展"],
   ["quench", "quench-water", "水槽 · 淬火"],
   ["temper", "temper", "火炉 · 回火"],
   ["grind", "grind", "砂带 · 研磨"],
@@ -23,14 +25,14 @@ for (const [verb, station, title] of acceptanceSlices) {
     await expect(page.locator("body")).toHaveAttribute("data-acceptance-operation-count", "0");
 
     await page.keyboard.press("Escape");
-    await expect(page.locator("body")).toHaveAttribute("data-active-station", ["cut","heat","hammer"].includes(verb) ? "overview" : station);
+    await expect(page.locator("body")).toHaveAttribute("data-active-station", ["cut","heat","hammer","power","press"].includes(verb) ? "overview" : station);
   });
 }
 
-test("the acceptance console switches between all eight isolated slices", async ({ page }) => {
+test("the acceptance console switches between all isolated slices", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#acceptance-console")).toBeVisible();
-  await expect(page.locator("[data-acceptance-target]" )).toHaveCount(8);
+  await expect(page.locator("[data-acceptance-target]" )).toHaveCount(10);
   await page.locator("[data-acceptance-target=hammer]").click();
   await expect(page).toHaveURL(/accept=hammer/);
   await expect(page.locator("body")).toHaveAttribute("data-active-station", "anvil");

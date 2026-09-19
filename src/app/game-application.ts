@@ -11,6 +11,8 @@ import {
   type ForgeSnapshot,
   type ForgeState,
   type CutOperation,
+  type ForgePressOperation,
+  type PowerHammerOperation,
   type SurfaceHammerOperation,
 } from "../forge/index.ts";
 import { solidEnvelope, workpieceGrindingSolids, workpieceSolids } from "../forge/solid-geometry.ts";
@@ -41,6 +43,20 @@ export class GameApplication {
     if(this.state!==source)throw new Error("工件已经改变，请重新瞄准。");
     this.state=result;this.previewState=result;this.previewElapsedMs=0;
     this.cancelPreparedCut();return this.getSnapshot();
+  }
+
+  async applyPoweredForge(
+    operation: PowerHammerOperation | ForgePressOperation,
+    evaluate: (state: ForgeState, op: PowerHammerOperation | ForgePressOperation) => Promise<ForgeState>,
+  ): Promise<ForgeSnapshot> {
+    const source = this.state;
+    const result = await evaluate(source, operation);
+    if (this.state !== source) throw new Error("工件已经改变，请重新启动设备。");
+    this.state = result;
+    this.previewState = result;
+    this.previewElapsedMs = 0;
+    this.cancelPreparedCut();
+    return this.getSnapshot();
   }
 
   commitPreparedCut(operation: CutOperation): ForgeSnapshot {

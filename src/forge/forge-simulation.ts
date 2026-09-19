@@ -212,6 +212,67 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
       })},a,result.nodes,geometry.grid));
       return appendOperation({...state,parameterVersion:FORGE_PARAMETER_VERSION,workpiece:{...before,geometry,sections}},operation);
     }
+    case "power-hammer": {
+      if (!Number.isInteger(operation.blows) || operation.blows < 1 || operation.blows > 6) {
+        throw new Error("动力锤冲击次数必须为 1–6 次。");
+      }
+      if (!Number.isFinite(operation.cadenceMs) || operation.cadenceMs < 80 || operation.cadenceMs > 500) {
+        throw new Error("动力锤节拍无效。");
+      }
+      let powered = state;
+      for (let blow = 0; blow < operation.blows; blow += 1) {
+        powered = applyForgeOperation(powered, {
+          kind: "surface-hammer",
+          pose: operation.pose,
+          target: operation.target,
+          energy: operation.energy,
+        });
+      }
+      return appendOperation({ ...powered, operations: state.operations }, operation);
+    }
+    case "forge-press": {
+      if (!Number.isFinite(operation.pressure) || operation.pressure < 0.1 || operation.pressure > 1) {
+        throw new Error("压力机载荷必须在 10%–100% 之间。");
+      }
+      if (!Number.isFinite(operation.strokeMm) || operation.strokeMm <= 0 || operation.strokeMm > 24) {
+        throw new Error("压力机行程无效。");
+      }
+      if (!Number.isFinite(operation.dwellMs) || operation.dwellMs < 0 || operation.dwellMs > 4_000) {
+        throw new Error("压力机保压时间无效。");
+      }
+      // Reuse the proven contact/support/volume-preserving geometry response once,
+      // then retain a slower-load history instead of recording a burst of impacts.
+      const energy = Math.max(0.1, Math.min(0.88,
+        0.12 + operation.pressure * 0.62 + operation.strokeMm / 24 * 0.08 + operation.dwellMs / 4_000 * 0.06));
+      const pressed = applyForgeOperation(state, {
+        kind: "surface-hammer",
+        pose: operation.pose,
+        target: operation.target,
+        energy,
+      });
+      const sections = pressed.workpiece.sections.map((section, sectionIndex) => {
+        const beforeSection = state.workpiece.sections[sectionIndex]!;
+        return {
+          ...section,
+          blocks: section.blocks.map((block, blockIndex) => {
+            const beforeBlock = beforeSection.blocks[blockIndex]!;
+            return {
+              ...block,
+              stress: beforeBlock.stress + (block.stress - beforeBlock.stress) * 0.6,
+              elasticStrain: beforeBlock.elasticStrain + (block.elasticStrain - beforeBlock.elasticStrain) * 0.55,
+              damage: beforeBlock.damage + (block.damage - beforeBlock.damage) * 0.45,
+              integrity: beforeBlock.integrity + (block.integrity - beforeBlock.integrity) * 0.45,
+              cracked: beforeBlock.cracked || (block.cracked && operation.pressure > 0.92),
+            };
+          }),
+        };
+      });
+      return appendOperation({
+        ...pressed,
+        operations: state.operations,
+        workpiece: { ...pressed.workpiece, sections },
+      }, operation);
+    }
     case "quench":
       return applyQuench(state, operation);
     case "grind":
@@ -1925,7 +1986,8 @@ function sectionSnapshot(section: BladeSection): ForgeSnapshotSection {
 function appendOperation(state: ForgeState, operation: ForgeOperation): ForgeState {
   const copied = operation.kind === "cut" && operation.path
     ? { ...operation, path: { ...operation.path, start: { ...operation.path.start }, end: { ...operation.path.end } } }
-    : operation.kind === "surface-hammer" ? {...operation,pose:{...operation.pose},target:{...operation.target}} : { ...operation };
+    : operation.kind === "surface-hammer" || operation.kind === "power-hammer" || operation.kind === "forge-press"
+      ? {...operation,pose:{...operation.pose},target:{...operation.target}} : { ...operation };
   return { ...state, workpiece: refreshSolidWorkpiece(state.workpiece), operations: [...state.operations, copied] };
 }
 

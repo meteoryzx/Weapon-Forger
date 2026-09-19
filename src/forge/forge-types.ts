@@ -251,6 +251,26 @@ export interface SurfaceHammerOperation {
   readonly energy: number;
 }
 
+/** A deterministic burst of fixed-die impacts from the powered hammer. */
+export interface PowerHammerOperation {
+  readonly kind: "power-hammer";
+  readonly pose: HammerPose;
+  readonly target: { readonly x: number; readonly z: number };
+  readonly energy: number;
+  readonly blows: number;
+  readonly cadenceMs: number;
+}
+
+/** One continuous press cycle: close, load, hold, and release. */
+export interface ForgePressOperation {
+  readonly kind: "forge-press";
+  readonly pose: HammerPose;
+  readonly target: { readonly x: number; readonly z: number };
+  readonly pressure: number;
+  readonly strokeMm: number;
+  readonly dwellMs: number;
+}
+
 export interface QuenchOperation {
   readonly kind: "quench";
   readonly medium: QuenchMedium;
@@ -322,6 +342,8 @@ export type ForgeOperation =
   | FeedOperation
   | HammerOperation
   | SurfaceHammerOperation
+  | PowerHammerOperation
+  | ForgePressOperation
   | QuenchOperation
   | GrindOperation
   | CutOperation
@@ -396,6 +418,8 @@ export type ForgeIntent =
   | SelectWorkpieceIntent
   | HammerIntent
   | SurfaceHammerOperation
+  | PowerHammerOperation
+  | ForgePressOperation
   | RotateIntent
   | FeedIntent
   | MoveBilletIntent

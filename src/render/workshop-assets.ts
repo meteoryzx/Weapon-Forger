@@ -4,6 +4,12 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { GrinderModel } from "./grinder-model.ts";
 
 export interface StationAsset { root:Group; contact?:Mesh<BufferGeometry,MeshStandardMaterial>; control?:Mesh<BufferGeometry,MeshStandardMaterial> }
+export interface PoweredForgingAsset extends StationAsset {
+  ram: Group;
+  control: Mesh<BufferGeometry, MeshStandardMaterial>;
+  readonly openRamY: number;
+  readonly closedRamY: number;
+}
 
 // The rendered room is the authority for wall clearance: its side walls are
 // narrowed by ROOM_SCALE_X and its masonry has real thickness, so a station
@@ -42,31 +48,57 @@ export function basinAsset(k:WorkshopModelKit,oil:boolean):StationAsset {
 export function grindingAsset(_k:WorkshopModelKit):StationAsset {
   return {root:new GrinderModel().root};
 }
-export function powerHammerAsset(k:WorkshopModelKit):StationAsset {
-  const root=new Group();root.name="power-hammer-reserved";
-  k.box(root,"anchored-plinth",[820,100,960],[0,50,0],"stone");
-  k.profile(root,"cast-base",[[-390,0],[390,0],[335,190],[-335,190]],780,[0,100,0],"iron");
-  for(const x of [-275,275]){
-    k.profile(root,"cast-frame",[[-90,0],[150,0],[140,1450],[60,1740],[-65,1720],[-100,1480]],110,[x,290,220],"iron");
-    k.cylinder(root,"polished-guide",22,1350,[x,1100,-175],"steel");
-    k.box(root,"guide-bearing",[120,95,120],[x,1500,-175],"iron");
-  }
-  k.box(root,"anvil-pedestal",[280,540,260],[0,560,-160],"iron");
-  k.box(root,"lower-die",[200,45,145],[0,852.5,-160],"steel");
-  k.box(root,"upper-die",[180,85,130],[0,1060,-160],"steel");
-  k.box(root,"ram",[130,410,130],[0,1307.5,-160],"iron");
-  k.box(root,"crosshead",[660,110,200],[0,1600,-140],"iron");
-  k.ring(root,"eccentric-wheel",245,25,[0,2020,-140],"iron");
-  for(let i=0;i<6;i++){
-    const angle=i*Math.PI/3;
-    k.beam(root,"wheel-spoke",[0,2020,-140],[Math.cos(angle)*235,2020+Math.sin(angle)*235,-140],35,40,"iron");
-  }
-  k.cylinder(root,"wheel-hub",65,150,[0,2020,-160],"brass","z");
-  k.beam(root,"connecting-rod",[95,2100,-225],[0,1500,-225],55,30,"steel");
-  k.cylinder(root,"rear-pulley",210,95,[0,1880,295],"iron","z",40);
-  k.box(root,"belt-upper",[70,15,490],[0,2210,90],"endgrain");
-  for(const x of [-335,335])for(const z of [-390,390])k.cylinder(root,"anchor-bolt",18,28,[x,125,z],"steel","y",6);
-  k.batch(root);return {root};
+export function powerHammerAsset(k:WorkshopModelKit):PoweredForgingAsset {
+  const root=new Group();root.name="power-hammer-low-poly";
+  k.profile(root,"flared-base",[[-390,0],[390,0],[330,160],[-330,160]],650,[0,3,0],"painted-iron");
+  // The approved reference is an enclosed C-frame. These three masses preserve
+  // the load path and throat while deliberately omitting belt/flywheel detail.
+  k.profile(root,"rear-cast-column",[[-310,0],[-40,0],[-15,1180],[-85,1510],[-285,1510]],480,[-40,145,115],"painted-iron");
+  k.profile(root,"upper-drive-housing",[[-120,0],[390,0],[345,360],[-40,430],[-170,300]],500,[-15,1330,65],"painted-iron");
+  k.profile(root,"lower-horn",[[-140,0],[300,0],[240,330],[-105,390]],420,[10,145,-10],"painted-iron");
+  k.box(root,"rear-service-cover",[26,330,300],[-322,930,140],"iron",8);
+  k.cylinder(root,"service-cap",105,34,[-338,1160,-35],"iron","x",12);
+  k.box(root,"anvil-seat",[320,320,330],[115,660,-50],"iron",10);
+  k.box(root,"lower-die",[250,55,210],[115,847.5,-50],"steel",5);
+  for(const x of [-315,315])for(const z of [-250,250])k.cylinder(root,"anchor-bolt",18,34,[x,177,z],"steel","y",6);
+  k.batch(root);
+
+  const ram=new Group();ram.name="power-hammer-ram";ram.userData.keepMesh=true;
+  k.cylinder(ram,"ram-guide",82,330,[115,0,-50],"steel","y",10);
+  k.box(ram,"upper-die",[230,100,200],[115,-210,-50],"steel",5);
+  const openRamY=1320*WORKSHOP_UNITS_PER_MM,closedRamY=1100*WORKSHOP_UNITS_PER_MM;ram.position.y=openRamY;root.add(ram);
+
+  const control=k.cylinder(root,"power-control",18,360,[365,520,-250],"steel","z",8);
+  control.userData.keepMesh=true;control.rotation.x=Math.PI/2;control.rotation.z=-0.18;
+  const contact=k.box(root,"power-contact",[280,18,240],[115,885,-50],"steel",2);
+  contact.userData.keepMesh=true;contact.material.transparent=true;contact.material.opacity=0;contact.material.depthWrite=false;
+  return {root,ram,control,contact,openRamY,closedRamY};
+}
+
+export function forgingPressAsset(k:WorkshopModelKit):PoweredForgingAsset {
+  const root=new Group();root.name="forging-press-low-poly";
+  k.profile(root,"press-base",[[-470,0],[470,0],[410,170],[-410,170]],650,[0,3,0],"iron");
+  k.box(root,"left-upright",[190,1150,310],[-330,735,40],"iron",10);
+  k.box(root,"right-upright",[190,1150,310],[330,735,40],"iron",10);
+  k.profile(root,"top-housing",[[-470,0],[470,0],[405,330],[-345,410],[345,410]],560,[0,1310,20],"iron");
+  k.box(root,"left-joint-plate",[250,220,36],[-330,1370,-265],"iron",5);
+  k.box(root,"right-joint-plate",[250,220,36],[330,1370,-265],"iron",5);
+  k.box(root,"lower-pedestal",[420,390,380],[0,640,-30],"iron",8);
+  k.box(root,"lower-die",[360,65,300],[0,867.5,-30],"steel",4);
+  for(const x of [-400,400])for(const z of [-250,250])k.cylinder(root,"anchor-bolt",18,34,[x,187,z],"steel","y",6);
+  k.batch(root);
+
+  const ram=new Group();ram.name="forging-press-ram";ram.userData.keepMesh=true;
+  k.cylinder(ram,"press-cylinder",92,360,[0,0,-30],"steel","y",10);
+  k.box(ram,"upper-platen",[430,105,350],[0,-235,-30],"iron",6);
+  k.box(ram,"upper-die",[340,75,285],[0,-325,-30],"steel",4);
+  const openRamY=1460*WORKSHOP_UNITS_PER_MM,closedRamY=1260*WORKSHOP_UNITS_PER_MM;ram.position.y=openRamY;root.add(ram);
+
+  const control=k.cylinder(root,"manual-pressure-switch",17,260,[480,710,-160],"steel","y",8);
+  control.userData.keepMesh=true;control.rotation.z=-0.55;
+  const contact=k.box(root,"press-contact",[390,18,330],[0,905,-30],"steel",2);
+  contact.userData.keepMesh=true;contact.material.transparent=true;contact.material.opacity=0;contact.material.depthWrite=false;
+  return {root,ram,control,contact,openRamY,closedRamY};
 }
 export function roomAsset(k:WorkshopModelKit) {
   const root=new Group();root.name="continuous-workshop";

@@ -46,6 +46,7 @@ export const WORKSHOP_LAYOUT: Record<string, WorkshopStationDefinition> = {
   "quench-oil": { origin: [15, 0, -160], footprint: [48, 92], workSurfaceY: 40, cameraTarget: [15, 40, -160] },
   grind: { origin: [150, 0, 132], footprint: [92, 92], workSurfaceY: 40, cameraTarget: [150, 40, 154] },
   power: { origin: [150, 0, 24], footprint: [76, 84], workSurfaceY: 40, cameraTarget: [150, 40, 24] },
+  press: { origin: [70, 0, 76], footprint: [80, 74], workSurfaceY: 42, cameraTarget: [70, 42, 76] },
 };
 
 export function stationLayout(name: keyof typeof WORKSHOP_LAYOUT): WorkshopStationDefinition {

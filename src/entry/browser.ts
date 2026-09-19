@@ -11,7 +11,7 @@ import {
 import { GameApplication } from "../app/game-application.ts";
 import type { AbrasiveUpdate } from "../app/grind-update.ts";
 import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
-import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint, type HammerPose, type SurfaceHammerOperation } from "../forge/index.ts";
+import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint, type ForgePressOperation, type HammerPose, type PowerHammerOperation, type SurfaceHammerOperation } from "../forge/index.ts";
 import { CUT_HOME, cutBounds, cutOperationFor, tablePoint, validCutPose, type CutPose } from "../app/cut-placement.ts";
 import { solidBounds } from "../forge/solid-geometry.ts";
 import { workshopUnits } from "../app/workshop-scale.ts";
@@ -35,7 +35,7 @@ const acceptanceReset = document.querySelector<HTMLButtonElement>("#acceptance-r
 const inspectionButtons = [...document.querySelectorAll<HTMLButtonElement>("[data-inspection-view]")];
 
 // The browser entry translates continuous pointer input into the public forge intents.
-const ACCEPTANCE_VERBS = ["materials", "cut", "weld", "heat", "hammer", "quench", "temper", "grind"] as const;
+const ACCEPTANCE_VERBS = ["materials", "cut", "weld", "heat", "hammer", "power", "press", "quench", "temper", "grind"] as const;
 type AcceptanceVerb = typeof ACCEPTANCE_VERBS[number];
 const searchParams = new URLSearchParams(window.location.search);
 const requestedAcceptanceVerb = searchParams.get("accept");
@@ -48,6 +48,8 @@ const acceptanceStation: ForgeStation | null = acceptanceVerb === "materials" ? 
   : acceptanceVerb === "weld" ? "weld"
   : acceptanceVerb === "heat" ? "furnace"
   : acceptanceVerb === "hammer" ? "anvil"
+  : acceptanceVerb === "power" ? "power"
+  : acceptanceVerb === "press" ? "press"
   : acceptanceVerb === "quench" ? `quench-${acceptanceMedium}` as ForgeStation
   : acceptanceVerb === "temper" ? "temper"
   : acceptanceVerb === "grind" ? "grind"
@@ -67,8 +69,8 @@ function createApplication(): GameApplication {
     prepareHotWorkpiece(next);
     next.applyIntent({ kind: "select-workpiece", benchIndex: 0 });
     prepareHotWorkpiece(next);
-  } else if (acceptanceVerb === "hammer" || acceptanceVerb === "quench") {
-    prepareHotWorkpiece(next,acceptanceVerb==="hammer"?30_000:20_000);
+  } else if (acceptanceVerb === "hammer" || acceptanceVerb === "power" || acceptanceVerb === "press" || acceptanceVerb === "quench") {
+    prepareHotWorkpiece(next,acceptanceVerb==="hammer"||acceptanceVerb==="power"||acceptanceVerb==="press"?30_000:20_000);
   } else if (acceptanceVerb === "temper") {
     prepareHotWorkpiece(next);
     next.applyIntent({ kind: "quench", medium: "water" });
@@ -196,6 +198,71 @@ document.querySelector("#hammer-mode")!.addEventListener("click",()=>{hammerPlac
 document.querySelector("#hammer-center")!.addEventListener("click",()=>placeHammer({...HAMMER_HOME}));
 document.querySelector("#hammer-overview")!.addEventListener("click",()=>setStation("overview"));
 hammerPieces.addEventListener("change",()=>{const index=latestSnapshot.bench.findIndex(p=>p.workpieceId===hammerPieces.value);if(index>=0){application.applyIntent({kind:"select-workpiece",benchIndex:index});updateView();}});
+
+const poweredControls=document.querySelector<HTMLElement>("#powered-controls")!;
+const poweredStatus=document.querySelector<HTMLElement>("#powered-status")!;
+const poweredForce=document.querySelector<HTMLInputElement>("#powered-force")!;
+const poweredFeed=document.querySelector<HTMLInputElement>("#powered-feed")!;
+const poweredLateral=document.querySelector<HTMLInputElement>("#powered-lateral")!;
+const poweredCycle=document.querySelector<HTMLInputElement>("#powered-cycle")!;
+const poweredRun=document.querySelector<HTMLButtonElement>("#powered-run")!;
+let poweredPending=false,poweredWorker:Worker|null=null;
+
+function poweredPose():HammerPose {
+  return {...HAMMER_HOME,x:Number(poweredFeed.value),z:Number(poweredLateral.value)};
+}
+function evaluatePowered(state:ForgeState,operation:PowerHammerOperation|ForgePressOperation):Promise<ForgeState> {
+  return new Promise((resolve,reject)=>{
+    poweredWorker??=new Worker(new URL("../platform/hammer.worker.ts",import.meta.url),{type:"module"});
+    const timer=setTimeout(()=>{poweredWorker?.terminate();poweredWorker=null;reject(new Error("动力设备计算超时，请重试。"));},30000);
+    poweredWorker.onmessage=(event:MessageEvent<{state?:ForgeState;error?:string}>)=>{
+      clearTimeout(timer);if(event.data.state)resolve(event.data.state);else reject(new Error(event.data.error??"动力设备计算失败。"));
+    };
+    poweredWorker.onerror=()=>{clearTimeout(timer);poweredWorker?.terminate();poweredWorker=null;reject(new Error("动力设备计算失败，请重试。"));};
+    poweredWorker.postMessage({state,operation});
+  });
+}
+function refreshPoweredInterface():void {
+  const active=activeStation==="power"||activeStation==="press";
+  poweredControls.hidden=!active;if(!active)return;
+  const press=activeStation==="press";
+  poweredCycle.max=press?"4":"6";
+  if(Number(poweredCycle.value)>Number(poweredCycle.max))poweredCycle.value=poweredCycle.max;
+  document.querySelector("#powered-force-label")!.textContent=`${poweredForce.value}%`;
+  document.querySelector("#powered-feed-label")!.textContent=`${poweredFeed.value} mm`;
+  document.querySelector("#powered-lateral-label")!.textContent=`${poweredLateral.value} mm`;
+  document.querySelector("#powered-cycle-label")!.textContent=press?`${poweredCycle.value} 秒`:`${poweredCycle.value} 次`;
+  poweredRun.textContent=press?"压下并保压":"启动动力锤";
+  poweredRun.disabled=poweredPending;
+  document.body.dataset.poweredPending=String(poweredPending);
+  document.body.dataset.poweredFeed=poweredFeed.value;
+  document.body.dataset.poweredLateral=poweredLateral.value;
+  document.body.dataset.poweredLoad=String(Number(poweredForce.value)/100);
+  if(!poweredPending)poweredStatus.textContent=press
+    ? "手动开关控制一次压下、保压和回程；持续载荷只记录一次压力循环。"
+    : "固定模具按设定次数连续冲击；改变送料位置可沿工件塑形。";
+  view?.setPoweredPose(poweredPose());
+}
+async function runPoweredForge():Promise<void> {
+  if(poweredPending||view?.poweredBusy||!(activeStation==="power"||activeStation==="press"))return;
+  const pose=poweredPose(),load=Number(poweredForce.value)/100,cycle=Number(poweredCycle.value);
+  poweredPending=true;poweredStatus.textContent=activeStation==="press"?"压力机压下中……":"动力锤运行中……";
+  const operation:PowerHammerOperation|ForgePressOperation=activeStation==="power"
+    ? {kind:"power-hammer",pose,target:{x:0,z:0},energy:load,blows:cycle,cadenceMs:180}
+    : {kind:"forge-press",pose,target:{x:0,z:0},pressure:load,strokeMm:6+load*14,dwellMs:cycle*1000};
+  if(operation.kind==="power-hammer")view?.runPowerHammer(performance.now(),operation.blows,operation.cadenceMs);
+  else view?.runForgePress(performance.now(),operation.dwellMs);
+  try{
+    await application.applyPoweredForge(operation,evaluatePowered);
+    updateView();
+    poweredStatus.textContent=operation.kind==="power-hammer"?`完成 ${operation.blows} 次冲击。`:`完成 ${(operation.dwellMs/1000).toFixed(0)} 秒保压并回程。`;
+  }catch(error){poweredStatus.textContent=error instanceof Error?error.message:"动力设备未完成。";}
+  finally{poweredPending=false;refreshPoweredInterface();}
+}
+for(const control of [poweredForce,poweredFeed,poweredLateral,poweredCycle])control.addEventListener("input",refreshPoweredInterface);
+poweredRun.addEventListener("click",()=>{void runPoweredForge();});
+document.querySelector("#powered-center")!.addEventListener("click",()=>{poweredFeed.value="0";poweredLateral.value="0";refreshPoweredInterface();});
+document.querySelector("#powered-overview")!.addEventListener("click",()=>setStation("overview"));
 const cutControls=document.querySelector<HTMLElement>("#cut-controls")!;
 const cutStatus=document.querySelector<HTMLElement>("#cut-status")!;
 const cutConfirm=document.querySelector<HTMLButtonElement>("#cut-confirm")!;
@@ -385,6 +452,8 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   materials: { title: "选料桌 · 选料", hint: "" },
   furnace: { title: "火炉 · 加热", hint: "拖动钢坯自由调整方向；整体进入炉腔后开始加热，完全拖出后停止。" },
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
+  power: { title: "动力锤 · 快速塑形", hint: "调节载荷、冲击次数和送料位置；每轮按固定节拍冲击同一接触区。" },
+  press: { title: "锻造压力机 · 压下延展", hint: "调节压力、送料位置与保压时间；手动开关执行压下、保压和回程。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
   "quench-water": { title: "水槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
@@ -500,6 +569,18 @@ function acceptanceState(state: ForgeState): readonly string[] {
         `塑性应变 ${average(sections.map((section) => section.plasticStrain)).toFixed(3)} · 应力 ${average(sections.map((section) => section.stress)).toFixed(3)}`,
         `损伤 ${Math.round(average(sections.map((section) => section.damage)) * 100)}% · ${shared}`,
       ];
+    case "power":
+      return [
+        `动力锤 · 温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 载荷 ${poweredForce.value}% · 送料 ${poweredFeed.value} mm`,
+        `累计动力锤循环 ${state.operations.filter(operation=>operation.kind==="power-hammer").length} · 塑性应变 ${average(sections.map(section=>section.plasticStrain)).toFixed(3)}`,
+        `机械功 ${sections.reduce((sum,section)=>sum+section.mechanicalWorkJ,0).toFixed(1)} J · ${shared}`,
+      ];
+    case "press":
+      return [
+        `压力机 · 温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 压力 ${poweredForce.value}% · 保压 ${poweredCycle.value}s`,
+        `累计压力循环 ${state.operations.filter(operation=>operation.kind==="forge-press").length} · 塑性应变 ${average(sections.map(section=>section.plasticStrain)).toFixed(3)}`,
+        `应力 ${average(sections.map(section=>section.stress)).toFixed(3)} · 损伤 ${Math.round(average(sections.map(section=>section.damage))*100)}% · ${shared}`,
+      ];
     case "quench":
       const quenchState = quenchPhase === "ready" ? "等待放入" : quenchPhase === "immersed" ? "工件已浸入" : "淬火检查";
       const stress = average(sections.map((section) => section.stress));
@@ -545,6 +626,8 @@ function renderState(): void {
     state.operations.some((operation) => operation.kind === "weld") ? "weld" : null,
     state.operations.some((operation) => operation.kind === "move-billet" && operation.destination === "furnace" && operation.elapsedMs > 0) ? "heat" : null,
     state.operations.some((operation) => operation.kind === "hammer" || operation.kind === "surface-hammer") ? "hammer" : null,
+    state.operations.some((operation) => operation.kind === "power-hammer") ? "power" : null,
+    state.operations.some((operation) => operation.kind === "forge-press") ? "press" : null,
     state.operations.some((operation) => operation.kind === "quench") ? "quench" : null,
     state.operations.some((operation) => operation.kind === "temper") ? "temper" : null,
     state.operations.some((operation) => operation.kind === "grind") ? "grind" : null,
@@ -566,6 +649,7 @@ function renderState(): void {
       ? `工作台 ${latestSnapshot.benchCount} 块 · 本次操作 ${state.operations.length - acceptanceSetupOperationCount}`
       : `工作台 ${latestSnapshot.benchCount} 块 · 操作 ${state.operations.length}`,
     `锤击 ${(operationCounts.hammer ?? 0)+(operationCounts["surface-hammer"]??0)} · 切割 ${operationCounts.cut ?? 0} · 焊合 ${operationCounts.weld ?? 0}`,
+    `动力锤 ${operationCounts["power-hammer"]??0} · 压力循环 ${operationCounts["forge-press"]??0}`,
     `淬火 ${latestSnapshot.quenchMedium ?? "未做"} · 回火 ${displayedTemper ?? "未做"} · 研磨 ${Math.round(latestSnapshot.edgeCoverage * 100)}%`,
     `损伤 ${Math.round(damage * 100)}% · 规则 ${latestSnapshot.parameterVersion}`,
   ];
@@ -622,6 +706,7 @@ function updateView(hammerPreview = null): void {
   updateMaterialsInterface();
   refreshCutInterface();
   refreshHammerInterface();
+  refreshPoweredInterface();
   renderState();
 }
 
@@ -630,9 +715,9 @@ function updateThermalHud(): void {
 }
 
 function setStation(station: ForgeStation): void {
-  if(cutting||hammerPending)return;
+  if(cutting||hammerPending||poweredPending||view?.poweredBusy)return;
   const furnaceModeSwitch=(activeStation==="furnace"||activeStation==="temper")&&(station==="furnace"||station==="temper");
-  if (!furnaceModeSwitch && acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer" && !materialSession && station !== acceptanceStation) return;
+  if (!furnaceModeSwitch && acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer" && acceptanceVerb!=="power" && acceptanceVerb!=="press" && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
   if (activeStation === "materials" && station !== "materials"
     && materialSelection.getPieces().length > 0
@@ -661,6 +746,7 @@ function setStation(station: ForgeStation): void {
   document.body.classList.toggle("cut-view",station==="cut");
   document.body.classList.toggle("heat-view",station==="furnace"||station==="temper");
   document.body.classList.toggle("hammer-view",station==="anvil");
+  document.body.classList.toggle("powered-view",station==="power"||station==="press");
   document.body.classList.toggle("material-session",station==="materials");
   hammerDrag=null;hammerAim=null;
   view?.setStation(station);
@@ -889,6 +975,7 @@ activeStation = acceptanceStation ?? "overview";
 if(activeStation==="grind")application.prepareGrinding();
 document.body.classList.toggle("heat-view", activeStation === "furnace" || activeStation === "temper");
 document.body.classList.toggle("hammer-view", activeStation === "anvil");
+document.body.classList.toggle("powered-view", activeStation === "power" || activeStation === "press");
 document.body.classList.toggle("material-session",activeStation==="materials");
 view?.resize(viewport());
 updateView();
@@ -1164,7 +1251,7 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (event.key === "Escape" && activeStation !== "overview") {
-    if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer") return;
+    if (acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer" && acceptanceVerb!=="power" && acceptanceVerb!=="press") return;
     event.preventDefault();
     setStation("overview");
     return;
@@ -1232,6 +1319,7 @@ requestAnimationFrame(renderFrame);
 window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {
   hammerWorker?.terminate();
+  poweredWorker?.terminate();
   cutWorker?.terminate();
   grindWorker?.terminate();
   view?.dispose();

@@ -6,7 +6,7 @@ import { SawStationView } from "../../src/render/saw-station-view.ts";
 import { FurnaceStationView } from "../../src/render/furnace-station-view.ts";
 import { HammerStationView } from "../../src/render/hammer-station-view.ts";
 import { WorkshopModelKit } from "../../src/render/workshop-model-kit.ts";
-import { basinAsset, grindingAsset, powerHammerAsset, ROOM_INTERIOR } from "../../src/render/workshop-assets.ts";
+import { basinAsset, forgingPressAsset, grindingAsset, powerHammerAsset, ROOM_INTERIOR } from "../../src/render/workshop-assets.ts";
 
 function solidBounds(root:Group) {
   root.updateMatrixWorld(true);
@@ -27,7 +27,7 @@ describe("authored workshop geometry",()=>{
     const roots:Record<string,Group>={materials:selection.group,cut:saw.group,furnace:furnace.body,temper:temper.body,anvil:hammer.group};
     // Dynamic hand tools are excluded from the static furniture envelope.
     hammer.tool.removeFromParent();
-    for(const [name,asset] of Object.entries({quench:basinAsset(k,false),"quench-oil":basinAsset(k,true),grind:grindingAsset(k),power:powerHammerAsset(k)})){
+    for(const [name,asset] of Object.entries({quench:basinAsset(k,false),"quench-oil":basinAsset(k,true),grind:grindingAsset(k),power:powerHammerAsset(k),press:forgingPressAsset(k)})){
       asset.root.position.set(...WORKSHOP_LAYOUT[name]!.origin);
       if(name.startsWith("quench"))asset.root.position.y=WORKSHOP_FLOOR_Y*(1-0.55);
       roots[name]=asset.root;

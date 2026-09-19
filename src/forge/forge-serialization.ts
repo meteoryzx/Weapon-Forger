@@ -50,12 +50,23 @@ export function assertForgeState(value: unknown): asserts value is ForgeState {
   arrayValue(state.operations, "Forge operations").forEach((item, index) => {
     const operation = record(item, `Forge operation ${index}`);
     stringValue(operation.kind, `Forge operation ${index} kind`);
-    if(operation.kind === "surface-hammer") {
+    if(operation.kind === "surface-hammer" || operation.kind === "power-hammer" || operation.kind === "forge-press") {
       assertHammerPose(record(operation.pose,"Hammer pose") as unknown as HammerPose);
       const target=record(operation.target,"Hammer target");
       finiteNumber(target.x,"Hammer target x");finiteNumber(target.z,"Hammer target z");
-      finiteNumber(operation.energy,"Hammer energy");
-      if(operation.energy<0.1||operation.energy>1)throw new Error("Invalid surface hammer energy.");
+      if(operation.kind === "surface-hammer" || operation.kind === "power-hammer") {
+        finiteNumber(operation.energy,"Hammer energy");
+        if(operation.energy<0.1||operation.energy>1)throw new Error("Invalid surface hammer energy.");
+      }
+      if(operation.kind === "power-hammer") {
+        nonNegativeInteger(operation.blows,"Power hammer blows");
+        finiteNumber(operation.cadenceMs,"Power hammer cadence");
+      }
+      if(operation.kind === "forge-press") {
+        finiteNumber(operation.pressure,"Forge press pressure");
+        finiteNumber(operation.strokeMm,"Forge press stroke");
+        finiteNumber(operation.dwellMs,"Forge press dwell");
+      }
     }
   });
   if (state.cutLosses !== undefined) arrayValue(state.cutLosses, "Cut losses").forEach(value => {

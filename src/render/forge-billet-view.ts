@@ -30,7 +30,7 @@ import {
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { QuenchEffects } from "./quench-effects.ts";
-import { basinAsset, powerHammerAsset, roomAsset, type StationAsset } from "./workshop-assets.ts";
+import { basinAsset, forgingPressAsset, powerHammerAsset, roomAsset, type PoweredForgingAsset, type StationAsset } from "./workshop-assets.ts";
 import { GRINDER, GrinderModel } from "./grinder-model.ts";
 
 import {
@@ -93,7 +93,9 @@ export type ForgeStation =
   | "quench-water"
   | "quench-oil"
   | "temper"
-  | "grind";
+  | "grind"
+  | "power"
+  | "press";
 export type InspectionView = "default" | "front" | "side" | "top";
 
 export type ForgeMaterialPick = "mild-steel" | "high-carbon-steel" | "spring-steel";
@@ -110,6 +112,8 @@ const STATION_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [numbe
   "quench-oil": WORKSHOP_LAYOUT["quench-oil"]!.origin,
   temper: WORKSHOP_LAYOUT.temper!.origin,
   grind: WORKSHOP_LAYOUT.grind!.origin,
+  power: WORKSHOP_LAYOUT.power!.origin,
+  press: WORKSHOP_LAYOUT.press!.origin,
 };
 
 const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number, number, number]> = {
@@ -122,6 +126,8 @@ const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number
   "quench-oil": [WORKSHOP_LAYOUT["quench-oil"]!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT["quench-oil"]!.origin[2]],
   temper: [WORKSHOP_LAYOUT.temper!.origin[0], FURNACE.hearth, WORKSHOP_LAYOUT.temper!.origin[2]],
   grind: [WORKSHOP_LAYOUT.grind!.origin[0] + workshopUnits(GRINDER.frontX), WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.restY), WORKSHOP_LAYOUT.grind!.origin[2]],
+  power: [WORKSHOP_LAYOUT.power!.origin[0] + workshopUnits(115), WORKSHOP_FLOOR_Y + workshopUnits(894), WORKSHOP_LAYOUT.power!.origin[2] - workshopUnits(50)],
+  press: [WORKSHOP_LAYOUT.press!.origin[0], WORKSHOP_FLOOR_Y + workshopUnits(914), WORKSHOP_LAYOUT.press!.origin[2] - workshopUnits(30)],
 };
 
 export const CAMERA_FRAMES = {
@@ -178,6 +184,7 @@ export class ForgeBilletView {
   private readonly temperFurnaceView: FurnaceStationView;
   readonly hammerView: HammerStationView;
   private hammerPose:HammerPose=HAMMER_HOME;
+  private poweredPose:HammerPose=HAMMER_HOME;
   private cutPose: CutPose = CUT_HOME;
   private cutValid: boolean | null = null;
   private materialsFocus: "table" | "rack" = "table";
@@ -221,6 +228,9 @@ export class ForgeBilletView {
   private readonly quenchEffects=new QuenchEffects();
   private readonly stationRoots=new Map<string,Group>();
   private readonly grinderModel = new GrinderModel("material");
+  private powerAsset: PoweredForgingAsset | null = null;
+  private pressAsset: PoweredForgingAsset | null = null;
+  private poweredMotion: { station: "power" | "press"; startedAtMs: number; durationMs: number; blows: number; dwellMs: number } | null = null;
   private viewport: RenderViewport;
 
   constructor(private readonly canvas: RenderCanvas, viewport: RenderViewport) {
@@ -337,6 +347,11 @@ export class ForgeBilletView {
     this.billet.rotation.set(snapshot.orientationQuarterTurns * Math.PI / 2,0,0);
     const anchor = BILLET_ANCHORS[activeStation];
     this.billetRig.position.set(...anchor);
+    if(activeStation==="power"||activeStation==="press"){
+      this.billetRig.position.x+=workshopUnits(this.poweredPose.x);
+      this.billetRig.position.z+=workshopUnits(this.poweredPose.z);
+      this.billet.rotation.x+=this.poweredPose.roll;
+    }
     this.temperControl.rotation.z = ((this.temperPreviewC ?? 220) - 220) / 160;
     const nextGeometry = this.preparedGrindMesh ?? createBilletGeometry(snapshot, hammerPreview);
     this.preparedGrindMesh=null;
@@ -362,7 +377,8 @@ export class ForgeBilletView {
         this.billet.position.copy(this.grindCenter).multiplyScalar(-BILLET_SCALE);
         this.billetHitTarget.position.y = 0;
         this.applyGrindTransform();
-      } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
+      } else if(activeStation==="power"||activeStation==="press") this.billetRig.rotation.set(0,this.poweredPose.yaw,0);
+      else this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
@@ -438,6 +454,7 @@ export class ForgeBilletView {
     const furnaceMoved = this.furnaceView.tick(nowMs);
     const temperFurnaceMoved = this.temperFurnaceView.tick(nowMs);
     const hammerMoved=this.hammerView.tick(nowMs);
+    const poweredMoved=this.tickPoweredForging(nowMs);
     this.grinderModel.tick(nowMs / 1000);
     const inQuench=this.station==="quench-water"||this.station==="quench-oil";
     // Decorative steam/ripples are deferred from the current acceptance gate.
@@ -450,7 +467,7 @@ export class ForgeBilletView {
       const quenchRenderReady = this.station !== "quench-water" && this.station !== "quench-oil"
         ? false
         : this.quenchPoseDirty && nowMs - this.lastQuenchRenderMs >= 500;
-      if (materialMoved || sawMoved || furnaceMoved || temperFurnaceMoved || hammerMoved || quenchMoved || quenchRenderReady || grindRenderReady || this.station === "grind") {
+      if (materialMoved || sawMoved || furnaceMoved || temperFurnaceMoved || hammerMoved || poweredMoved || quenchMoved || quenchRenderReady || grindRenderReady || this.station === "grind") {
         this.quenchPoseDirty = false;
         if (this.station === "quench-water" || this.station === "quench-oil") this.lastQuenchRenderMs = nowMs;
         if (this.station === "quench-water" || this.station === "quench-oil") this.lastQuenchEffectRenderMs = nowMs;
@@ -468,6 +485,42 @@ export class ForgeBilletView {
     this.camera.updateProjectionMatrix();
     if (amount >= 1) this.isTransitioning = false;
     this.render();
+  }
+
+  runPowerHammer(nowMs: number, blows: number, cadenceMs: number): void {
+    this.poweredMotion = { station: "power", startedAtMs: nowMs, durationMs: Math.max(240, blows * cadenceMs), blows, dwellMs: 0 };
+  }
+
+  setPoweredPose(pose:HammerPose):void {
+    this.poweredPose={...pose};
+    if(this.snapshot&&(this.station==="power"||this.station==="press"))this.update(this.snapshot,null,this.station,this.temperPreviewC);
+  }
+
+  runForgePress(nowMs: number, dwellMs: number): void {
+    this.poweredMotion = { station: "press", startedAtMs: nowMs, durationMs: 760 + dwellMs, blows: 1, dwellMs };
+  }
+
+  get poweredBusy(): boolean { return this.poweredMotion !== null; }
+
+  private tickPoweredForging(nowMs: number): boolean {
+    const motion=this.poweredMotion;
+    if(!motion)return false;
+    const asset=motion.station==="power"?this.powerAsset:this.pressAsset;
+    if(!asset){this.poweredMotion=null;return false;}
+    const elapsed=Math.max(0,nowMs-motion.startedAtMs),t=Math.min(1,elapsed/motion.durationMs);
+    let travel=0;
+    if(motion.station==="power"){
+      const cycle=(t*motion.blows)%1;
+      travel=cycle<0.38?cycle/0.38:cycle<0.58?1:(1-cycle)/0.42;
+      asset.control.rotation.z=-0.18+Math.sin(t*Math.PI*motion.blows*2)*0.06;
+    }else{
+      const closeMs=380,holdEnd=closeMs+motion.dwellMs;
+      travel=elapsed<closeMs?elapsed/closeMs:elapsed<holdEnd?1:Math.max(0,1-(elapsed-holdEnd)/380);
+      asset.control.rotation.z=-0.55-travel*0.28;
+    }
+    asset.ram.position.y=asset.openRamY+(asset.closedRamY-asset.openRamY)*Math.max(0,Math.min(1,travel));
+    if(t>=1){asset.ram.position.y=asset.openRamY;this.poweredMotion=null;}
+    return true;
   }
 
   resize(viewport: RenderViewport): void {
@@ -1079,6 +1132,15 @@ export class ForgeBilletView {
     const power=powerHammerAsset(k);
     power.root.position.set(...WORKSHOP_LAYOUT.power!.origin);this.scene.add(power.root);
     this.stationRoots.set("power",power.root);
+    power.contact!.userData.station="power";
+    this.stationMeshes.set("power",power.contact!);
+    this.powerAsset=power;
+    const press=forgingPressAsset(k);
+    press.root.position.set(...WORKSHOP_LAYOUT.press!.origin);this.scene.add(press.root);
+    this.stationRoots.set("press",press.root);
+    press.contact!.userData.station="press";
+    this.stationMeshes.set("press",press.contact!);
+    this.pressAsset=press;
     for(const station of ["materials","cut","weld","quench-water","quench-oil","grind"] as const){
       const definition=WORKSHOP_LAYOUT[station==="weld"?"materials":station==="quench-water"?"quench":station]!;
       const target=new Mesh(new BoxGeometry(definition.footprint[0],50,definition.footprint[1]),new MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false}));
@@ -1106,6 +1168,8 @@ export class ForgeBilletView {
     this.anvilModel.visible=true;
     const power = this.stationRoots.get("power");
     if (power) power.visible = activeStation !== "furnace" && activeStation !== "temper";
+    const press = this.stationRoots.get("press");
+    if (press) press.visible = activeStation !== "furnace" && activeStation !== "temper";
     this.hammerView.setActive(activeStation==="anvil");
     for(const mesh of this.materialMeshes.values())mesh.visible=false;
   }
