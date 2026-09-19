@@ -1167,9 +1167,9 @@ export class ForgeBilletView {
     this.temperFurnaceView.itemRig.visible=activeStation==="temper";
     this.anvilModel.visible=true;
     const power = this.stationRoots.get("power");
-    if (power) power.visible = activeStation !== "furnace" && activeStation !== "temper";
+    if (power) power.visible = activeStation === "power" || activeStation === "overview";
     const press = this.stationRoots.get("press");
-    if (press) press.visible = activeStation !== "furnace" && activeStation !== "temper";
+    if (press) press.visible = activeStation === "press" || activeStation === "overview";
     this.hammerView.setActive(activeStation==="anvil");
     for(const mesh of this.materialMeshes.values())mesh.visible=false;
   }
@@ -1203,6 +1203,15 @@ export class ForgeBilletView {
     if(station==="cut")return sawCameraFrame(this.camera.aspect);
     if (station === "materials") return materialsCameraFrame(this.materialsFocus, this.camera.aspect);
     if (station === "weld") return weldCameraFrame(this.camera.aspect);
+    if (station === "power" || station === "press") {
+      const layout = WORKSHOP_LAYOUT[station]!;
+      const target = new Vector3(layout.origin[0], WORKSHOP_FLOOR_Y + workshopUnits(770), layout.origin[2]);
+      // The powered machines are tall props. Frame the whole load path rather
+      // than the die alone, with extra distance on narrow viewports.
+      const distance = Math.max(1, 1.55 / this.camera.aspect);
+      const offset = new Vector3(station === "power" ? -30 : 30, 36, 92).multiplyScalar(distance);
+      return { position: target.clone().add(offset).toArray(), target: target.toArray() };
+    }
     if (station === "grind") {
       const target = new Vector3(BILLET_ANCHORS.grind[0], BILLET_ANCHORS.grind[1] + workshopUnits(38), BILLET_ANCHORS.grind[2]);
       const distance = Math.max(1, 0.46 / this.camera.aspect);
