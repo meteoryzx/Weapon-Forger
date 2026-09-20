@@ -9,6 +9,7 @@ import {
   totalVolume,
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
+import { PowerHammerCycle, POWER_CADENCE_MS } from "../app/power-hammer-cycle.ts";
 import type { AbrasiveUpdate } from "../app/grind-update.ts";
 import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
 import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint, type ForgePressOperation, type HammerPose, type PowerHammerOperation, type SurfaceHammerOperation } from "../forge/index.ts";
@@ -207,9 +208,15 @@ const poweredLateral=document.querySelector<HTMLInputElement>("#powered-lateral"
 const poweredCycle=document.querySelector<HTMLInputElement>("#powered-cycle")!;
 const poweredRun=document.querySelector<HTMLButtonElement>("#powered-run")!;
 let poweredPending=false,poweredWorker:Worker|null=null;
+const powerCycle=new PowerHammerCycle();
+let powerHeld=false,powerPoseCurrent:HammerPose={...HAMMER_HOME};
+let powerDrag:{point:{x:number;z:number};pose:HammerPose;rotate:boolean;startX:number}|null=null;
+let powerStroke:{pose:HammerPose;energy:number;contact:boolean}|null=null;
+const powerAxis=document.querySelector<HTMLSelectElement>("#power-axis")!;
+let powerNotice="";
 
 function poweredPose():HammerPose {
-  return {...HAMMER_HOME,x:Number(poweredFeed.value),z:Number(poweredLateral.value)};
+  return activeStation==="power"?powerPoseCurrent:{...HAMMER_HOME,x:Number(poweredFeed.value),z:Number(poweredLateral.value)};
 }
 function evaluatePowered(state:ForgeState,operation:PowerHammerOperation|ForgePressOperation):Promise<ForgeState> {
   return new Promise((resolve,reject)=>{
@@ -223,45 +230,104 @@ function evaluatePowered(state:ForgeState,operation:PowerHammerOperation|ForgePr
   });
 }
 function refreshPoweredInterface():void {
+  document.getElementById("power-machine-view")!.hidden=activeStation!=="power";
   const active=activeStation==="power"||activeStation==="press";
   poweredControls.hidden=!active;if(!active)return;
   const press=activeStation==="press";
+  for(const id of ["powered-cycle","powered-cycle-label","powered-cycle-title"])document.getElementById(id)!.hidden=!press;
+  document.getElementById("power-axis-control")!.hidden=press;
   poweredCycle.max=press?"4":"6";
   if(Number(poweredCycle.value)>Number(poweredCycle.max))poweredCycle.value=poweredCycle.max;
+  if(!press){poweredFeed.value=String(powerPoseCurrent.x);poweredLateral.value=String(powerPoseCurrent.z);}
   document.querySelector("#powered-force-label")!.textContent=`${poweredForce.value}%`;
   document.querySelector("#powered-feed-label")!.textContent=`${poweredFeed.value} mm`;
   document.querySelector("#powered-lateral-label")!.textContent=`${poweredLateral.value} mm`;
   document.querySelector("#powered-cycle-label")!.textContent=press?`${poweredCycle.value} 秒`:`${poweredCycle.value} 次`;
-  poweredRun.textContent=press?"压下并保压":"启动动力锤";
-  poweredRun.disabled=poweredPending;
+  poweredRun.textContent=press?"压下并保压":"锻打";
+  poweredRun.title=press?"压下并保压":"按住锻打，松开停止后续冲击";
+  poweredRun.disabled=press&&poweredPending;
+  for(const control of [poweredFeed,poweredLateral,powerAxis])control.disabled=poweredPending||powerCycle.busy;
+  (document.querySelector("#powered-center") as HTMLButtonElement).disabled=poweredPending||powerCycle.busy;
   document.body.dataset.poweredPending=String(poweredPending);
   document.body.dataset.poweredFeed=poweredFeed.value;
   document.body.dataset.poweredLateral=poweredLateral.value;
   document.body.dataset.poweredLoad=String(Number(poweredForce.value)/100);
+  view?.setPoweredPose(poweredPose());
   if(!poweredPending)poweredStatus.textContent=press
     ? "手动开关控制一次压下、保压和回程；持续载荷只记录一次压力循环。"
-    : "固定模具按设定次数连续冲击；改变送料位置可沿工件塑形。";
-  view?.setPoweredPose(poweredPose());
+    : powerNotice || (view?.powerWorkpiece.contact?.supported?"接触有效":"空击");
+}
+function placePower(pose:HammerPose):void {
+  if(poweredPending||powerCycle.busy||!view)return;
+  if(view.placePowerWorkpiece(pose)){powerPoseCurrent={...pose};powerNotice="";}
+  else powerNotice="空间不足";
+  refreshPoweredInterface();
+}
+function stopPower():void {powerHeld=false;powerDrag=null;}
+
+async function commitPowerImpact():Promise<void> {
+  const stroke=powerStroke;
+  if(!stroke)return;
+  if(!stroke.contact){powerCycle.release(performance.now(),0);return;}
+  poweredPending=true;
+  refreshPoweredInterface();
+  const before=hammerFrame(latestSnapshot.geometry,stroke.pose);
+  try {
+    await application.applyPoweredForge({kind:"power-hammer",pose:stroke.pose,target:{x:0,z:0},
+      energy:stroke.energy,blows:1,cadenceMs:POWER_CADENCE_MS},evaluatePowered);
+    const after=hammerFrame(application.getState().workpiece.geometry,stroke.pose);
+    const shift=rotateHammerPoint({x:after.center.x-before.center.x,y:0,z:after.center.z-before.center.z},stroke.pose);
+    powerPoseCurrent={...stroke.pose,x:stroke.pose.x+shift.x,z:stroke.pose.z+shift.z};
+    powerNotice="";view?.setPoweredPose(powerPoseCurrent,false);updateView();
+  } catch(error) {
+    stopPower();powerNotice=error instanceof Error?error.message:"冲击未完成";
+  } finally {
+    poweredPending=false;
+    powerCycle.release(performance.now(),view?.powerWorkpiece.contactHeight??0);
+    refreshPoweredInterface();
+  }
+}
+function tickPower(now:number):void {
+  const wasBusy=powerCycle.busy;
+  if(activeStation==="power"&&powerHeld&&!powerDrag&&!view?.isCameraTransitioning()&&!view?.isInspectionActive()&&!powerCycle.busy){
+    const contact=view?.powerWorkpiece.contact;
+    const height=view?.powerWorkpiece.contactHeight??0;
+    if(height>120){stopPower();powerNotice="开口不足";refreshPoweredInterface();}
+    else if(powerCycle.begin(now,height)){
+      powerStroke={pose:{...powerPoseCurrent},energy:Number(poweredForce.value)/100,contact:!!contact?.supported};
+      refreshPoweredInterface();
+    }
+  }
+  if(powerCycle.tick(now))void commitPowerImpact();
+  if(wasBusy||powerCycle.busy)view?.setPowerGap(powerCycle.gap(now));
+  if(wasBusy&&!powerCycle.busy)refreshPoweredInterface();
+  document.body.dataset.powerPhase=powerCycle.phase;
+  document.body.dataset.powerHeld=String(powerHeld);
 }
 async function runPoweredForge():Promise<void> {
-  if(poweredPending||view?.poweredBusy||!(activeStation==="power"||activeStation==="press"))return;
+  if(poweredPending||view?.poweredBusy||activeStation!=="press")return;
   const pose=poweredPose(),load=Number(poweredForce.value)/100,cycle=Number(poweredCycle.value);
-  poweredPending=true;poweredStatus.textContent=activeStation==="press"?"压力机压下中……":"动力锤运行中……";
-  const operation:PowerHammerOperation|ForgePressOperation=activeStation==="power"
-    ? {kind:"power-hammer",pose,target:{x:0,z:0},energy:load,blows:cycle,cadenceMs:180}
-    : {kind:"forge-press",pose,target:{x:0,z:0},pressure:load,strokeMm:6+load*14,dwellMs:cycle*1000};
-  if(operation.kind==="power-hammer")view?.runPowerHammer(performance.now(),operation.blows,operation.cadenceMs);
-  else view?.runForgePress(performance.now(),operation.dwellMs);
+  poweredPending=true;poweredStatus.textContent="压力机压下中……";
+  const operation:ForgePressOperation={kind:"forge-press",pose,target:{x:0,z:0},pressure:load,strokeMm:6+load*14,dwellMs:cycle*1000};
+  view?.runForgePress(performance.now(),operation.dwellMs);
   try{
     await application.applyPoweredForge(operation,evaluatePowered);
     updateView();
-    poweredStatus.textContent=operation.kind==="power-hammer"?`完成 ${operation.blows} 次冲击。`:`完成 ${(operation.dwellMs/1000).toFixed(0)} 秒保压并回程。`;
+    poweredStatus.textContent=`完成 ${(operation.dwellMs/1000).toFixed(0)} 秒保压并回程。`;
   }catch(error){poweredStatus.textContent=error instanceof Error?error.message:"动力设备未完成。";}
   finally{poweredPending=false;refreshPoweredInterface();}
 }
-for(const control of [poweredForce,poweredFeed,poweredLateral,poweredCycle])control.addEventListener("input",refreshPoweredInterface);
+for(const control of [poweredForce,poweredCycle])control.addEventListener("input",refreshPoweredInterface);
+for(const control of [poweredFeed,poweredLateral])control.addEventListener("input",()=>{
+  if(activeStation==="power")placePower({...powerPoseCurrent,x:Number(poweredFeed.value),z:Number(poweredLateral.value)});
+  else refreshPoweredInterface();
+});
 poweredRun.addEventListener("click",()=>{void runPoweredForge();});
-document.querySelector("#powered-center")!.addEventListener("click",()=>{poweredFeed.value="0";poweredLateral.value="0";refreshPoweredInterface();});
+poweredRun.addEventListener("pointerdown",event=>{if(activeStation==="power"){event.preventDefault();poweredRun.setPointerCapture(event.pointerId);powerHeld=true;}});
+poweredRun.addEventListener("pointerup",stopPower);
+poweredRun.addEventListener("pointercancel",stopPower);
+poweredRun.addEventListener("lostpointercapture",stopPower);
+document.querySelector("#powered-center")!.addEventListener("click",()=>{if(activeStation==="power")placePower({...HAMMER_HOME});else {poweredFeed.value="0";poweredLateral.value="0";refreshPoweredInterface();}});
 document.querySelector("#powered-overview")!.addEventListener("click",()=>setStation("overview"));
 const cutControls=document.querySelector<HTMLElement>("#cut-controls")!;
 const cutStatus=document.querySelector<HTMLElement>("#cut-status")!;
@@ -452,7 +518,7 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   materials: { title: "选料桌 · 选料", hint: "" },
   furnace: { title: "火炉 · 加热", hint: "拖动钢坯自由调整方向；整体进入炉腔后开始加热，完全拖出后停止。" },
   anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
-  power: { title: "动力锤 · 快速塑形", hint: "调节载荷、冲击次数和送料位置；每轮按固定节拍冲击同一接触区。" },
+  power: { title: "动力锤", hint: "" },
   press: { title: "锻造压力机 · 压下延展", hint: "调节压力、送料位置与保压时间；手动开关执行压下、保压和回程。" },
   cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
@@ -504,6 +570,8 @@ function acceptanceOperationCount(state: ForgeState): number {
   return state.operations.filter((operation) => (
     acceptanceVerb === "heat" ? operation.kind === "move-billet" && operation.destination === "furnace" && operation.elapsedMs === 0
     : acceptanceVerb === "hammer" ? operation.kind === "surface-hammer" || operation.kind === "hammer"
+    : acceptanceVerb === "power" ? operation.kind === "power-hammer"
+    : acceptanceVerb === "press" ? operation.kind === "forge-press"
     : operation.kind === acceptanceVerb
   )).length;
 }
@@ -715,7 +783,8 @@ function updateThermalHud(): void {
 }
 
 function setStation(station: ForgeStation): void {
-  if(cutting||hammerPending||poweredPending||view?.poweredBusy)return;
+  stopPower();
+  if(cutting||hammerPending||poweredPending||powerCycle.busy||view?.poweredBusy)return;
   const furnaceModeSwitch=(activeStation==="furnace"||activeStation==="temper")&&(station==="furnace"||station==="temper");
   if (!furnaceModeSwitch && acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer" && acceptanceVerb!=="power" && acceptanceVerb!=="press" && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
@@ -963,6 +1032,7 @@ document.body.classList.toggle("cut-view",acceptanceStation==="cut");
 view = new ForgeBilletView(canvas, viewport());
 view.setStation(acceptanceStation ?? "overview");
 inspectionButtons.forEach(button => button.addEventListener("click", () => {
+  stopPower();
   const mode = button.dataset.inspectionView as InspectionView;
   view?.setInspectionView(mode);
   inspectionButtons.forEach(candidate => candidate.setAttribute("aria-pressed", candidate === button ? "true" : "false"));
@@ -989,6 +1059,13 @@ canvas.addEventListener("pointerdown", (event) => {
   const bounds = canvas.getBoundingClientRect();
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
+
+  if(activeStation==="power"){
+    if(poweredPending||powerCycle.busy||!view.pickPowerWorkpiece(x,y))return;
+    const point=view.powerTablePoint(x,y);
+    if(point)powerDrag={point,pose:{...powerPoseCurrent},rotate:event.button===2,startX:x};
+    return;
+  }
 
   if(activeStation==="cut"){
     if(cutting)return;
@@ -1090,6 +1167,17 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if(activeStation==="power"&&powerDrag&&view){
+    const bounds=canvas.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
+    if(powerDrag.rotate){
+      const axis=powerAxis.value==="roll"?"roll":"yaw";
+      placePower({...powerDrag.pose,[axis]:powerDrag.pose[axis]+(x-powerDrag.startX)*0.012});
+    }else{
+      const p=view.powerTablePoint(x,y);
+      if(p)placePower({...powerDrag.pose,x:powerDrag.pose.x+p.x-powerDrag.point.x,z:powerDrag.pose.z+p.z-powerDrag.point.z});
+    }
+    return;
+  }
   if(activeStation==="anvil"&&view){
     const bounds=canvas.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
     if(hammerDrag){const p=view.hammerTablePoint(x,y);if(p)placeHammer({...hammerDrag.pose,x:hammerDrag.pose.x+p.x-hammerDrag.point.x,z:hammerDrag.pose.z+p.z-hammerDrag.point.z});}
@@ -1153,6 +1241,7 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("pointerup", (event) => {
+  powerDrag=null;
   hammerDrag=null;
   cutDrag=null;
   if (grindDrag?.translate) gesture = null;
@@ -1186,6 +1275,7 @@ canvas.addEventListener("pointerup", (event) => {
 });
 
 canvas.addEventListener("pointercancel", () => {
+  stopPower();
   hammerDrag=null;
   cutDrag=null;
   grindDrag=null;
@@ -1201,8 +1291,23 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("keydown", (event) => {
+  if(activeStation==="power"&&event.code==="Space"){
+    const target=event.target;
+    if(target instanceof HTMLElement&&(target.isContentEditable||target instanceof HTMLTextAreaElement
+      ||target instanceof HTMLSelectElement||(target instanceof HTMLInputElement&&target.type!=="range")))return;
+    event.preventDefault();
+    if(!event.repeat&&!view?.isInspectionActive()&&!view?.isCameraTransitioning())powerHeld=true;
+    return;
+  }
   if (event.key !== "Escape" && (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement)) return;
   if (view?.isInspectionActive()) return;
+  if(activeStation==="power"){
+    const key=event.key.toLowerCase(),step=event.shiftKey?20:4;
+    if(["arrowleft","arrowright","arrowup","arrowdown"].includes(key)){
+      event.preventDefault();placePower({...powerPoseCurrent,x:powerPoseCurrent.x+(key==="arrowleft"?-step:key==="arrowright"?step:0),
+        z:powerPoseCurrent.z+(key==="arrowup"?-step:key==="arrowdown"?step:0)});return;
+    }
+  }
   if(activeStation==="cut" && ["q","e","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Enter"].includes(event.key.length===1?event.key.toLowerCase():event.key)){
     event.preventDefault();if(cutting)return;
     const key=event.key.toLowerCase();
@@ -1273,6 +1378,11 @@ window.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("wheel",event=>{
+  if(activeStation==="power"){
+    event.preventDefault();
+    poweredForce.value=String(Math.max(15,Math.min(90,Number(poweredForce.value)+(event.deltaY<0?5:-5))));
+    refreshPoweredInterface();return;
+  }
   if (activeStation === "temper") {
     event.preventDefault();
     const current = temperPreviewC ?? latestSnapshot.temperTemperatureC ?? 220;
@@ -1296,6 +1406,7 @@ canvas.addEventListener("wheel",event=>{
 },{passive:false});
 
 const renderFrame = (nowMs: number): void => {
+  tickPower(nowMs);
   tickFurnace(nowMs);
   if (activeStation === "grind" && grindHolding && !grindDrag?.translate && view && document.hasFocus()) {
     if (grindLastTick === null) grindLastTick = nowMs;
@@ -1315,6 +1426,12 @@ const renderFrame = (nowMs: number): void => {
   requestAnimationFrame(renderFrame);
 };
 requestAnimationFrame(renderFrame);
+
+window.addEventListener("keyup",event=>{if(event.code==="Space"){powerHeld=false;event.preventDefault();}});
+window.addEventListener("blur",stopPower);
+document.addEventListener("visibilitychange",()=>{if(document.hidden)stopPower();});
+canvas.addEventListener("contextmenu",event=>{if(activeStation==="power")event.preventDefault();});
+canvas.addEventListener("lostpointercapture",()=>{powerDrag=null;});
 
 window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {

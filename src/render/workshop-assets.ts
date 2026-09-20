@@ -2,6 +2,7 @@ import { BufferGeometry, Group, Mesh, MeshStandardMaterial, PlaneGeometry } from
 import { QUENCH_BODY_SCALE_Y, QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_LAYOUT, WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { GrinderModel } from "./grinder-model.ts";
+import { createPowerHammer } from "./power-hammer-model.ts";
 
 export interface StationAsset { root:Group; contact?:Mesh<BufferGeometry,MeshStandardMaterial>; control?:Mesh<BufferGeometry,MeshStandardMaterial> }
 export interface PoweredForgingAsset extends StationAsset {
@@ -49,30 +50,7 @@ export function grindingAsset(_k:WorkshopModelKit):StationAsset {
   return {root:new GrinderModel().root};
 }
 export function powerHammerAsset(k:WorkshopModelKit):PoweredForgingAsset {
-  const root=new Group();root.name="power-hammer-low-poly";
-  k.profile(root,"flared-base",[[-390,0],[390,0],[330,160],[-330,160]],650,[0,3,0],"painted-iron");
-  // The approved reference is an enclosed C-frame. These three masses preserve
-  // the load path and throat while deliberately omitting belt/flywheel detail.
-  k.profile(root,"rear-cast-column",[[-310,0],[-40,0],[-15,1180],[-85,1510],[-285,1510]],480,[-40,145,115],"painted-iron");
-  k.profile(root,"upper-drive-housing",[[-120,0],[390,0],[345,360],[-40,430],[-170,300]],500,[-15,1330,65],"painted-iron");
-  k.profile(root,"lower-horn",[[-140,0],[300,0],[240,330],[-105,390]],420,[10,145,-10],"painted-iron");
-  k.box(root,"rear-service-cover",[26,330,300],[-322,930,140],"iron",8);
-  k.cylinder(root,"service-cap",105,34,[-338,1160,-35],"iron","x",12);
-  k.box(root,"anvil-seat",[320,320,330],[115,660,-50],"iron",10);
-  k.box(root,"lower-die",[250,55,210],[115,847.5,-50],"steel",5);
-  for(const x of [-315,315])for(const z of [-250,250])k.cylinder(root,"anchor-bolt",18,34,[x,177,z],"steel","y",6);
-  k.batch(root);
-
-  const ram=new Group();ram.name="power-hammer-ram";ram.userData.keepMesh=true;
-  k.cylinder(ram,"ram-guide",82,330,[115,0,-50],"steel","y",10);
-  k.box(ram,"upper-die",[230,100,200],[115,-210,-50],"steel",5);
-  const openRamY=1320*WORKSHOP_UNITS_PER_MM,closedRamY=1100*WORKSHOP_UNITS_PER_MM;ram.position.y=openRamY;root.add(ram);
-
-  const control=k.cylinder(root,"power-control",18,360,[365,520,-250],"steel","z",8);
-  control.userData.keepMesh=true;control.rotation.x=Math.PI/2;control.rotation.z=-0.18;
-  const contact=k.box(root,"power-contact",[280,18,240],[115,885,-50],"steel",2);
-  contact.userData.keepMesh=true;contact.material.transparent=true;contact.material.opacity=0;contact.material.depthWrite=false;
-  return {root,ram,control,contact,openRamY,closedRamY};
+  return createPowerHammer(k);
 }
 
 export function forgingPressAsset(k:WorkshopModelKit):PoweredForgingAsset {
@@ -94,9 +72,10 @@ export function forgingPressAsset(k:WorkshopModelKit):PoweredForgingAsset {
   k.box(ram,"upper-die",[340,75,285],[0,-325,-30],"steel",4);
   const openRamY=1460*WORKSHOP_UNITS_PER_MM,closedRamY=1260*WORKSHOP_UNITS_PER_MM;ram.position.y=openRamY;root.add(ram);
 
-  const control=k.cylinder(root,"manual-pressure-switch",17,260,[480,710,-160],"steel","y",8);
+  const control=k.cylinder(root,"manual-pressure-switch",17,260,[380,710,-160],"steel","y",8);
   control.userData.keepMesh=true;control.rotation.z=-0.55;
   const contact=k.box(root,"press-contact",[390,18,330],[0,905,-30],"steel",2);
+  contact.material=contact.material.clone();
   contact.userData.keepMesh=true;contact.material.transparent=true;contact.material.opacity=0;contact.material.depthWrite=false;
   return {root,ram,control,contact,openRamY,closedRamY};
 }

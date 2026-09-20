@@ -5,6 +5,7 @@ import { HAMMER_HOME, HAMMER_RULES, hammerFrame, hammerSurface, placedHammerSurf
 import { WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
+import { hammerFootprint } from "./hammer-footprint.ts";
 
 export const ANVIL = { surface:WORKSHOP_SURFACE_Y,scale:WORKSHOP_UNITS_PER_MM } as const;
 export function hammerCameraFrame(aspect:number) {
@@ -85,20 +86,8 @@ export class HammerStationView {
     this.energy=energy;this.aim=point?this.contact(point.x,point.z):null;
     this.footprint.visible=this.aim!==null;
     if(this.aim){
-      const position:number[]=[],r=HAMMER_RULES.face/2,{x,z}=this.aim.point;
-      // Clip real surface triangles to the square footprint, preserving all voids.
-      for(const triangle of this.surface){
-        let polygon=[...triangle.points];
-        for(const [axis,edge,sign] of [["x",x-r,-1],["x",x+r,1],["z",z-r,-1],["z",z+r,1]] as const){
-          const next:typeof polygon=[];
-          for(let i=0;i<polygon.length;i++){
-            const a=polygon[i]!,b=polygon[(i+1)%polygon.length]!,da=sign*(a[axis]-edge),db=sign*(b[axis]-edge);
-            if(da<=0)next.push(a);
-            if((da<0&&db>0)||(da>0&&db<0)){const t=da/(da-db);next.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t,z:a.z+(b.z-a.z)*t});}
-          }polygon=next;if(polygon.length<3)break;
-        }
-        for(let i=1;i+1<polygon.length;i++)for(const p of [polygon[0]!,polygon[i]!,polygon[i+1]!])position.push(p.x*ANVIL.scale,ANVIL.surface+p.y*ANVIL.scale+0.05,p.z*ANVIL.scale);
-      }
+      const {x,z}=this.aim.point;
+      const position=hammerFootprint(this.surface,x,z).map((v,i)=>v*ANVIL.scale+(i%3===1?ANVIL.surface+0.05:0));
       this.footprint.geometry.dispose();this.footprint.geometry=new BufferGeometry();
       this.footprint.geometry.setAttribute("position",new Float32BufferAttribute(position,3));
       this.footprint.material.color.set(this.aim.supported?0x9de6c6:0xf49b6b);

@@ -37,13 +37,16 @@
       #hammer-controls input {width:125px;accent-color:#d5aa62;}
       #hammer-status {color:#d6c498;font-size:13px;min-height:18px;}
       #hammer-mode[aria-pressed="true"] {background:#6b5432;}
-      body.powered-view #game {position:fixed;left:212px;top:112px;width:calc(100% - 212px);height:calc(100% - 300px);}
-      body.powered-view #hud {left:212px;height:112px;box-sizing:border-box;overflow:auto;}
+      body.powered-view #game {position:fixed;left:212px;top:128px;width:calc(100% - 212px);height:calc(100% - 316px);}
+      body.powered-view #hud {left:212px;height:128px;box-sizing:border-box;overflow:auto;}
+      body.powered-view #inspection-controls {flex-wrap:wrap;}
       body.powered-view #materials-controls {display:none;}
       #powered-controls {position:fixed;left:212px;right:0;bottom:0;min-height:188px;overflow:auto;box-sizing:border-box;padding:10px 18px;background:#202624;border-top:1px solid #59605d;color:#e5e9e7;font:14px system-ui,sans-serif;z-index:16;}
       #powered-controls button {min-height:34px;padding:6px 12px;background:#435447;color:#f1efe8;border:1px solid #82917f;border-radius:4px;font:inherit;cursor:pointer;}
       #powered-controls button:disabled {opacity:.45;cursor:default;}
       #powered-controls input {width:145px;accent-color:#d5aa62;}
+      #powered-controls .cut-row:not(:last-child) {display:grid;grid-template-columns:repeat(2,34px minmax(80px,145px) 58px);gap:8px;}
+      #power-axis-control {grid-column:span 3;}
       #powered-status {color:#d6c498;font-size:13px;min-height:18px;}
       body.heat-view #game {position:fixed;left:212px;top:108px;width:calc(100% - 212px);height:calc(100% - 200px);}
       body.heat-view #hud {left:212px;height:108px;box-sizing:border-box;overflow:auto;}
@@ -93,9 +96,11 @@
         body.hammer-view #game {left:164px;width:calc(100% - 164px);height:calc(100% - 322px);}
         body.hammer-view #hud,#hammer-controls {left:164px;}
         #hammer-controls {height:210px;padding:8px;}
-        body.powered-view #game {left:164px;width:calc(100% - 164px);height:calc(100% - 352px);}
+        body.powered-view #game {left:164px;width:calc(100% - 164px);height:calc(100% - 368px);}
         body.powered-view #hud,#powered-controls {left:164px;}
         #powered-controls {height:240px;padding:8px;}
+        #powered-controls .cut-row:not(:last-child) {grid-template-columns:34px minmax(60px,1fr) 54px;}
+        #powered-controls input {width:100%;min-width:0;margin:0;}
       }
       @media (max-width:760px) {
         body.acceptance-mode #acceptance-console {width:96px;left:4px;padding:5px;}
@@ -145,6 +150,7 @@
         <button type="button" data-inspection-view="front">前视</button>
         <button type="button" data-inspection-view="side">侧视</button>
         <button type="button" data-inspection-view="top">俯视</button>
+        <button id="power-machine-view" type="button" data-inspection-view="machine" hidden>设备</button>
       </div>
     </div>
     <section id="materials-controls" aria-label="选料与当前工件" hidden>
@@ -214,20 +220,20 @@
       </div>
     </section>
     <section id="powered-controls" aria-label="动力锻造操作" hidden>
-      <div id="powered-status" role="status">调整送料位置和载荷，然后启动设备。</div>
+      <div id="powered-status" role="status"></div>
       <div class="cut-row">
         <label for="powered-force">载荷</label><input id="powered-force" type="range" min="15" max="90" step="5" value="45" /><output id="powered-force-label">45%</output>
-        <label for="powered-feed">送料位置</label><input id="powered-feed" type="range" min="-120" max="120" step="4" value="0" /><output id="powered-feed-label">0 mm</output>
+        <label for="powered-feed">横移</label><input id="powered-feed" type="range" min="-400" max="400" step="1" value="0" /><output id="powered-feed-label">0 mm</output>
       </div>
       <div class="cut-row">
-        <label for="powered-lateral">横向位置</label><input id="powered-lateral" type="range" min="-20" max="20" step="2" value="0" /><output id="powered-lateral-label">0 mm</output>
-        <label for="powered-cycle">冲击/保压</label><input id="powered-cycle" type="range" min="1" max="6" step="1" value="3" /><output id="powered-cycle-label">3 次</output>
+        <label for="powered-lateral">送进</label><input id="powered-lateral" type="range" min="-300" max="400" step="1" value="0" /><output id="powered-lateral-label">0 mm</output>
+        <label id="powered-cycle-title" for="powered-cycle">保压</label><input id="powered-cycle" type="range" min="1" max="6" step="1" value="3" /><output id="powered-cycle-label">3 秒</output>
+        <label id="power-axis-control">旋转轴 <select id="power-axis"><option value="yaw">Y · 转向</option><option value="roll">X · 翻滚</option></select></label>
       </div>
       <div class="cut-row">
         <button id="powered-run" type="button">启动动力锤</button>
         <button id="powered-center" type="button">工件居中</button>
         <button id="powered-overview" type="button">工坊总览</button>
-        <span>动力锤按冲击次数运行；压力机滑杆表示保压秒数。</span>
       </div>
     </section>
     <script type="module" src="/src/entry/browser.ts"></script>

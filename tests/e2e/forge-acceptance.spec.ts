@@ -7,7 +7,7 @@ const acceptanceSlices = [
   ["weld", "weld", "焊合台 · 焊合"],
   ["heat", "furnace", "火炉 · 加热"],
   ["hammer", "anvil", "铁砧 · 锤击"],
-  ["power", "power", "动力锤 · 快速塑形"],
+  ["power", "power", "动力锤"],
   ["press", "press", "锻造压力机 · 压下延展"],
   ["quench", "quench-water", "水槽 · 淬火"],
   ["temper", "temper", "火炉 · 回火"],

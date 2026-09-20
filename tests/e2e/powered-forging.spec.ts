@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 }]) {
-  for (const station of ["power", "press"] as const) {
+  for (const station of ["press"] as const) {
     test(`${station} performs one real powered shaping cycle at ${viewport.width}px`, async ({ page }, testInfo) => {
       test.setTimeout(60_000);
       const errors: string[] = [];
@@ -30,7 +30,7 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
       await expect(body).toHaveAttribute("data-total-material-volume",volume!);
       await expect(body).toHaveAttribute("data-temperature-c",temperature!);
       await expect(page.locator("#powered-status")).toContainText(
-        station === "power" ? "固定模具按设定次数连续冲击" : "手动开关控制一次压下、保压和回程",
+        "手动开关控制一次压下、保压和回程",
       );
       await page.screenshot({path:`output/playwright/${station}-${viewport.width}.png`});
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);

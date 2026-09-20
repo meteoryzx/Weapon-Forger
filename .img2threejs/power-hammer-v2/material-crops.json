@@ -1,0 +1,71 @@
+{
+  "sourceImage": "D:\\打了个铁\\Weapon-Forger-hammer\\assets\\concepts\\power-hammer-v2-main.png",
+  "zonesDir": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-crops",
+  "detailInventory": {
+    "scanMethod": "component-zones",
+    "targetMinDetails": 6,
+    "details": [
+      {
+        "id": "iron",
+        "kind": "",
+        "description": "",
+        "region": {
+          "x": 0.25,
+          "y": 0.15,
+          "width": 0.15,
+          "height": 0.13,
+          "units": "normalized"
+        },
+        "scale": "",
+        "affects": "",
+        "mapsTo": {
+          "type": "",
+          "ref": ""
+        },
+        "evidenceRef": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-crops\\iron.png",
+        "confidence": 0.0
+      },
+      {
+        "id": "steel",
+        "kind": "",
+        "description": "",
+        "region": {
+          "x": 0.267,
+          "y": 0.371,
+          "width": 0.118,
+          "height": 0.071,
+          "units": "normalized"
+        },
+        "scale": "",
+        "affects": "",
+        "mapsTo": {
+          "type": "",
+          "ref": ""
+        },
+        "evidenceRef": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-crops\\steel.png",
+        "confidence": 0.0
+      },
+      {
+        "id": "brass",
+        "kind": "",
+        "description": "",
+        "region": {
+          "x": 0.421,
+          "y": 0.175,
+          "width": 0.035,
+          "height": 0.055,
+          "units": "normalized"
+        },
+        "scale": "",
+        "affects": "",
+        "mapsTo": {
+          "type": "",
+          "ref": ""
+        },
+        "evidenceRef": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-crops\\brass.png",
+        "confidence": 0.0
+      }
+    ]
+  },
+  "authoringInstruction": "Open each zone crop under zonesDir and replace every detail stub's kind, description, scale, affects, mapsTo, and confidence with what is actually observed. Add more detail entries per zone if a single zone contains multiple distinct marks; do not leave stubs unfilled or unlinked (mapsTo must reference a real component.localFeatures or material.localOverrides entry)."
+}
