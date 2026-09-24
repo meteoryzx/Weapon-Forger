@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "runId": "reconstruction-r2-shared-furnace",
+  "captures": [
+    {
+      "mode": "desktop",
+      "state": null,
+      "report": "artifacts/reconstruction-r2/desktop-overview/desktop.json"
+    },
+    {
+      "mode": "mobile",
+      "state": null,
+      "report": "artifacts/reconstruction-r2/mobile-overview/mobile.json"
+    }
+  ],
+  "artifacts": [
+    "artifacts/reconstruction-r2/workshop-actions.webm",
+    "artifacts/reconstruction-r2/motion.json",
+    "artifacts/reconstruction-r2/desktop-materials/desktop.json",
+    "artifacts/reconstruction-r2/desktop-materials/desktop.png",
+    "artifacts/reconstruction-r2/desktop-cut/desktop.json",
+    "artifacts/reconstruction-r2/desktop-cut/desktop.png",
+    "artifacts/reconstruction-r2/desktop-heat/desktop.json",
+    "artifacts/reconstruction-r2/desktop-heat/desktop.png",
+    "artifacts/reconstruction-r2/desktop-hammer/desktop.json",
+    "artifacts/reconstruction-r2/desktop-hammer/desktop.png",
+    "artifacts/reconstruction-r2/desktop-quench/desktop.json",
+    "artifacts/reconstruction-r2/desktop-quench/desktop.png",
+    "artifacts/reconstruction-r2/desktop-temper/desktop.json",
+    "artifacts/reconstruction-r2/desktop-temper/desktop.png",
+    "artifacts/reconstruction-r2/desktop-grind/desktop.json",
+    "artifacts/reconstruction-r2/desktop-grind/desktop.png",
+    "artifacts/reconstruction-r2/mobile-materials/mobile.json",
+    "artifacts/reconstruction-r2/mobile-materials/mobile.png",
+    "artifacts/reconstruction-r2/mobile-cut/mobile.json",
+    "artifacts/reconstruction-r2/mobile-cut/mobile.png",
+    "artifacts/reconstruction-r2/mobile-heat/mobile.json",
+    "artifacts/reconstruction-r2/mobile-heat/mobile.png",
+    "artifacts/reconstruction-r2/mobile-hammer/mobile.json",
+    "artifacts/reconstruction-r2/mobile-hammer/mobile.png",
+    "artifacts/reconstruction-r2/mobile-quench/mobile.json",
+    "artifacts/reconstruction-r2/mobile-quench/mobile.png",
+    "artifacts/reconstruction-r2/mobile-temper/mobile.json",
+    "artifacts/reconstruction-r2/mobile-temper/mobile.png",
+    "artifacts/reconstruction-r2/mobile-grind/mobile.json",
+    "artifacts/reconstruction-r2/mobile-grind/mobile.png"
+  ]
+}

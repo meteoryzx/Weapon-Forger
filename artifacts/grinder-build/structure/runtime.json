@@ -1,0 +1,163 @@
+{
+  "errors": [],
+  "parts": [
+    {
+      "name": "base",
+      "vertices": 24
+    },
+    {
+      "name": "spine",
+      "vertices": 24
+    },
+    {
+      "name": "cheek--1",
+      "vertices": 144
+    },
+    {
+      "name": "bearing--1-300",
+      "vertices": 24
+    },
+    {
+      "name": "hub--1-300",
+      "vertices": 40
+    },
+    {
+      "name": "bearing--1-1160",
+      "vertices": 24
+    },
+    {
+      "name": "hub--1-1160",
+      "vertices": 40
+    },
+    {
+      "name": "foot--1--280",
+      "vertices": 36
+    },
+    {
+      "name": "foot--1-320",
+      "vertices": 36
+    },
+    {
+      "name": "cheek-1",
+      "vertices": 144
+    },
+    {
+      "name": "bearing-1-300",
+      "vertices": 24
+    },
+    {
+      "name": "hub-1-300",
+      "vertices": 40
+    },
+    {
+      "name": "bearing-1-1160",
+      "vertices": 24
+    },
+    {
+      "name": "hub-1-1160",
+      "vertices": 40
+    },
+    {
+      "name": "foot-1--280",
+      "vertices": 36
+    },
+    {
+      "name": "foot-1-320",
+      "vertices": 36
+    },
+    {
+      "name": "abrasive-loop",
+      "vertices": 134
+    },
+    {
+      "name": "upper-wheel",
+      "vertices": 292
+    },
+    {
+      "name": "lower-wheel",
+      "vertices": 292
+    },
+    {
+      "name": "work-rest",
+      "vertices": 24
+    },
+    {
+      "name": "rest-arm",
+      "vertices": 24
+    },
+    {
+      "name": "rest-support",
+      "vertices": 24
+    },
+    {
+      "name": "platen",
+      "vertices": 24
+    },
+    {
+      "name": "upper-guard",
+      "vertices": 24
+    },
+    {
+      "name": "tension-slide",
+      "vertices": 24
+    },
+    {
+      "name": "tension-block-770",
+      "vertices": 24
+    },
+    {
+      "name": "tension-block-1020",
+      "vertices": 24
+    },
+    {
+      "name": "drive-pedestal",
+      "vertices": 24
+    },
+    {
+      "name": "drive-wheel",
+      "vertices": 196
+    },
+    {
+      "name": "drive-recess",
+      "vertices": 148
+    },
+    {
+      "name": "drive-hub",
+      "vertices": 40
+    },
+    {
+      "name": "drive-spoke-0",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-1",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-2",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-3",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-4",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-5",
+      "vertices": 24
+    },
+    {
+      "name": "transmission-small",
+      "vertices": 196
+    },
+    {
+      "name": "transmission-loop",
+      "vertices": 2352
+    }
+  ],
+  "calls": 39,
+  "triangles": 2168
+}

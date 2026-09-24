@@ -11,7 +11,12 @@ import {
   type ForgeSnapshot,
   type ForgeState,
   type CutOperation,
+  type ForgePressOperation,
+  type PowerHammerOperation,
+  type SurfaceHammerOperation,
 } from "../forge/index.ts";
+import { solidEnvelope, workpieceGrindingSolids, workpieceSolids } from "../forge/solid-geometry.ts";
+import type { AbrasiveUpdate } from "./grind-update.ts";
 
 export class GameApplication {
   private state: ForgeState;
@@ -19,6 +24,7 @@ export class GameApplication {
   private previewElapsedMs = 0;
   private preparedCut: { source: ForgeState; result: ForgeState; operation: CutOperation } | null = null;
   private cutGeneration = 0;
+  private furnaceTemperatureC: number = FORGE_RULES.furnaceGasTemperatureC;
 
   async prepareCut(operation: CutOperation, evaluate: (state: ForgeState, operation: CutOperation) => Promise<ForgeState>): Promise<boolean> {
     this.preparedCut = null;
@@ -31,6 +37,27 @@ export class GameApplication {
   }
 
   cancelPreparedCut(): void { this.preparedCut = null; this.cutGeneration++; }
+
+  async applySurfaceHammer(operation:SurfaceHammerOperation,evaluate:(state:ForgeState,op:SurfaceHammerOperation)=>Promise<ForgeState>):Promise<ForgeSnapshot> {
+    const source=this.state,result=await evaluate(source,operation);
+    if(this.state!==source)throw new Error("工件已经改变，请重新瞄准。");
+    this.state=result;this.previewState=result;this.previewElapsedMs=0;
+    this.cancelPreparedCut();return this.getSnapshot();
+  }
+
+  async applyPoweredForge(
+    operation: PowerHammerOperation | ForgePressOperation,
+    evaluate: (state: ForgeState, op: PowerHammerOperation | ForgePressOperation) => Promise<ForgeState>,
+  ): Promise<ForgeSnapshot> {
+    const source = this.state;
+    const result = await evaluate(source, operation);
+    if (this.state !== source) throw new Error("工件已经改变，请重新启动设备。");
+    this.state = result;
+    this.previewState = result;
+    this.previewElapsedMs = 0;
+    this.cancelPreparedCut();
+    return this.getSnapshot();
+  }
 
   commitPreparedCut(operation: CutOperation): ForgeSnapshot {
     const prepared = this.preparedCut;
@@ -53,6 +80,23 @@ export class GameApplication {
     return this.state;
   }
 
+  prepareGrinding(): void {
+    const piece=this.state.workpiece;
+    if(piece.geometry.solids)return;
+    const solids=piece.sections.some(s=>s.plasticStrain>0)?workpieceSolids(piece):workpieceGrindingSolids(piece);
+    const geometry={...piece.geometry,solids};
+    this.state={...this.state,workpiece:{...piece,geometry:{...geometry,outline:solidEnvelope(geometry)}}};
+    this.previewState=this.state;this.previewElapsedMs=0;
+  }
+
+  commitGrinding(source: ForgeState, update: AbrasiveUpdate): boolean {
+    if(this.state!==source || !update.changed)return false;
+    const solids=Array.from(update.order,i=>i<0?update.solids[-i-1]!:source.workpiece.geometry.solids![i]!);
+    const sections=source.workpiece.sections.map((s,i)=>update.sections.find(c=>c.index===i)?.section??s);
+    this.state={...source,workpiece:{...source.workpiece,sections,geometry:{...source.workpiece.geometry,solids,outline:update.outline}},operations:[...source.operations,update.operation]};
+    this.previewState=this.state;this.previewElapsedMs=0;this.cancelPreparedCut();return true;
+  }
+
   getFacts(): ForgeFacts {
     return createForgeFacts(this.state);
   }
@@ -65,7 +109,7 @@ export class GameApplication {
     }
     const delta = boundedElapsed - this.previewElapsedMs;
     if (delta > 0) {
-      this.previewState = previewThermalState(this.previewState, delta);
+      this.previewState = previewThermalState(this.previewState, delta, this.furnaceTemperatureC);
       this.previewElapsedMs = boundedElapsed;
     }
     return createForgeSnapshot(this.previewState);
@@ -83,5 +127,9 @@ export class GameApplication {
   commitPreview(): void {
     this.state = this.previewState;
     this.previewElapsedMs = 0;
+  }
+
+  setFurnaceTemperature(temperatureC: number): void {
+    this.furnaceTemperatureC = Math.max(80, Math.min(FORGE_RULES.furnaceGasTemperatureC, temperatureC));
   }
 }

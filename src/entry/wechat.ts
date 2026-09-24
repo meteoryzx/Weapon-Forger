@@ -1,5 +1,5 @@
 import { GameApplication } from "../app/game-application.ts";
-import { hammerEnergyForPressDuration } from "../platform/hammer-charge.ts";
+import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint } from "../forge/index.ts";
 import type { WechatApi } from "../platform/wechat-types.ts";
 import { ForgeBilletView } from "../render/forge-billet-view.ts";
 
@@ -27,13 +27,16 @@ application.commitPreview();
 application.applyIntent({ kind: "move-billet", destination: "inspection", elapsedMs: 0 });
 view.enableRotateControls();
 view.setStation("anvil");
+let pose={...HAMMER_HOME};
 
 function updateView(): void {
   view.update(application.getSnapshot(), null, "anvil");
+  view.updateHammerPose(pose);
 }
 
 updateView();
-let activePress: { readonly sectionIndex: number; readonly faceBias: number; readonly startedAtMs: number } | null = null;
+function tick(now:number):void {view.tick(now);requestAnimationFrame(tick);}
+requestAnimationFrame(tick);
 
 wxApi.onTouchStart((event) => {
   const touch = event.touches[0];
@@ -41,29 +44,23 @@ wxApi.onTouchStart((event) => {
     return;
   }
   const quarterTurns = view.pickRotateControl(touch.clientX, touch.clientY);
+  if (view.hammerView.busy) return;
   if (quarterTurns !== null) {
-    activePress = null;
-    application.applyIntent({ kind: "rotate", quarterTurns });
+    pose={...pose,roll:pose.roll+quarterTurns*Math.PI/12};
     updateView();
     return;
   }
 
-  const target = view.pickHammerTarget(touch.clientX, touch.clientY);
+  const target = view.pickHammerSurface(touch.clientX, touch.clientY);
   if (!target) {
     return;
   }
-  activePress = { ...target, startedAtMs: Date.now() };
-});
-wxApi.onTouchEnd(() => {
-  if (!activePress) {
-    return;
-  }
-  const { sectionIndex, faceBias, startedAtMs } = activePress;
-  activePress = null;
-  const energy = hammerEnergyForPressDuration(Date.now() - startedAtMs);
-  application.applyIntent({ kind: "hammer", sectionIndex, faceBias, energy });
-  updateView();
-});
-wxApi.onTouchCancel(() => {
-  activePress = null;
+  try{
+    const before=hammerFrame(application.getState().workpiece.geometry,pose);
+    application.applyIntent({ kind:"surface-hammer",pose,target,energy:HAMMER_RULES.defaultEnergy });
+    const after=hammerFrame(application.getState().workpiece.geometry,pose);
+    const shift=rotateHammerPoint({x:after.center.x-before.center.x,y:0,z:after.center.z-before.center.z},pose);
+    pose={...pose,x:pose.x+shift.x,z:pose.z+shift.z};
+    updateView();view.aimHammer(target,HAMMER_RULES.defaultEnergy);view.hammerView.strike(performance.now());view.hammerView.finishStrike(performance.now()+96);
+  }catch{/* Unsupported surface touches do not mutate the workpiece. */}
 });

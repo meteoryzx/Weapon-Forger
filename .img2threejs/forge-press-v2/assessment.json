@@ -1,0 +1,349 @@
+{
+  "preSpecAssessment": {
+    "objectClass": {
+      "primaryType": "hydraulic gate-frame forge press",
+      "primaryDomain": "object",
+      "formLanguage": [
+        "hard-surface",
+        "mechanical"
+      ],
+      "structureKind": [
+        "articulated assembly"
+      ],
+      "motionPotential": [
+        "articulated"
+      ],
+      "materialFamilies": [
+        "metal"
+      ],
+      "notes": "Two accepted concept views; simplified geometry and shared workshop palette explicitly requested."
+    },
+    "complexity": {
+      "tier": "moderate",
+      "scores": {
+        "silhouetteComplexity": 2,
+        "componentCount": 2,
+        "hierarchyDepth": 1,
+        "repetitionDensity": 1,
+        "materialLayerCount": 1,
+        "localDetailDensity": 1,
+        "occlusionRisk": 1,
+        "actionReadinessNeed": 2
+      },
+      "estimatedCounts": {
+        "macroComponents": 6,
+        "mesoComponents": 12,
+        "microFeatureGroups": 9,
+        "materialLayers": 4,
+        "repetitionSystems": 1
+      },
+      "reasoning": [
+        "Moderate after user-directed removal of dense rust, scratches, embossed lettering and micro fasteners. Identity still depends on integrated profiled gate, moving guided crosshead, fixed cylinder, pedestal, gauge and lever."
+      ]
+    },
+    "specDepthDecision": {
+      "requiredDepth": "moderate",
+      "minimumComponentLevels": [
+        "macro",
+        "meso"
+      ],
+      "needsRepetitionSystems": false,
+      "needsMaterialLocalOverrides": false,
+      "needsMultipleReviewViews": true,
+      "needsActionReadyHierarchy": true,
+      "rationale": "Shallow mechanical assemblies, hard edged extrusions and discrete tooling; rigid translation only."
+    },
+    "unknownsToResolveBeforeImplementation": [],
+    "detailInventory": {
+      "scanMethod": "component-zones",
+      "targetMinDetails": 9,
+      "details": [
+        {
+          "id": "detail-gate-frame",
+          "kind": "bevel",
+          "description": "gate-frame",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "gate-frame/identity"
+          }
+        },
+        {
+          "id": "detail-foot-braces",
+          "kind": "contour",
+          "description": "foot-braces",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "foot-braces/identity"
+          }
+        },
+        {
+          "id": "detail-cylinder-shell",
+          "kind": "contour",
+          "description": "cylinder-shell",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "cylinder-shell/identity"
+          }
+        },
+        {
+          "id": "detail-piston",
+          "kind": "gloss",
+          "description": "piston",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "piston/identity"
+          }
+        },
+        {
+          "id": "detail-guide-left",
+          "kind": "gloss",
+          "description": "guide-left",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "guide-left/identity"
+          }
+        },
+        {
+          "id": "detail-crosshead",
+          "kind": "contour",
+          "description": "crosshead",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "crosshead/identity"
+          }
+        },
+        {
+          "id": "detail-gauge",
+          "kind": "linework",
+          "description": "gauge",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "gauge/identity"
+          }
+        },
+        {
+          "id": "detail-lever",
+          "kind": "contour",
+          "description": "lever",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "lever/identity"
+          }
+        },
+        {
+          "id": "detail-cap-fasteners",
+          "kind": "fastener",
+          "description": "cap-fasteners",
+          "evidenceRefs": [
+            "full-object",
+            "accepted-views"
+          ],
+          "mapsTo": {
+            "ref": "cap-fasteners/identity"
+          }
+        }
+      ]
+    },
+    "anatomy": {
+      "applies": false,
+      "styleHeads": 0,
+      "proportions": {
+        "headUnit": 0,
+        "torso": 0,
+        "legs": 0,
+        "shoulderWidth": 0,
+        "hipWidth": 0
+      },
+      "pose": {
+        "type": "unassessed",
+        "jointAngles": {}
+      },
+      "faceLandmarks": {
+        "eyeLine": 0,
+        "eyeSpacing": 0,
+        "noseBase": 0,
+        "mouthLine": 0,
+        "hairline": 0
+      },
+      "features": [],
+      "confidence": 0,
+      "note": "Only meaningful when objectClass.primaryDomain is character or hybrid. Set applies=true and fill from forge/stage1_intake/extract_landmarks.py. See grimoire/character/reconstruction.md and grimoire/character/likeness_maximization.md."
+    },
+    "sourceImage": "D:/打了个铁/Weapon-Forger-hammer/assets/concepts/forge-press-v2-main.png"
+  },
+  "qualityContract": {
+    "qualityBar": "moderate",
+    "definitionOfDone": [
+      "Low-poly reference-faithful gate press with chamfered shoulders, braced feet, visibly guided crosshead, fixed cylinder shell, pedestal, analog dial and side lever.",
+      "Actual bounds at most 1000 x 925 mm and approximately 1900 mm tall. Iron opening 600 mm. Tool center z=0. Support top=875 mm, upper bottom=995 mm, 120 mm rigid stroke.",
+      "Gray cast iron and steel share power-hammer palette; small brass accents; no generated images or repeated texture/micro passes."
+    ],
+    "minimumSpecDepth": {
+      "macroComponents": 2,
+      "mesoComponents": 3,
+      "microFeatureGroups": 2,
+      "materialLayers": 2,
+      "repetitionSystems": 0,
+      "reviewViewpoints": 3
+    },
+    "featureGroups": [
+      {
+        "id": "overall-silhouette",
+        "name": "Overall silhouette and proportions",
+        "required": true,
+        "qualityCriteria": [
+          "Bounding shape, dominant curves, negative spaces, and scale relationships are explicitly described."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model reads as a generic placeholder instead of the reference object",
+          "major proportions are guessed without evidence"
+        ]
+      },
+      {
+        "id": "primary-structure",
+        "name": "Primary structure and hierarchy",
+        "required": true,
+        "qualityCriteria": [
+          "Major parts, joints, seams, contact points, and parent-child relationships are named before code generation."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "large visible parts are merged into one mesh",
+          "component hierarchy is too shallow for the observed complexity"
+        ]
+      },
+      {
+        "id": "attachment-joint-correctness",
+        "name": "Attachment and joint correctness",
+        "required": true,
+        "qualityCriteria": [
+          "Every visible child appendage, branch, limb, handle, connector, tube, cable, horn, wing, leg, or hinged part has an attachment contract with parent socket, localStart/localEnd, contact type, embed/overlap, and gap tolerance."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "child part root floats away from the parent",
+          "branch/limb/tube is centered in space instead of pivoting from its root",
+          "parent-child transform mixes world and local coordinates"
+        ]
+      },
+      {
+        "id": "surface-material-response",
+        "name": "Surface material response",
+        "required": true,
+        "qualityCriteria": [
+          "Shared workshop iron #555f60 roughness .72, steel #a3a9a6 roughness .32, brass #b59755 roughness .44. Existing low-amplitude mineral albedo only. No claimed extracted PBR or corrosion fidelity."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "surface looks like flat plastic",
+          "local material variation is missing or not tied to image evidence"
+        ]
+      }
+    ],
+    "visualDeltaChecks": [
+      "silhouette and negative-space delta",
+      "component hierarchy depth delta",
+      "repetition density and distribution delta",
+      "material albedo/roughness/normal response delta",
+      "local feature placement and scale delta"
+    ],
+    "antiShallowSpecRules": [
+      "Do not proceed to code if qualityContract.qualityBar is unassessed.",
+      "Do not proceed to code if the spec only contains a root component for a moderate or complex object.",
+      "Do not proceed to code if required featureGroups are not represented by componentTree, materials, or repetitionSystems.",
+      "Do not proceed to code if visible local features are described only in prose and not attached to components/materials/evidenceRefs.",
+      "Do not proceed past structural-pass if attached child parts lack attachment.parentSocket, localStart, localEnd, embedDepth/overlap, and gapTolerance.",
+      "Do not pass material look-dev when albedo is reused as roughness, height, normal, or AO.",
+      "Do not pass material look-dev without macro, meso, and micro surface frequency bands for close-up materials.",
+      "Do not pass reference-fidelity material look-dev from a source image without usable referencePbr maps or an explicit documented limitation.",
+      "Do not patch a spec with extracted PBR maps when extraction confidence is below the target threshold unless the user explicitly accepts lower fidelity.",
+      "Do not place adjacent separate-geometry parts below 0.02 world-unit seam overlap (source: grimoire/build/geometry_patterns.md).",
+      "Do not satisfy raised or recessed relief, fasteners, or grip structure with a map alone when the feature affects form; use geometry or displacement (source: grimoire/build/geometry_patterns.md).",
+      "Adjacent components must overlap by at least 0.02 world units at shared seams (source: grimoire/build/geometry_patterns.md).",
+      "Raised or recessed relief and fasteners must be geometry, instanced micro-parts, or displacement; a map alone is an approximation (source: grimoire/build/geometry_patterns.md)."
+    ],
+    "mustNotDo": [
+      "Do not proceed to code if qualityContract.qualityBar is unassessed.",
+      "Do not proceed to code if the spec only contains a root component for a moderate or complex object.",
+      "Do not proceed to code if required featureGroups are not represented by componentTree, materials, or repetitionSystems.",
+      "Do not proceed to code if visible local features are described only in prose and not attached to components/materials/evidenceRefs.",
+      "Do not proceed past structural-pass if attached child parts lack attachment.parentSocket, localStart, localEnd, embedDepth/overlap, and gapTolerance.",
+      "Do not pass material look-dev when albedo is reused as roughness, height, normal, or AO.",
+      "Do not pass material look-dev without macro, meso, and micro surface frequency bands for close-up materials.",
+      "Do not pass reference-fidelity material look-dev from a source image without usable referencePbr maps or an explicit documented limitation.",
+      "Do not patch a spec with extracted PBR maps when extraction confidence is below the target threshold unless the user explicitly accepts lower fidelity.",
+      "Do not place adjacent separate-geometry parts below 0.02 world-unit seam overlap (source: grimoire/build/geometry_patterns.md).",
+      "Do not satisfy raised or recessed relief, fasteners, or grip structure with a map alone when the feature affects form; use geometry or displacement (source: grimoire/build/geometry_patterns.md).",
+      "Adjacent components must overlap by at least 0.02 world units at shared seams (source: grimoire/build/geometry_patterns.md).",
+      "Raised or recessed relief and fasteners must be geometry, instanced micro-parts, or displacement; a map alone is an approximation (source: grimoire/build/geometry_patterns.md)."
+    ]
+  },
+  "localSpecSearch": {
+    "collection": "core_3d",
+    "query": "Early Industrial Hydraulic Forge Press",
+    "index": {
+      "status": "hit",
+      "reason": "current",
+      "fingerprint": "62f2831e1d52eeb6dbb94a87c44fa25b1f4926626a7b1f8c2bcadc63e04e9471"
+    },
+    "matches": [
+      {
+        "record_id": "core.pbr-wearness-alpha-mask",
+        "file_path": "docs/raw/img2threejs-skill-dataset.json",
+        "heading": null,
+        "key_path": "categories.material_pbr[9]",
+        "score": 3.086972024081,
+        "snippets": [
+          "... trong kênh alpha của texture Base Color, độc lập với độ trong suốt thị giác. Recognition cues: Alpha ~196: paint erodes early, visible scratches/chips even at low float (Factory New range); Alpha <128: durable, resists scratching; Alpha = 0 ..."
+        ],
+        "source_refs": [
+          {
+            "path": "docs/raw/img2threejs-skill-dataset.json",
+            "heading": null,
+            "key_path": "categories.material_pbr[9]"
+          }
+        ],
+        "evidence_refs": [
+          {
+            "kind": "source",
+            "ref": "docs/raw/img2threejs-skill-dataset.json",
+            "note": "img2threejs NotebookLM research distillation"
+          }
+        ]
+      }
+    ]
+  }
+}

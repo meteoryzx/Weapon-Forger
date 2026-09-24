@@ -51,8 +51,32 @@ export function cloneWorkpieceGeometry(geometry: WorkpieceGeometry): WorkpieceGe
       ...solid,
       vertices: solid.vertices.map(vertex => ({ weights: vertex.weights.map(weight => ({ ...weight })) })),
       faces: solid.faces.map(face => [...face]),
+      ...(solid.groundFaces ? { groundFaces: [...solid.groundFaces] } : {}),
     })) } : {}),
   };
+}
+
+const snapshotNodes = new WeakMap<WorkpieceGeometry["nodes"], WorkpieceGeometry["nodes"]>();
+const snapshotSolids = new WeakMap<NonNullable<WorkpieceGeometry["solids"]>[number], NonNullable<WorkpieceGeometry["solids"]>[number]>();
+const snapshotGeometries = new WeakMap<WorkpieceGeometry, WorkpieceGeometry>();
+
+/** Share immutable snapshot fragments without exposing mutable simulation objects. */
+export function snapshotWorkpieceGeometry(g: WorkpieceGeometry): WorkpieceGeometry {
+  const cached = snapshotGeometries.get(g);
+  if (cached) return cached;
+  let nodes = snapshotNodes.get(g.nodes);
+  if (!nodes) { nodes = Object.freeze(g.nodes.map(n=>Object.freeze({...n}))); snapshotNodes.set(g.nodes,nodes); }
+  const solids = g.solids?.map(s=>{
+    let copy=snapshotSolids.get(s);
+    if(!copy){copy=Object.freeze({...s,
+      vertices:Object.freeze(s.vertices.map(v=>Object.freeze({weights:Object.freeze(v.weights.map(w=>Object.freeze({...w})))}))),
+      faces:Object.freeze(s.faces.map(f=>Object.freeze([...f]))),
+      ...(s.groundFaces?{groundFaces:Object.freeze([...s.groundFaces])}:{})});snapshotSolids.set(s,copy);}
+    return copy;
+  });
+  const result=Object.freeze({...g,grid:Object.freeze({...g.grid}),nodes,
+    outline:Object.freeze(g.outline.map(p=>Object.freeze({...p}))),...(solids?{solids:Object.freeze(solids)}:{})});
+  snapshotGeometries.set(g,result);return result;
 }
 
 export function outlineArea(outline: readonly PlanarPoint[]): number {

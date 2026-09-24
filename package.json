@@ -9,11 +9,13 @@
   "scripts": {
     "check:governance": "node scripts/check-governance.mjs",
     "dev": "vite --config vite.web.config.ts",
+    "dev:codex": "vite --config vite.web.config.ts --host 127.0.0.1 --port 4199 --strictPort",
     "build:web": "vite build --config vite.web.config.ts",
     "build:wechat": "vite build --config vite.wechat.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "test:e2e": "playwright test",
+    "bench:hammer": "node scripts/hammer-bench.mjs",
     "check": "npm run check:governance && npm run typecheck && npm run test && npm run build:web && npm run build:wechat"
   },
   "dependencies": {
@@ -24,6 +26,7 @@
     "@types/node": "24.4.0",
     "@types/three": "0.185.1",
     "esbuild": "0.28.1",
+    "pngjs": "^7.0.0",
     "typescript": "7.0.2",
     "vite": "8.1.5",
     "vitest": "4.1.10"

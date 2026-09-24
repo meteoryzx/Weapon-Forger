@@ -1,0 +1,311 @@
+{
+  "errors": [],
+  "parts": [
+    {
+      "name": "base",
+      "vertices": 324
+    },
+    {
+      "name": "spine",
+      "vertices": 324
+    },
+    {
+      "name": "cheek--1",
+      "vertices": 300
+    },
+    {
+      "name": "bearing--1-300",
+      "vertices": 324
+    },
+    {
+      "name": "hub--1-300",
+      "vertices": 40
+    },
+    {
+      "name": "bearing--1-1160",
+      "vertices": 324
+    },
+    {
+      "name": "hub--1-1160",
+      "vertices": 40
+    },
+    {
+      "name": "foot--1--280",
+      "vertices": 84
+    },
+    {
+      "name": "foot--1-320",
+      "vertices": 84
+    },
+    {
+      "name": "cheek-1",
+      "vertices": 300
+    },
+    {
+      "name": "bearing-1-300",
+      "vertices": 324
+    },
+    {
+      "name": "hub-1-300",
+      "vertices": 40
+    },
+    {
+      "name": "bearing-1-1160",
+      "vertices": 324
+    },
+    {
+      "name": "hub-1-1160",
+      "vertices": 40
+    },
+    {
+      "name": "foot-1--280",
+      "vertices": 84
+    },
+    {
+      "name": "foot-1-320",
+      "vertices": 84
+    },
+    {
+      "name": "abrasive-loop",
+      "vertices": 134
+    },
+    {
+      "name": "upper-wheel",
+      "vertices": 292
+    },
+    {
+      "name": "upper-wheel-rim--1",
+      "vertices": 148
+    },
+    {
+      "name": "upper-wheel-recess--1",
+      "vertices": 76
+    },
+    {
+      "name": "upper-wheel-boss--1",
+      "vertices": 52
+    },
+    {
+      "name": "upper-wheel-spoke--1-0",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke--1-1",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke--1-2",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke--1-3",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke--1-4",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke--1-5",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-rim-1",
+      "vertices": 148
+    },
+    {
+      "name": "upper-wheel-recess-1",
+      "vertices": 76
+    },
+    {
+      "name": "upper-wheel-boss-1",
+      "vertices": 52
+    },
+    {
+      "name": "upper-wheel-spoke-1-0",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke-1-1",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke-1-2",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke-1-3",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke-1-4",
+      "vertices": 24
+    },
+    {
+      "name": "upper-wheel-spoke-1-5",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel",
+      "vertices": 292
+    },
+    {
+      "name": "lower-wheel-rim--1",
+      "vertices": 148
+    },
+    {
+      "name": "lower-wheel-recess--1",
+      "vertices": 76
+    },
+    {
+      "name": "lower-wheel-boss--1",
+      "vertices": 52
+    },
+    {
+      "name": "lower-wheel-spoke--1-0",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke--1-1",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke--1-2",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke--1-3",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke--1-4",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke--1-5",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-rim-1",
+      "vertices": 148
+    },
+    {
+      "name": "lower-wheel-recess-1",
+      "vertices": 76
+    },
+    {
+      "name": "lower-wheel-boss-1",
+      "vertices": 52
+    },
+    {
+      "name": "lower-wheel-spoke-1-0",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke-1-1",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke-1-2",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke-1-3",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke-1-4",
+      "vertices": 24
+    },
+    {
+      "name": "lower-wheel-spoke-1-5",
+      "vertices": 24
+    },
+    {
+      "name": "work-rest",
+      "vertices": 324
+    },
+    {
+      "name": "rest-arm",
+      "vertices": 324
+    },
+    {
+      "name": "rest-support",
+      "vertices": 324
+    },
+    {
+      "name": "platen",
+      "vertices": 324
+    },
+    {
+      "name": "upper-guard",
+      "vertices": 324
+    },
+    {
+      "name": "tension-slide",
+      "vertices": 324
+    },
+    {
+      "name": "tension-block-770",
+      "vertices": 324
+    },
+    {
+      "name": "tension-block-1020",
+      "vertices": 324
+    },
+    {
+      "name": "drive-pedestal",
+      "vertices": 324
+    },
+    {
+      "name": "drive-wheel",
+      "vertices": 196
+    },
+    {
+      "name": "drive-recess",
+      "vertices": 148
+    },
+    {
+      "name": "drive-hub",
+      "vertices": 40
+    },
+    {
+      "name": "drive-spoke-0",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-1",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-2",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-3",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-4",
+      "vertices": 24
+    },
+    {
+      "name": "drive-spoke-5",
+      "vertices": 24
+    },
+    {
+      "name": "transmission-small",
+      "vertices": 196
+    },
+    {
+      "name": "transmission-loop",
+      "vertices": 2352
+    },
+    {
+      "name": "hex-fasteners",
+      "vertices": 40
+    }
+  ],
+  "calls": 76,
+  "triangles": 5152
+}

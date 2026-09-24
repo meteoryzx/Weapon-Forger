@@ -131,6 +131,7 @@ export interface WorkpieceSolid {
   readonly blockId: string;
   readonly vertices: readonly SolidVertex[];
   readonly faces: readonly (readonly number[])[];
+  readonly groundFaces?: readonly number[];
 }
 
 export interface CutLoss {
@@ -157,12 +158,17 @@ export interface QuenchEvent {
   readonly medium: QuenchMedium;
   readonly startTemperatureC: number;
   readonly endTemperatureC: number;
+  readonly immersion?: number;
+  readonly movement?: number;
+  readonly dwellMs?: number;
+  readonly exitTemperatureC?: number;
 }
 
 export interface TemperEvent {
   readonly kind: "temper";
   readonly operationIndex: number;
   readonly temperatureC: number;
+  readonly durationMs?: number;
 }
 
 export type HeatTreatmentEvent = QuenchEvent | TemperEvent;
@@ -230,15 +236,78 @@ export interface HammerOperation {
   readonly faceBias?: number;
 }
 
+/** Millimetres on the anvil; yaw around world up, roll around the billet's long axis. */
+export interface HammerPose {
+  readonly x: number;
+  readonly z: number;
+  readonly yaw: number;
+  readonly roll: number;
+}
+
+export interface SurfaceHammerOperation {
+  readonly kind: "surface-hammer";
+  readonly pose: HammerPose;
+  readonly target: { readonly x: number; readonly z: number };
+  readonly energy: number;
+}
+
+/** A deterministic burst of fixed-die impacts from the powered hammer. */
+export interface PowerHammerOperation {
+  readonly kind: "power-hammer";
+  readonly pose: HammerPose;
+  readonly target: { readonly x: number; readonly z: number };
+  readonly energy: number;
+  readonly blows: number;
+  readonly cadenceMs: number;
+}
+
+/** One flat-die cycle. Preview cumulative dwell from the SAME pre-cycle state;
+ * commit only the final result on release. Pressure is rated-force fraction
+ * [0.1, 1], stroke is (0, 24] mm, dwell is [0, 4000] ms; zero dwell is unchanged.
+ */
+export interface ForgePressOperation {
+  readonly kind: "forge-press";
+  readonly pose: HammerPose;
+  readonly target: { readonly x: number; readonly z: number };
+  readonly pressure: number;
+  readonly strokeMm: number;
+  readonly dwellMs: number;
+}
+
 export interface QuenchOperation {
   readonly kind: "quench";
   readonly medium: QuenchMedium;
+  /** Normalized interaction facts. Optional for legacy replays. */
+  readonly immersion?: number;
+  readonly movement?: number;
+  readonly dwellMs?: number;
+  readonly exitTemperatureC?: number;
 }
 
 export interface GrindOperation {
   readonly kind: "grind";
   readonly sectionIndex: number;
   readonly amount: number;
+  /** Tool approach angle in radians; zero is the calibrated edge contact. */
+  readonly angle?: number;
+  /** Finite local contact patch for physical grinding. Omitted by legacy replays. */
+  readonly contact?: {
+    readonly axialPosition: number;
+    readonly verticalOffset: number;
+    readonly axialWidth: number;
+    readonly verticalHeight: number;
+    readonly depth: number;
+    readonly angle?: number;
+    /** Abrasive plane and finite footprint in workpiece millimetres. */
+    readonly frame?: {
+      readonly origin: { readonly x: number; readonly y: number; readonly z: number };
+      readonly normal: { readonly x: number; readonly y: number; readonly z: number };
+      readonly across: { readonly x: number; readonly y: number; readonly z: number };
+      readonly down: { readonly x: number; readonly y: number; readonly z: number };
+      readonly width: number;
+      readonly height: number;
+    };
+  };
 }
 
 // 切割：移除有限刀路扫过的锯缝；仍连通则保留当前工件，仅将新独立组件移入 bench。
@@ -264,6 +333,7 @@ export interface WeldOperation {
 export interface TemperOperation {
   readonly kind: "temper";
   readonly temperatureC: number;
+  readonly durationMs?: number;
 }
 
 export type ForgeOperation =
@@ -274,6 +344,9 @@ export type ForgeOperation =
   | RotateOperation
   | FeedOperation
   | HammerOperation
+  | SurfaceHammerOperation
+  | PowerHammerOperation
+  | ForgePressOperation
   | QuenchOperation
   | GrindOperation
   | CutOperation
@@ -316,12 +389,18 @@ export interface MoveBilletIntent {
 export interface QuenchIntent {
   readonly kind: "quench";
   readonly medium: QuenchMedium;
+  readonly immersion?: number;
+  readonly movement?: number;
+  readonly dwellMs?: number;
+  readonly exitTemperatureC?: number;
 }
 
 export interface GrindIntent {
   readonly kind: "grind";
   readonly sectionIndex: number;
   readonly amount: number;
+  readonly angle?: number;
+  readonly contact?: NonNullable<GrindOperation["contact"]>;
 }
 
 export type CutIntent = CutOperation;
@@ -334,12 +413,16 @@ export interface WeldIntent {
 export interface TemperIntent {
   readonly kind: "temper";
   readonly temperatureC: number;
+  readonly durationMs?: number;
 }
 
 export type ForgeIntent =
   | SelectMaterialIntent
   | SelectWorkpieceIntent
   | HammerIntent
+  | SurfaceHammerOperation
+  | PowerHammerOperation
+  | ForgePressOperation
   | RotateIntent
   | FeedIntent
   | MoveBilletIntent
@@ -444,8 +527,17 @@ export interface ForgeSnapshot {
   readonly heatTreatmentCount: number;
   readonly materialRegionCount: number;
   readonly removedVolume: number;
+  readonly grindMetrics: GrindMetrics;
   readonly benchCount: number;
   readonly bench: readonly ForgeSnapshotWorkpiece[];
+}
+
+export interface GrindMetrics {
+  readonly bladeAngleDeg: number;
+  readonly edgeThicknessMm: number;
+  /** Normalized geometric surface irregularity, derived from occupied solids. */
+  readonly roughness: number;
+  readonly symmetry: number;
 }
 
 export interface HammerInfluenceSample {

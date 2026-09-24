@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Power Hammer - Integrated Model</title>
+<style>
+html,body{margin:0;height:100%;font:14px system-ui;background:#d5d6d8;color:#202427}canvas{display:block;width:100%;height:100%}header{position:absolute;top:12px;left:12px;right:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}select,input{accent-color:#287c69}label{display:flex;align-items:center;gap:5px}input[type=range]{width:100px}
+</style>
+<canvas></canvas>
+<header><strong>Power Hammer</strong><select aria-label="View"><option value="reference">3/4</option><option value="front">Front</option><option value="right">Right</option><option value="rear">Rear</option></select><label><input id="motion" type="checkbox">Motion</label><label>Travel<input id="travel" type="range" min="0" max="120" value="0"><output>0 mm</output></label></header>
+<script type="module">
+import * as THREE from '/node_modules/three/build/three.module.js';
+import { RoomEnvironment } from '/node_modules/three/examples/jsm/environments/RoomEnvironment.js';
+import { createPowerHammer } from '/src/render/power-hammer-model.ts';
+import { WorkshopModelKit } from '/src/render/workshop-model-kit.ts';
+const renderer=new THREE.WebGLRenderer({canvas:document.querySelector('canvas'),antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;
+const scene=new THREE.Scene();scene.background=new THREE.Color('#d5d6d8');
+const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,1,2000);
+const pmrem=new THREE.PMREMGenerator(renderer),room=new RoomEnvironment();
+scene.environment=pmrem.fromScene(room).texture;scene.environmentIntensity=0.8;room.dispose();pmrem.dispose();
+scene.add(new THREE.HemisphereLight('#eef4ff','#777871',2));
+const key=new THREE.DirectionalLight('#fff3de',3);key.position.set(180,260,160);key.castShadow=true;
+Object.assign(key.shadow.camera,{left:-150,right:150,top:220,bottom:-120,near:1,far:700});key.shadow.mapSize.set(1024,1024);scene.add(key);
+const kit=new WorkshopModelKit(),asset=createPowerHammer(kit);scene.add(asset.root);
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(1600,1600),new THREE.MeshStandardMaterial({color:'#c2c5c5',roughness:1}));
+ground.rotation.x=-Math.PI/2;ground.position.y=-30.1;ground.receiveShadow=true;scene.add(ground);
+const select=document.querySelector('select'),travel=document.querySelector('#travel'),motion=document.querySelector('#motion');
+const directions={reference:[0.85,0.3,0.7],front:[0,0.08,1],right:[1,0.08,0],rear:[0,0.08,-1]};
+function frame(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();const d=new THREE.Vector3(...directions[select.value]).normalize();camera.position.copy(d.multiplyScalar(350*Math.max(1,0.8/camera.aspect))).add(new THREE.Vector3(0,58,0));camera.lookAt(0,58,0);}
+select.addEventListener('change',frame);addEventListener('resize',frame);frame();
+renderer.setAnimationLoop(now=>{const mm=motion.checked?60-60*Math.cos(now*Math.PI/500):Number(travel.value);asset.ram.position.y=-mm*0.08;document.querySelector('output').textContent=`${Math.round(mm)} mm`;renderer.render(scene,camera);document.body.dataset.ready='true';});
+</script>
+</html>

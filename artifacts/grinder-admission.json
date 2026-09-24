@@ -1,0 +1,14 @@
+{
+  "admitted": true,
+  "reasons": [],
+  "provenance": {
+    "viewpoint": "reference",
+    "sourcePath": "D:\\打了个铁\\Weapon-Forger-hammer\\artifacts\\grinder-reference\\hero.png",
+    "width": 518,
+    "height": 870,
+    "foregroundCoverage": 0.4387,
+    "largestComponentFraction": 1.0,
+    "pHash": 17266376568182300825,
+    "duplicateOfHash": null
+  }
+}

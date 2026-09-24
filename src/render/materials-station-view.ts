@@ -5,20 +5,24 @@ import {
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { FORGE_MATERIALS, FORGE_RULES, type ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { thermalSteelAppearance } from "./thermal-color.ts";
-import { WORKSHOP_UNITS_PER_MM } from "../app/workshop-scale.ts";
+import { WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM, WORKSHOP_LAYOUT } from "../app/workshop-scale.ts";
+import { WorkshopModelKit } from "./workshop-model-kit.ts";
 
 // Keep the selection area's accepted local arrangement; move the whole station
 // to the workshop's back-left so its full-sized table does not envelop the forge.
-export const MATERIALS_ORIGIN = new Vector3(-600, 0, -250);
+export const MATERIALS_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.materials!.origin);
 export const MATERIALS_FRAMES = {
-  table: { position: [0, 262, 430], target: [0, 145, -28] },
-  rack: { position: [0, 262, 430], target: [0, 145, -28] },
+  // Operator-facing centerline: a slight downward angle keeps the whole
+  // tabletop readable and makes picking targets predictable.
+  table: { position: [0, 92, 116], target: [0, 46, 0] },
+  rack: { position: [0, 110, 140], target: [0, 48, -8] },
 } as const;
 
-const TABLE_SURFACE_Y = 72;
-const TABLE_ITEM_BASE_Y = TABLE_SURFACE_Y + 1.25;
-const STOCK_SHELF_SURFACE_Y = 200;
-const RETURN_SHELF_SURFACE_Y = 288;
+const TABLE_SURFACE_Y = WORKSHOP_SURFACE_Y;
+const TABLE_ITEM_BASE_Y = TABLE_SURFACE_Y + 0.02;
+export const MATERIAL_SHELF = { stockSurface: 82, returnSurface: 50, front: -20.8, center: -37.6 } as const;
+const STOCK_SHELF_SURFACE_Y = MATERIAL_SHELF.stockSurface;
+const RETURN_SHELF_SURFACE_Y = MATERIAL_SHELF.returnSurface;
 const STOCK_SCALE = WORKSHOP_UNITS_PER_MM;
 const STOCK_LENGTH = FORGE_RULES.workpieceLength * STOCK_SCALE;
 const SIDE_AXIS = new Vector3(1, 0, 0);
@@ -34,7 +38,14 @@ export function materialsCameraFrame(_focus: "table" | "rack", aspect: number) {
   const frame = MATERIALS_FRAMES.table;
   const target = new Vector3(...frame.target).add(MATERIALS_ORIGIN);
   const position = new Vector3(...frame.position).add(MATERIALS_ORIGIN);
-  position.sub(target).multiplyScalar(Math.max(1, 1.25 / aspect)).add(target);
+  position.sub(target).multiplyScalar(Math.max(1, 0.78 / aspect)).add(target);
+  return { position: position.toArray(), target: target.toArray() };
+}
+
+export function weldCameraFrame(aspect: number) {
+  const target = new Vector3(0, TABLE_SURFACE_Y + 12, 12).add(MATERIALS_ORIGIN);
+  const position = new Vector3(0, 104, 154).add(MATERIALS_ORIGIN);
+  position.sub(target).multiplyScalar(Math.max(1, 0.78 / aspect)).add(target);
   return { position: position.toArray(), target: target.toArray() };
 }
 
@@ -46,46 +57,31 @@ export class MaterialsStationView {
   readonly tableItems: Mesh[] = [];
   private selected: string | null = null;
   private lastTick: number | null = null;
+  private readonly kit = new WorkshopModelKit();
 
   constructor(private readonly geometryOf: (piece: ForgeSnapshotWorkpiece) => BufferGeometry) {
     this.group.position.copy(MATERIALS_ORIGIN);
-    const wood = new MeshStandardMaterial({ color: "#75533a", roughness: 0.86 });
-    const edge = new MeshStandardMaterial({ color: "#47372d", roughness: 0.9 });
-    const iron = new MeshStandardMaterial({ color: "#424a50", metalness: 0.65, roughness: 0.5 });
-    const stone = new MeshStandardMaterial({ color: "#626968", roughness: 1 });
-    this.box(this.group, [700, 360, 16], [0, 145, -270], stone);
-
-    // The shelf is deep enough for a full stock billet and shares its front edge with the table.
+    const kit=this.kit;
+    kit.bench(this.group,1600,800,150);
+    kit.ruler(this.group,500,[0,875,510]);
+    for(const x of [-18,18])kit.beam(this.group,"tongs-handle",[600+x,881,320],[600-x,885,20],12,12,"iron");
+    for(const x of [-18,18])kit.beam(this.group,"tongs-jaw",[600-x,885,20],[600+x,887,-65],15,18,"steel");
+    kit.cylinder(this.group,"tongs-pivot",10,10,[600,885,55],"brass");
     this.group.add(this.rack);
-    for (const x of [-230, 230]) this.box(this.rack, [20, 356, 48], [x, 142, -115], edge);
-    for (const y of [106, 194, 282]) this.box(this.rack, [480, 12, 220], [0, y, -115], wood);
-    this.box(this.rack, [480, 22, 54], [0, 324, -115], wood);
-    this.box(this.rack, [446, 16, 14], [0, -20, -28], edge);
-
-    // Its back edge meets the shelf front edge at z=-5, forming one continuous work area.
-    for (let plank = 0; plank < 6; plank += 1) {
-      const material = wood.clone();
-      material.color.multiplyScalar(0.9 + plank * 0.025);
-      this.box(this.group, [510, 14, 50], [0, 65, 20 + plank * 50], material);
+    for(const x of [-750,750])kit.box(this.rack,"rack-upright",[80,1800,80],[x,900,-480],"endgrain");
+    for(const height of [450,1000,1400,1750]){
+      kit.box(this.rack,"stock-shelf",[1520,45,420],[0,height-22.5,-470],"wood");
+      kit.box(this.rack,"shelf-backstop",[1520,65,25],[0,height+10,-682],"iron");
     }
-    for (const x of [-218, 218]) {
-      for (const z of [18, 272]) this.box(this.group, [22, 100, 22], [x, 14, z], edge);
-    }
-    this.box(this.group, [474, 18, 18], [0, 45, -2], edge);
-    this.box(this.group, [474, 16, 18], [0, 8, 268], iron);
-
-    const windowGlass = new MeshBasicMaterial({ color: "#adc9db" });
-    this.box(this.group, [108, 138, 6], [-286, 184, -260], windowGlass);
-    for (const x of [-342, -286, -230]) this.box(this.group, [7, 150, 10], [x, 184, -250], edge);
-    for (const y of [108, 184, 260]) this.box(this.group, [122, 7, 10], [-286, y, -250], edge);
-    const windowLight = new PointLight("#bbd9ed", 24_000, 580, 2);
-    windowLight.position.set(-275, 240, -130);
-    this.group.add(windowLight);
+    for(const x of [-700,700])kit.beam(this.rack,"rack-brace",[x,420,-650],[-x,1650,-650],35,24,"iron");
+    // Background stock is deliberately distinct from the three selectable sources.
+    for(let i=0;i<12;i++)kit.box(this.rack,"stored-bar",[32,24,336],[-580+i*105,462,-470],"iron",2);
+    kit.batch(this.rack);kit.batch(this.group);
 
     const storedQuaternion = orientationFor(STORED_DIRECTION);
     const inspectionQuaternion = orientationFor(INSPECTION_DIRECTION);
     const halfThickness = FORGE_RULES.initialSectionThickness * STOCK_SCALE / 2;
-    const shelfFrontZ = -5;
+    const shelfFrontZ = MATERIAL_SHELF.front;
     const extractedPosition = new Vector3(0, STOCK_SHELF_SURFACE_Y + halfThickness, shelfFrontZ + STOCK_LENGTH / 2);
     const inspectionRear = new Vector3(
       0,
@@ -102,7 +98,7 @@ export class MaterialsStationView {
           FORGE_RULES.initialSectionThickness * STOCK_SCALE,
           FORGE_RULES.initialSectionWidth * STOCK_SCALE,
           1,
-          0.65,
+          0.04,
         ),
         new MeshStandardMaterial({
           color: (["#899297", "#747d84", "#80898d"][index] ?? "#80898d"),
@@ -111,9 +107,9 @@ export class MaterialsStationView {
         }),
       );
       const storedPosition = new Vector3(
-        -142 + index * 142,
+        -36 + index * 36,
         STOCK_SHELF_SURFACE_Y + FORGE_RULES.initialSectionThickness * STOCK_SCALE / 2,
-        -112,
+        MATERIAL_SHELF.center,
       );
       mesh.position.copy(storedPosition);
       mesh.quaternion.copy(storedQuaternion);
@@ -146,14 +142,16 @@ export class MaterialsStationView {
       const onTable = tableIds.has(piece.workpieceId);
       const mesh = this.createWorkpieceMesh(piece, piece.workpieceId === activeWorkpieceId);
       if (onTable) {
-        mesh.position.set(-174 + tableIndex * 116, TABLE_ITEM_BASE_Y, 112);
+        // The table is 800 mm deep at the shared scale. Keep the selected
+        // billet on its usable top instead of placing it beyond the rear edge.
+        mesh.position.set(-42 + tableIndex * 28, TABLE_ITEM_BASE_Y + 0.04, 0);
         mesh.quaternion.copy(orientationFor(STORED_DIRECTION));
         mesh.userData.tableSlot = tableIndex;
         this.tableItems.push(mesh);
         this.group.add(mesh);
         tableIndex += 1;
       } else {
-        mesh.position.set(-174 + rackIndex * 116, RETURN_SHELF_SURFACE_Y, -112);
+        mesh.position.set(-42 + rackIndex * 28, RETURN_SHELF_SURFACE_Y, MATERIAL_SHELF.center);
         mesh.quaternion.copy(orientationFor(STORED_DIRECTION));
         mesh.userData.rackSlot = rackIndex;
         this.rackItems.push(mesh);
@@ -204,6 +202,7 @@ export class MaterialsStationView {
     });
     geometries.forEach((geometry) => geometry.dispose());
     materials.forEach((material) => material.dispose());
+    this.kit.woodTexture.dispose();this.kit.mineralTexture.dispose();
   }
 
   private clearDynamicItems(): void {
