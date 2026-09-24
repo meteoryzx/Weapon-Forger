@@ -1,7 +1,7 @@
 import type { ForgeMaterial } from "./forge-types.ts";
 
-export const FORGE_PARAMETER_VERSION = "physics-3";
-export const FORGE_STATE_VERSION = "forge-state-4";
+export const FORGE_PARAMETER_VERSION = "physics-9";
+export const FORGE_STATE_VERSION = "forge-state-5";
 
 const WORKPIECE_LENGTH = 336;
 const WORKPIECE_WIDTH = 48;
@@ -92,6 +92,8 @@ export const FORGE_RULES = {
   furnaceRadiationViewFactor: 0.85,
   airConvectionWPerM2K: 12,
   stefanBoltzmannWPerM2K4: 5.670_374_419e-8,
+  // Accelerated for playability, while the 100 ms UI cadence preserves the
+  // shape of the thermal curve instead of presenting one-second jumps.
   thermalTimeScale: 6,
   thermalStepSeconds: 0.1,
   maximumThermalIntentMs: 120_000,

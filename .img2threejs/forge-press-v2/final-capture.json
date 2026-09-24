@@ -1,0 +1,63 @@
+{
+  "label": "final",
+  "sourceSha256": "11a75a02ae2783c16f0b5b2738ebb373645f5ea8a6a06a77e8b3691c00b8586b",
+  "opened": {
+    "bounds": [
+      78.88,
+      152,
+      72
+    ],
+    "floor": -30,
+    "gap": 9.600000000000009,
+    "lowerTop": 40,
+    "ramY": 0,
+    "triangles": 5410,
+    "drawCalls": 141
+  },
+  "closed": {
+    "bounds": [
+      78.88,
+      152,
+      72
+    ],
+    "floor": -30,
+    "gap": 7.105427357601002e-15,
+    "lowerTop": 40,
+    "ramY": -9.6,
+    "triangles": 5410,
+    "drawCalls": 141
+  },
+  "motion": {
+    "a": -7.287515405264737,
+    "b": -8.824690834344537,
+    "changed": true
+  },
+  "shots": [
+    {
+      "view": "reference",
+      "foregroundPixels": 301830,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "front",
+      "foregroundPixels": 214916,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "right",
+      "foregroundPixels": 162214,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "rear",
+      "foregroundPixels": 222540,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "left",
+      "foregroundPixels": 163219,
+      "totalPixels": 1152000
+    }
+  ],
+  "errors": []
+}

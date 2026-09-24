@@ -1,0 +1,85 @@
+{
+  "ok": true,
+  "verdict": "pass",
+  "confidence": 0.86,
+  "estimatedFidelity": 0.86,
+  "targetThreshold": 0.7,
+  "materialId": "brass",
+  "sourceImage": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-crops\\brass.png",
+  "outDir": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-evidence\\brass",
+  "palette": [
+    "#413123",
+    "#6A4D30",
+    "#B0834A",
+    "#1D1814",
+    "#EACC96"
+  ],
+  "maps": {
+    "albedo": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-evidence\\brass\\brass_albedo.png",
+      "url": "brass_albedo.png",
+      "channel": "albedo",
+      "source": "reference-pixel-extraction"
+    },
+    "roughness": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-evidence\\brass\\brass_roughness.png",
+      "url": "brass_roughness.png",
+      "channel": "roughness",
+      "source": "reference-pixel-extraction"
+    },
+    "height": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-evidence\\brass\\brass_height.png",
+      "url": "brass_height.png",
+      "channel": "height",
+      "source": "reference-pixel-extraction"
+    },
+    "normal": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-evidence\\brass\\brass_normal.png",
+      "url": "brass_normal.png",
+      "channel": "normal",
+      "source": "reference-pixel-extraction"
+    },
+    "ao": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\.img2threejs\\power-hammer-v2\\material-evidence\\brass\\brass_ao.png",
+      "url": "brass_ao.png",
+      "channel": "ao",
+      "source": "reference-pixel-extraction"
+    }
+  },
+  "diagnostics": {
+    "sourceWidth": 39,
+    "sourceHeight": 77,
+    "mapSize": 256,
+    "cropBBoxPixels": {
+      "x": 0,
+      "y": 0,
+      "width": 39,
+      "height": 77
+    },
+    "mask": {
+      "backgroundColor": "#211E1E",
+      "backgroundNoise": 41.593,
+      "transparentPixelFraction": 0.0,
+      "foregroundCoverage": 0.7499
+    },
+    "mapStats": {
+      "valueRange": 0.6584,
+      "heightP90Gradient": 0.1263,
+      "roughnessBase": 0.757,
+      "roughnessVariation": 0.2,
+      "normalStrength": 0.304,
+      "blurRadius": 5
+    },
+    "palette": [
+      "#413123",
+      "#6A4D30",
+      "#B0834A",
+      "#1D1814",
+      "#EACC96"
+    ]
+  },
+  "warnings": [
+    "single-image inverse rendering cannot prove true physical PBR; confidence is capped"
+  ],
+  "limitation": "single-image PBR extraction is an estimate; 70%+ extraction confidence still needs render screenshot review"
+}

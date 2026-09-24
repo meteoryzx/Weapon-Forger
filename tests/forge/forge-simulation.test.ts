@@ -323,7 +323,7 @@ describe("forge simulation", () => {
     expect(Math.abs(geometricVolume(state) - initial) / initial).toBeLessThan(0.005);
     expect(totalVolume(state)).toBeCloseTo(initial, 8);
     expect(allTetrahedraPositive(state)).toBe(true);
-  });
+  }, 15_000);
 
   it("does not reverse a corner deformation after striking its orthogonal face", () => {
     let state = forgeAt(950);

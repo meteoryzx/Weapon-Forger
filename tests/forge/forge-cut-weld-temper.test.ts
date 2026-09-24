@@ -6,6 +6,7 @@ import {
   createForgeSnapshot,
   createForgeState,
   FORGE_RULES,
+  HIGH_CARBON_STEEL,
   outlineArea,
   replayForgeState,
   SPRING_STEEL,
@@ -137,6 +138,25 @@ describe("cut, weld, temper", () => {
     });
     expect(createForgeSnapshot(tempered).temperTemperatureC).toBe(200);
     expect(() => applyForgeOperation(createForgeState({ sectionCount: 8 }), { kind: "temper", temperatureC: 600 })).toThrow();
+  });
+
+  it("releases quench stress with temperature and soak time without repairing cracks", () => {
+    let state = createForgeState({ material: HIGH_CARBON_STEEL, sectionCount: 8 });
+    state = applyForgeOperation(state, { kind: "heat", temperatureC: 900 });
+    state = applyForgeOperation(state, { kind: "quench", medium: "water" });
+    const beforeStress = state.workpiece.sections.reduce((sum, section) => sum + section.stress, 0);
+    const crackedBefore = state.workpiece.sections.some((section) => section.cracked);
+    const tempered = applyForgeOperation(state, { kind: "temper", temperatureC: 220, durationMs: 60_000 });
+    const afterStress = tempered.workpiece.sections.reduce((sum, section) => sum + section.stress, 0);
+
+    expect(afterStress).toBeLessThan(beforeStress);
+    expect(tempered.workpiece.heatTreatments.at(-1)).toMatchObject({
+      kind: "temper",
+      temperatureC: 220,
+      durationMs: 60_000,
+    });
+    expect(tempered.workpiece.sections.some((section) => section.cracked)).toBe(crackedBefore);
+    expect(tempered.workpiece.sections.some((section) => section.damage > 0)).toBe(true);
   });
 
   it("weld keeps source material regions while exposing an aggregate carbon value", () => {

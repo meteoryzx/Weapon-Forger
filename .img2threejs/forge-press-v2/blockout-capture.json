@@ -1,0 +1,63 @@
+{
+  "label": "blockout",
+  "sourceSha256": "28e08650503d80cce6253e4755a89e62ce086dff70900998ce088a868262d508",
+  "opened": {
+    "bounds": [
+      78.4,
+      148,
+      72
+    ],
+    "floor": -30,
+    "gap": 9.600000000000009,
+    "lowerTop": 40,
+    "ramY": 0,
+    "triangles": 554,
+    "drawCalls": 23
+  },
+  "closed": {
+    "bounds": [
+      78.4,
+      148,
+      72
+    ],
+    "floor": -30,
+    "gap": 7.105427357601002e-15,
+    "lowerTop": 40,
+    "ramY": -9.6,
+    "triangles": 554,
+    "drawCalls": 23
+  },
+  "motion": {
+    "a": -3.350546287171323,
+    "b": -1.3348339252843109,
+    "changed": true
+  },
+  "shots": [
+    {
+      "view": "reference",
+      "foregroundPixels": 294604,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "front",
+      "foregroundPixels": 192237,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "right",
+      "foregroundPixels": 149824,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "rear",
+      "foregroundPixels": 195002,
+      "totalPixels": 1152000
+    },
+    {
+      "view": "left",
+      "foregroundPixels": 149796,
+      "totalPixels": 1152000
+    }
+  ],
+  "errors": []
+}

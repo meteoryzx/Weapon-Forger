@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Box3, BoxGeometry, PerspectiveCamera, Vector3 } from "three";
-import { createForgeSnapshot, createForgeState } from "../../src/forge/index.ts";
-import { MaterialsStationView, materialsCameraFrame } from "../../src/render/materials-station-view.ts";
-import { WORKSHOP_UNITS_PER_MM } from "../../src/app/workshop-scale.ts";
+import { createForgeSnapshot, createForgeState, FORGE_RULES } from "../../src/forge/index.ts";
+import { MaterialsStationView, materialsCameraFrame, MATERIAL_SHELF } from "../../src/render/materials-station-view.ts";
+import { WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM, WORKSHOP_STANDARD } from "../../src/app/workshop-scale.ts";
 
 function cameraFor(aspect: number) {
-  const camera = new PerspectiveCamera(52, aspect, 0.1, 2000);
+  const camera = new PerspectiveCamera(WORKSHOP_STANDARD.camera.fov, aspect, 0.1, 2000);
   const frame = materialsCameraFrame("table", aspect);
   camera.position.fromArray(frame.position);
   camera.lookAt(new Vector3().fromArray(frame.target));
@@ -39,11 +39,11 @@ describe("material station geometry without browser rendering", () => {
     const home = selected.position.clone();
     station.update(selected.userData.materialId as string, []);
     for (let time = 0; time <= 160; time += 16) station.tick(time);
-    expect(selected.position.z).toBeGreaterThan(home.z + 100);
+    expect(selected.position.z).toBeGreaterThan(home.z + FORGE_RULES.workpieceLength * WORKSHOP_UNITS_PER_MM * 0.9);
     expect(Math.abs(longAxis(selected).y)).toBeLessThan(0.01);
     for (let time = 176; time <= 900; time += 16) station.tick(time);
     const axis = longAxis(selected);
-    expect(selected.position.z).toBeGreaterThan(home.z + 60);
+    expect(selected.position.z).toBeGreaterThan(MATERIAL_SHELF.front);
     expect(selected.position.y).toBeLessThan(home.y);
     expect(axis.y).toBeGreaterThan(0.45);
     expect(axis.z).toBeLessThan(-0.8);
@@ -55,7 +55,7 @@ describe("material station geometry without browser rendering", () => {
       (selected.userData.storageShelfSurfaceY as number) + 8 * WORKSHOP_UNITS_PER_MM / 2,
       0,
     );
-    expect(rearEnd.z).toBeCloseTo(-5, 0);
+    expect(rearEnd.z).toBeCloseTo(MATERIAL_SHELF.front, 5);
     station.dispose();
   });
 
@@ -72,8 +72,8 @@ describe("material station geometry without browser rendering", () => {
     for (const item of station.tableItems) {
       expect(Math.abs(longAxis(item).z)).toBeGreaterThan(0.99);
       const bottomY = new Box3().setFromObject(item).min.y;
-      expect(bottomY).toBeGreaterThan(72);
-      expect(bottomY).toBeLessThan(74);
+      expect(bottomY).toBeGreaterThan(WORKSHOP_SURFACE_Y);
+      expect(bottomY).toBeLessThan(WORKSHOP_SURFACE_Y + 2);
       expect(item.userData.workpieceId).toBeTruthy();
     }
     station.dispose();

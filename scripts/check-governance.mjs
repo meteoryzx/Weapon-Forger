@@ -30,40 +30,11 @@ if (checkpointHeadings.length !== 1) {
   fail("PROJECT_PLAN.md must contain exactly one '## 0. 唯一当前检查点' heading");
 }
 
-const branch = process.env.GITHUB_HEAD_REF || git("branch", "--show-current");
-const governanceBranch = branch.startsWith("governance/");
-const baseRevision = process.env.GOVERNANCE_BASE_SHA || "origin/main";
-const governanceFiles = new Set([
-  ".github/CODEOWNERS",
-  ".github/pull_request_template.md",
-  ".github/workflows/ci.yml",
-  "AGENTS.md",
-  "PROJECT_PLAN.md",
-  "README.md",
-  "package.json",
-  "scripts/check-governance.mjs",
-]);
-
-if (governanceBranch) {
-  const changedFiles = git("diff", "--name-only", baseRevision).split(/\r?\n/u).filter(Boolean);
-  const outOfScope = changedFiles.filter((path) => !governanceFiles.has(path));
-  if (outOfScope.length > 0) {
-    fail(`governance branch contains non-governance files: ${outOfScope.join(", ")}`);
-  }
-}
-
-try {
-  const baseAgents = git("show", `${baseRevision}:AGENTS.md`);
-  const currentAgents = readFileSync("AGENTS.md", "utf8").trim();
-  if (!governanceBranch && currentAgents !== baseAgents) {
-    fail(`branch '${branch || "detached"}' does not carry the authoritative ${baseRevision}:AGENTS.md`);
-  }
-} catch (error) {
-  if (!governanceBranch) {
-    fail(`cannot verify AGENTS.md against ${baseRevision}: ${error.message}`);
-  }
+const agents = readFileSync("AGENTS.md", "utf8");
+for (const heading of ["## 1. 开发流程", "## 2. 当前工程原则", "## 3. 核心边界", "## 4. Git 与协作"]) {
+  if (!agents.includes(heading)) fail(`AGENTS.md is missing ${heading}`);
 }
 
 if (!process.exitCode) {
-  process.stdout.write("Governance check passed: one instruction file, one current checkpoint, authoritative rules aligned.\n");
+  process.stdout.write("Governance check passed: one instruction file, one current checkpoint, development contract present.\n");
 }

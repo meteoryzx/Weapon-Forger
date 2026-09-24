@@ -1,0 +1,289 @@
+{
+  "sourceImage": "D:/打了个铁/Weapon-Forger-hammer/assets/concepts/power-hammer-v2-main.png",
+  "detailInventory": {
+    "scanMethod": "grid-3x3",
+    "targetMinDetails": 14,
+    "details": [
+      {
+        "id": "cap-bolt-ring",
+        "kind": "fastener",
+        "description": "Top flange fasteners",
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "front-cap/cap-bolt-ring"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r0c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "flange-step",
+        "kind": "ridge",
+        "description": "Raised flange rim",
+        "region": {
+          "x": 0,
+          "y": 0,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "front-cap/flange-step"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r0c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "guide-band",
+        "kind": "seam",
+        "description": "Lower guide collar seam",
+        "region": {
+          "x": 0,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "guide/guide-band"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "ram-polish",
+        "kind": "gloss",
+        "description": "Longitudinal polished steel",
+        "region": {
+          "x": 0,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "material",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "ram/ram-polish"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "upper-edge",
+        "kind": "bevel",
+        "description": "Upper die bevel",
+        "region": {
+          "x": 0,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "upper-die/upper-edge"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "lower-edge",
+        "kind": "bevel",
+        "description": "Lower die bevel",
+        "region": {
+          "x": 0,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "lower-die/lower-edge"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "throat-rim",
+        "kind": "bevel",
+        "description": "Continuous throat inner rim",
+        "region": {
+          "x": 0.3333333333333333,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "frame/throat-rim"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c1.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "tall-seam",
+        "kind": "seam",
+        "description": "Rectangular cover border",
+        "region": {
+          "x": 0.6666666666666666,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "service-tall/tall-seam"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c2.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "round-bolts",
+        "kind": "fastener",
+        "description": "Radial cover bolts",
+        "region": {
+          "x": 0.6666666666666666,
+          "y": 0.3333333333333333,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "service-round/round-bolts"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r1c2.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "low-lip",
+        "kind": "ridge",
+        "description": "Raised panel lip",
+        "region": {
+          "x": 0.6666666666666666,
+          "y": 0.6666666666666666,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "service-low/low-lip"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r2c2.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "base-edge",
+        "kind": "bevel",
+        "description": "Plinth chamfer",
+        "region": {
+          "x": 0,
+          "y": 0.6666666666666666,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "base/base-edge"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r2c0.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "rib-edge",
+        "kind": "bevel",
+        "description": "Support rib edge",
+        "region": {
+          "x": 0.3333333333333333,
+          "y": 0.6666666666666666,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "rib-positive-x/rib-edge"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r2c1.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "oil-cap",
+        "kind": "ridge",
+        "description": "Brass cup cap and stem",
+        "region": {
+          "x": 0.3333333333333333,
+          "y": 0,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "lubricator-front/oil-cap"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r0c1.png",
+        "confidence": 0.8
+      },
+      {
+        "id": "rear-seam",
+        "kind": "seam",
+        "description": "Rear cylinder lid seam",
+        "region": {
+          "x": 0.6666666666666666,
+          "y": 0,
+          "width": 0.3333333333333333,
+          "height": 0.3333333333333333,
+          "units": "normalized"
+        },
+        "scale": "see owner sizeMm",
+        "affects": "geometry",
+        "mapsTo": {
+          "type": "component.localFeatures",
+          "ref": "rear-cap/rear-seam"
+        },
+        "evidenceRef": "D:/打了个铁/Weapon-Forger-hammer/.img2threejs/power-hammer-v2/detail-inventory/zone-r0c2.png",
+        "confidence": 0.8
+      }
+    ]
+  }
+}

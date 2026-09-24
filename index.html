@@ -11,6 +11,9 @@
       #hud-title { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
       #hud-hint { font-size: 13px; color: #a9b0b5; margin-top: 8px; max-width: 640px; line-height: 1.5; }
       #hud-state { font-size: 12px; color: #d4b77a; margin-top: 8px; max-width: 760px; line-height: 1.5; }
+      #inspection-controls { pointer-events: auto; display: flex; gap: 5px; margin-top: 7px; }
+      #inspection-controls button { min-height: 28px; padding: 4px 9px; color: #d8dcda; background: #252a28; border: 1px solid #59605d; border-radius: 4px; cursor: pointer; }
+      #inspection-controls button[aria-pressed="true"] { border-color: #d5aa62; color: #fff4dc; background: #4b4030; }
       #acceptance-console { position: fixed; left: 12px; top: 12px; bottom: 12px; width: 176px; padding: 12px; box-sizing: border-box; overflow-y: auto; color: #e8e6df; background: rgba(20, 23, 22, 0.94); border: 1px solid #59605d; border-radius: 6px; font-family: system-ui, sans-serif; z-index: 20; }
       #acceptance-console[hidden] { display: none; }
       #acceptance-console h2 { margin: 0 0 10px; font-size: 15px; font-weight: 650; }
@@ -23,19 +26,41 @@
       #acceptance-console select { padding: 6px 8px; text-align: left; }
       #acceptance-reset { margin-top: 12px; }
       body.acceptance-mode #hud { left: 212px; }
+      body.acceptance-mode #game {position:fixed;left:212px;top:168px;width:calc(100% - 212px);height:calc(100% - 168px);}
+      body.acceptance-mode #hud {height:168px;box-sizing:border-box;overflow:auto;background:#151817;}
       [hidden] { display: none !important; }
+      body.hammer-view #game {position:fixed;left:212px;top:112px;width:calc(100% - 212px);height:calc(100% - 284px);}
+      body.hammer-view #hud {left:212px;height:112px;box-sizing:border-box;overflow:auto;}
+      body.hammer-view #materials-controls {display:none;}
+      #hammer-controls {position:fixed;left:212px;right:0;bottom:0;height:172px;overflow:auto;box-sizing:border-box;padding:10px 18px;background:#202624;border-top:1px solid #59605d;color:#e5e9e7;font:14px system-ui,sans-serif;z-index:16;}
+      #hammer-controls button,#hammer-controls select {min-height:32px;padding:5px 10px;background:#333d38;color:#e5e9e7;border:1px solid #727c77;border-radius:4px;font:inherit;cursor:pointer;}
+      #hammer-controls input {width:125px;accent-color:#d5aa62;}
+      #hammer-status {color:#d6c498;font-size:13px;min-height:18px;}
+      /* The powered control panel grows to roughly 297px on desktop once the
+         status, slider, help text, and action row are laid out. Reserve that
+         real height so the canvas never sits underneath its controls. */
+      body.powered-view #game {position:fixed;left:212px;top:128px;width:calc(100% - 212px);height:calc(100% - 425px);}
+      body.powered-view #hud {left:212px;height:128px;box-sizing:border-box;overflow:auto;}
+      body.powered-view #inspection-controls {flex-wrap:wrap;}
+      body.powered-view #materials-controls {display:none;}
+      #powered-controls {position:fixed;left:212px;right:0;bottom:0;min-height:188px;overflow:auto;box-sizing:border-box;padding:10px 18px;background:#202624;border-top:1px solid #59605d;color:#e5e9e7;font:14px system-ui,sans-serif;z-index:16;}
+      #powered-controls button {min-height:34px;padding:6px 12px;background:#435447;color:#f1efe8;border:1px solid #82917f;border-radius:4px;font:inherit;cursor:pointer;}
+      #powered-controls button:disabled {opacity:.45;cursor:default;}
+      #powered-controls input {width:145px;accent-color:#d5aa62;}
+      #powered-controls .cut-row:not(:last-child) {display:grid;grid-template-columns:repeat(2,34px minmax(80px,145px) 58px);gap:8px;}
+      #powered-status {color:#d6c498;font-size:13px;min-height:18px;}
       body.heat-view #game {position:fixed;left:212px;top:108px;width:calc(100% - 212px);height:calc(100% - 200px);}
       body.heat-view #hud {left:212px;height:108px;box-sizing:border-box;overflow:auto;}
       body.heat-view #materials-controls {display:none;}
       #heat-controls {position:fixed;left:212px;right:0;bottom:0;height:92px;box-sizing:border-box;padding:10px 18px;background:#202624;color:#e5e9e7;border-top:1px solid #59605d;font:14px system-ui,sans-serif;z-index:16;}
       #heat-controls button {padding:7px 16px;margin:8px 12px 0 0;border:1px solid #9b8158;border-radius:4px;background:#4b4030;color:#fff4dc;font:inherit;cursor:pointer;}
+      #heat-controls [aria-pressed="false"] {background:#252a28;border-color:#727c77;}
       #cut-controls {position:fixed;left:212px;right:0;bottom:0;min-height:148px;box-sizing:border-box;padding:12px 18px;background:#202624;border-top:1px solid #59605d;color:#e5e9e7;font:14px system-ui,sans-serif;z-index:16;}
       #cut-controls button,#cut-controls select {min-height:34px;padding:6px 12px;background:#333d38;color:#e5e9e7;border:1px solid #727c77;border-radius:4px;font:inherit;cursor:pointer;}
       #cut-controls button:disabled {opacity:0.4;cursor:default;}
       #cut-confirm {background:#596b4b!important;}
       .cut-row {display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0;}
       #cut-status {color:#d6c498;font-size:13px;}
-      #cut-angle {width:170px;}
       body.cut-view #game {position:fixed;left:212px;top:112px;width:calc(100% - 212px);height:calc(100% - 282px);}
       body.cut-view #hud {left:212px;height:112px;box-sizing:border-box;overflow:auto;}
       body.cut-view #materials-controls {display:none;}
@@ -68,6 +93,28 @@
         #cut-controls {max-height:225px;overflow:auto;}
         body.heat-view #game {left:164px;width:calc(100% - 164px);}
         body.heat-view #hud,#heat-controls {left:164px;}
+        body.hammer-view #game {left:164px;width:calc(100% - 164px);height:calc(100% - 322px);}
+        body.hammer-view #hud,#hammer-controls {left:164px;}
+        #hammer-controls {height:210px;padding:8px;}
+        body.powered-view #game {left:164px;width:calc(100% - 164px);height:calc(100% - 368px);}
+        body.powered-view #hud,#powered-controls {left:164px;}
+        #powered-controls {height:240px;padding:8px;}
+        #powered-controls .cut-row:not(:last-child) {grid-template-columns:34px minmax(60px,1fr) 54px;}
+        #powered-controls input {width:100%;min-width:0;margin:0;}
+      }
+      @media (max-width:760px) {
+        body.acceptance-mode #acceptance-console {width:96px;left:4px;padding:5px;}
+        body.acceptance-mode #acceptance-console h2 {font-size:12px;}
+        body.acceptance-mode #acceptance-console button {font-size:12px;padding:5px 2px;}
+        body.acceptance-mode #hud {left:104px;}
+        body.acceptance-mode #hud-title {font-size:15px;}
+        body.acceptance-mode #game {left:104px;top:190px;width:calc(100% - 104px);height:calc(100% - 190px);}
+        body.acceptance-mode #hud {height:190px;}
+        #hammer-controls,#powered-controls,#heat-controls,#cut-controls,#materials-controls {left:104px;}
+        #heat-controls {height:140px;overflow:auto;}
+        body.heat-view #game {height:calc(100% - 248px);}
+        body.hammer-view #game {height:calc(100% - 400px);}
+        body.powered-view #game {height:calc(100% - 430px);}
       }
     </style>
   </head>
@@ -81,6 +128,8 @@
         <button type="button" data-acceptance-target="weld">3. 焊合</button>
         <button type="button" data-acceptance-target="heat">4. 加热</button>
         <button type="button" data-acceptance-target="hammer">5. 锤击</button>
+        <button type="button" data-acceptance-target="power">5A. 动力锤</button>
+        <button type="button" data-acceptance-target="press">5B. 压力机</button>
         <button type="button" data-acceptance-target="quench">6. 淬火</button>
         <button type="button" data-acceptance-target="temper">7. 回火</button>
         <button type="button" data-acceptance-target="grind">8. 研磨</button>
@@ -96,6 +145,13 @@
       <div id="hud-title"></div>
       <div id="hud-hint"></div>
       <div id="hud-state" aria-live="polite"></div>
+      <div id="inspection-controls" aria-label="工件检视角度">
+        <button type="button" data-inspection-view="default">操作视角</button>
+        <button type="button" data-inspection-view="front">前视</button>
+        <button type="button" data-inspection-view="side">侧视</button>
+        <button type="button" data-inspection-view="top">俯视</button>
+        <button id="power-machine-view" type="button" data-inspection-view="machine" hidden>设备</button>
+      </div>
     </div>
     <section id="materials-controls" aria-label="选料与当前工件" hidden>
       <strong id="material-name">材料来源</strong>
@@ -115,6 +171,7 @@
         <label for="workpiece-station">工位</label>
         <select id="workpiece-station">
           <option value="furnace">加热</option><option value="anvil">锤击</option>
+          <option value="power">动力锤</option><option value="press">压力机</option>
           <option value="cut">切割</option><option value="weld">焊合</option>
           <option value="quench-water">水淬</option><option value="quench-oil">油淬</option>
           <option value="temper">回火</option><option value="grind">研磨</option>
@@ -125,10 +182,9 @@
     <section id="cut-controls" aria-label="圆锯切割操作" hidden>
       <div id="cut-status" role="status">拖动金属摆放到锯片下方</div>
       <div class="cut-row">
-        <label for="cut-angle">平面旋转</label><input id="cut-angle" type="range" min="-180" max="180" step="1" value="0" />
-        <output id="cut-angle-label" for="cut-angle">0°</output>
         <button id="cut-center" type="button">重新摆正</button>
         <button id="cut-confirm" type="button" disabled>确认切割</button>
+        <span>Shift＋左键平移 · Q/E 绕 Y · A/D 绕 Z · W/S 绕 X</span>
       </div>
       <div class="cut-row">
         <label for="cut-piece">加工对象</label><select id="cut-piece"></select>
@@ -140,8 +196,36 @@
     </section>
     <section id="heat-controls" aria-label="加热操作" hidden>
       <div id="heat-status" role="status"></div>
+      <button type="button" data-furnace-mode="furnace" aria-pressed="true">加热</button>
+      <button type="button" data-furnace-mode="temper" aria-pressed="false">回火</button>
       <button id="heat-toggle" type="button">送入加热</button>
       <button id="heat-overview" type="button">工坊总览</button>
+    </section>
+    <section id="hammer-controls" aria-label="锤击操作" hidden>
+      <div id="hammer-status" role="status">移动指针瞄准金属，单击落锤；滚轮调整力度。</div>
+      <div class="cut-row">
+        <label for="hammer-force">力度</label><input id="hammer-force" type="range" min="10" max="100" step="5" value="55" /><output id="hammer-force-label">55%</output>
+        <button id="hammer-center" type="button">重新摆正</button>
+      </div>
+      <div class="cut-row">
+        <label for="hammer-piece">加工对象</label><select id="hammer-piece"></select>
+        <button id="hammer-overview" type="button">工坊总览</button>
+        <span>左键落锤 · W 前送 · S 回收 · Q/E 绕 Y · A/D 沿工件长轴翻转</span>
+      </div>
+    </section>
+    <section id="powered-controls" aria-label="动力锻造操作" hidden>
+      <div id="powered-status" role="status"></div>
+      <div class="cut-row">
+        <label for="powered-force">载荷</label><input id="powered-force" type="range" min="15" max="90" step="5" value="45" /><output id="powered-force-label">45%</output>
+      </div>
+      <div class="cut-row">
+        <span>W/S 前后送料 · A/D 左右平移 · Q/E 绕工件长轴翻转</span>
+      </div>
+      <div class="cut-row">
+        <button id="powered-run" type="button">启动动力锤</button>
+        <button id="powered-center" type="button">工件居中</button>
+        <button id="powered-overview" type="button">工坊总览</button>
+      </div>
     </section>
     <script type="module" src="/src/entry/browser.ts"></script>
   </body>

@@ -1,0 +1,87 @@
+{
+  "ok": true,
+  "verdict": "pass",
+  "confidence": 0.751,
+  "estimatedFidelity": 0.751,
+  "targetThreshold": 0.7,
+  "materialId": "abrasive",
+  "sourceImage": "D:\\打了个铁\\Weapon-Forger-hammer\\artifacts\\grinder-reference\\abrasive.png",
+  "outDir": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\abrasive",
+  "palette": [
+    "#763E34",
+    "#6D352E",
+    "#81473A",
+    "#622D28",
+    "#925545"
+  ],
+  "maps": {
+    "albedo": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\abrasive\\abrasive_albedo.png",
+      "url": "abrasive_albedo.png",
+      "channel": "albedo",
+      "source": "reference-pixel-extraction"
+    },
+    "roughness": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\abrasive\\abrasive_roughness.png",
+      "url": "abrasive_roughness.png",
+      "channel": "roughness",
+      "source": "reference-pixel-extraction"
+    },
+    "height": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\abrasive\\abrasive_height.png",
+      "url": "abrasive_height.png",
+      "channel": "height",
+      "source": "reference-pixel-extraction"
+    },
+    "normal": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\abrasive\\abrasive_normal.png",
+      "url": "abrasive_normal.png",
+      "channel": "normal",
+      "source": "reference-pixel-extraction"
+    },
+    "ao": {
+      "path": "D:\\打了个铁\\Weapon-Forger-hammer\\public\\grinder\\abrasive\\abrasive_ao.png",
+      "url": "abrasive_ao.png",
+      "channel": "ao",
+      "source": "reference-pixel-extraction"
+    }
+  },
+  "diagnostics": {
+    "sourceWidth": 37,
+    "sourceHeight": 220,
+    "mapSize": 1024,
+    "cropBBoxPixels": {
+      "x": 0,
+      "y": 0,
+      "width": 37,
+      "height": 220
+    },
+    "mask": {
+      "backgroundColor": "#733A31",
+      "backgroundNoise": 20.1,
+      "transparentPixelFraction": 0.0,
+      "foregroundCoverage": 1.0
+    },
+    "mapStats": {
+      "valueRange": 0.1528,
+      "heightP90Gradient": 0.15386,
+      "roughnessBase": 0.859,
+      "roughnessVariation": 0.161,
+      "normalStrength": 0.337,
+      "blurRadius": 21
+    },
+    "palette": [
+      "#763E34",
+      "#6D352E",
+      "#81473A",
+      "#622D28",
+      "#925545"
+    ]
+  },
+  "warnings": [
+    "image is not clearly isolated from background; using most pixels as material evidence",
+    "object/background separation is weak",
+    "low value range weakens height/roughness inference"
+  ],
+  "limitation": "single-image PBR extraction is an estimate; 70%+ extraction confidence still needs render screenshot review"
+}
