@@ -375,3 +375,11 @@ Next: verify the restored dual-furnace layout and narrow camera framing, then ru
 - Updated the stale browser paths to use the current W/S feed contract and explicit support-boundary distance. No force threshold or material yield rule was lowered to make a tilted or unsupported workpiece deform.
 - Verification: `npm run test:e2e -- tests/e2e/powered-forging.spec.ts --workers=1` passed 3/3; `npm run test:e2e -- tests/e2e/power-hammer.spec.ts --workers=1` passed 4/4; full unit tests passed 37 files / 207 tests; typecheck, governance, both builds and `git diff --check` passed. The 4199 author page should now be reloaded after the dev server restart.
 - Remaining author review: inspect the pressure machine's integrated early-industrial model, continuous close/load/release feel, and whether the reduced-detail appearance is acceptable. Img2threejs state remains an honest active evidence record with the earlier blockout Tier-1 failure; this is not being relabeled as a final visual pass. Full crafting-chain regression remains intentionally unrun.
+
+## 2026-09-24 仓库整理与当前体验基线
+
+- 作者要求当前体验内容完整进入 main，再进入手感、美术打磨。5173 的 Vite 确认来自 Weapon-Forger-hammer，main@f37effe，代码已完整收录，无需再次合并旧分支。
+- 文件树核对：30db90c = b14155d；d2a08c9 = 8fea9a6。选料、基线属于 squash 后旧分支残留；旧几何由 f752faf 修复接续，不能回退到旧有限切割算法。详情见 docs/REPOSITORY_BASELINE.md。
+- 旧 dsh 目录 8 个未提交文件、governance 目录 1 个未提交文件原地保留，不参与当前体验。没有删除分支/工作目录，也没有改写历史。
+- 本轮未修改运行代码，完整保留当前体验版本。npm run check 通过：治理、类型、37 文件 / 208 单测、Web 和微信构建；Web 包体积警告仍存在。本轮未重新跑浏览器体验，遵循作者自行体验要求；之前 1280px 布局失败和严格响应门槛失败仍未解决，不将本次归档称为全量玩法通过。
+- 下一阶段已获方向授权：连续移动响应与局部坐标、布局与接触可读性优先，之后统一模型/材质/光影/音效。作者提供体验判断，自动检查不能代替。
