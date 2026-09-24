@@ -32,9 +32,10 @@ describe("img2threejs power hammer integration",()=>{
     expect(new Box3().setFromObject(asset.upper).min.y).toBeCloseTo(lower.max.y);
     expect(new Box3().setFromObject(meshes["front-cylinder"])).toEqual(cylinderBefore);
   });
-  it("does not let the pressure-machine picking proxy erase shared steel",()=>{
+  it("keeps real pressure tooling and shared steel visible",()=>{
     const kit=new WorkshopModelKit(),asset=createPowerHammer(kit),press=forgingPressAsset(kit);
-    expect(press.contact!.material.opacity).toBe(0);
+    expect(press.contact!.material.opacity).toBe(1);
+    expect(press.contact!.material).not.toBe(kit.materials.steel);
     expect(kit.materials.steel.opacity).toBe(1);
     expect(asset.contact.material.opacity).toBe(1);
     expect(asset.upper.material.opacity).toBe(1);
@@ -48,6 +49,18 @@ describe("img2threejs power hammer integration",()=>{
     expect(item.canPlace(snapshot,{...HAMMER_HOME,z:-600})).toBe(false);
     item.update(snapshot,{...HAMMER_HOME,z:100});
     expect(item.contact).toBeNull();expect(item.preview.visible).toBe(false);
+    item.dispose();
+  });
+  it("keeps the rendered surface on the same yaw and long-axis roll as physics",()=>{
+    const item=new PowerHammerWorkpiece(),snapshot=createForgeSnapshot(createForgeState());
+    item.update(snapshot,HAMMER_HOME);
+    item.update(snapshot,{...HAMMER_HOME,yaw:0.7,roll:0.35});
+    item.group.updateMatrixWorld(true);
+    const position=item.item.geometry.getAttribute("position");
+    const rendered=item.item.localToWorld(new Vector3().fromBufferAttribute(position,0));
+    const surfacePoint=item.surface[0]!.points[0]!;
+    const expected=item.group.localToWorld(new Vector3(surfacePoint.x,surfacePoint.y,surfacePoint.z));
+    expect(rendered.distanceTo(expected)).toBeLessThan(1e-6);
     item.dispose();
   });
 });

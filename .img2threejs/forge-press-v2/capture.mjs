@@ -1,0 +1,38 @@
+import { chromium } from '@playwright/test';
+import fs from 'node:fs';
+import { createHash } from 'node:crypto';
+import { PNG } from 'pngjs';
+const label=process.argv[2]??'blockout',dir='.img2threejs/forge-press-v2';
+const browser=await chromium.launch({headless:true});
+const page=await browser.newPage({viewport:{width:1280,height:900}});
+const errors=[];page.on('pageerror',e=>errors.push(String(e)));
+await page.goto('http://127.0.0.1:4199/'+dir+'/preview/index.html');
+await page.waitForFunction(()=>window.pressReview);
+const shots=[];
+for(const view of ['reference','front','right','rear','left']){
+ await page.evaluate(async v=>{window.pressReview.view(v);await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));},view);
+ await page.screenshot({path:`${dir}/preview/${label}-${view}.png`});
+ const png=PNG.sync.read(fs.readFileSync(`${dir}/preview/${label}-${view}.png`));
+ let nonBackground=0;for(let i=0;i<png.data.length;i+=4)if(Math.max(...png.data.subarray(i,i+3))-Math.min(...png.data.subarray(i,i+3))>12||png.data[i]<170)nonBackground++;
+ shots.push({view,foregroundPixels:nonBackground,totalPixels:png.width*png.height});
+}
+await page.evaluate(()=>window.pressReview.view('reference'));
+const opened=await page.evaluate(()=>window.pressReview.inspect());
+await page.getByRole('slider',{name:'Stroke'}).fill('120');
+await page.screenshot({path:`${dir}/preview/${label}-closed.png`});
+const closed=await page.evaluate(()=>window.pressReview.inspect());
+await page.getByRole('slider',{name:'Stroke'}).fill('0');
+await page.setViewportSize({width:390,height:844});
+await page.screenshot({path:`${dir}/preview/${label}-mobile.png`});
+await page.getByRole('checkbox',{name:'Cycle'}).check();
+const motionA=await page.evaluate(()=>window.pressReview.inspect().ramY);
+await page.waitForTimeout(150);
+const motionB=await page.evaluate(()=>window.pressReview.inspect().ramY);
+await page.getByRole('checkbox',{name:'Cycle'}).uncheck();
+const meshes=await page.evaluate(()=>{const {asset}=window.pressReview;asset.ram.position.y=0;asset.root.updateMatrixWorld(true);return Object.entries(asset.root.userData.referenceMeshes).map(([id,m])=>({id,name:id,vertices:Array.from(m.geometry.attributes.position.array),indices:m.geometry.index?Array.from(m.geometry.index.array):null,matrixWorld:m.matrixWorld.toArray()}));});
+fs.writeFileSync(`${dir}/${label}-meshes.json`,JSON.stringify({meshes}));
+const source=fs.readFileSync('src/render/forge-press-model.ts');
+fs.writeFileSync(`${dir}/${label}-source.ts`,source);
+const result={label,sourceSha256:createHash('sha256').update(source).digest('hex'),opened,closed,motion:{a:motionA,b:motionB,changed:motionA!==motionB},shots,errors};
+fs.writeFileSync(`${dir}/${label}-capture.json`,JSON.stringify(result,null,2)+'\n');
+console.log(JSON.stringify(result));await browser.close();

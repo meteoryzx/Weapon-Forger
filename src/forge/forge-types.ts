@@ -261,7 +261,10 @@ export interface PowerHammerOperation {
   readonly cadenceMs: number;
 }
 
-/** One continuous press cycle: close, load, hold, and release. */
+/** One flat-die cycle. Preview cumulative dwell from the SAME pre-cycle state;
+ * commit only the final result on release. Pressure is rated-force fraction
+ * [0.1, 1], stroke is (0, 24] mm, dwell is [0, 4000] ms; zero dwell is unchanged.
+ */
 export interface ForgePressOperation {
   readonly kind: "forge-press";
   readonly pose: HammerPose;

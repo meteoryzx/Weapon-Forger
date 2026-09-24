@@ -3,6 +3,7 @@ import { QUENCH_BODY_SCALE_Y, QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_LAYOU
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { GrinderModel } from "./grinder-model.ts";
 import { createPowerHammer } from "./power-hammer-model.ts";
+import { createForgePress } from "./forge-press-model.ts";
 
 export interface StationAsset { root:Group; contact?:Mesh<BufferGeometry,MeshStandardMaterial>; control?:Mesh<BufferGeometry,MeshStandardMaterial> }
 export interface PoweredForgingAsset extends StationAsset {
@@ -54,30 +55,7 @@ export function powerHammerAsset(k:WorkshopModelKit):PoweredForgingAsset {
 }
 
 export function forgingPressAsset(k:WorkshopModelKit):PoweredForgingAsset {
-  const root=new Group();root.name="forging-press-low-poly";
-  k.profile(root,"press-base",[[-470,0],[470,0],[410,170],[-410,170]],650,[0,3,0],"iron");
-  k.box(root,"left-upright",[190,1150,310],[-330,735,40],"iron",10);
-  k.box(root,"right-upright",[190,1150,310],[330,735,40],"iron",10);
-  k.profile(root,"top-housing",[[-470,0],[470,0],[405,330],[-345,410],[345,410]],560,[0,1310,20],"iron");
-  k.box(root,"left-joint-plate",[250,220,36],[-330,1370,-265],"iron",5);
-  k.box(root,"right-joint-plate",[250,220,36],[330,1370,-265],"iron",5);
-  k.box(root,"lower-pedestal",[420,390,380],[0,640,-30],"iron",8);
-  k.box(root,"lower-die",[360,65,300],[0,867.5,-30],"steel",4);
-  for(const x of [-400,400])for(const z of [-250,250])k.cylinder(root,"anchor-bolt",18,34,[x,187,z],"steel","y",6);
-  k.batch(root);
-
-  const ram=new Group();ram.name="forging-press-ram";ram.userData.keepMesh=true;
-  k.cylinder(ram,"press-cylinder",92,360,[0,0,-30],"steel","y",10);
-  k.box(ram,"upper-platen",[430,105,350],[0,-235,-30],"iron",6);
-  k.box(ram,"upper-die",[340,75,285],[0,-325,-30],"steel",4);
-  const openRamY=1460*WORKSHOP_UNITS_PER_MM,closedRamY=1260*WORKSHOP_UNITS_PER_MM;ram.position.y=openRamY;root.add(ram);
-
-  const control=k.cylinder(root,"manual-pressure-switch",17,260,[380,710,-160],"steel","y",8);
-  control.userData.keepMesh=true;control.rotation.z=-0.55;
-  const contact=k.box(root,"press-contact",[390,18,330],[0,905,-30],"steel",2);
-  contact.material=contact.material.clone();
-  contact.userData.keepMesh=true;contact.material.transparent=true;contact.material.opacity=0;contact.material.depthWrite=false;
-  return {root,ram,control,contact,openRamY,closedRamY};
+  return createForgePress(k);
 }
 export function roomAsset(k:WorkshopModelKit) {
   const root=new Group();root.name="continuous-workshop";

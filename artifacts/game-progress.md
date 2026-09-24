@@ -1,5 +1,29 @@
 # Workshop reconstruction
 
+## 2026-09-23 pressure experience calibration and placement response
+
+- Resumed the account handoff from the existing dirty checkout. The previous 600 kN calibration produced only about 0.016 mm compression at 65% and 0.057 mm at 70% on the hot spring-steel acceptance baseline, so the player could not read the result in the scene even though the rule tests changed geometry.
+- Calibrated `PRESS_RULES.maximumForceN` to 800 kN. The same baseline now compresses about 0.33 mm at 65% and 0.47 mm at 70% after 4 s, while low load and cold material remain below yield and unchanged. Added regressions for the visible 70% response and the below-yield path.
+- Restored direct placement feedback for both powered machines: left drag translates the billet along the real table plane, right drag rolls it, and collision/path checks still reject obstructed poses. Added desktop/narrow Playwright coverage for real drag input.
+- Fixed powered W/S/A/D input backlog: placement uses cached conservative bounds, stationary machine envelopes are cached, and the latest pose is applied on the next frame with a short coalesced render delay so keyup and held input are not blocked by WebGL synchronization. The focused browser timing regression now records four keys below 80 ms while contact remains supported.
+- Evidence: focused press rules 33/33; powered browser suite 8/8 including the <80 ms input regression; typecheck, governance, Web build and `git diff --check` pass. The full serial unit suite is 206/207 because `tests/forge/hammer-support.test.ts` exceeds its 5 s per-test limit under the full parallel run; the isolated case passes in about 2 s. Web retains the existing >500 kB chunk warning.
+- Author experience remains pending. Open `http://127.0.0.1:4199/?accept=press` and hold `Space` or hold the `下压` button at 65–70%; use left drag to move the billet and right drag to roll it. The current slice still uses a flat platen; V-shaped tooling remains a separate geometry/physics contract.
+
+## 2026-09-21 account handoff, not final acceptance
+
+- User requests moving development to another Codex account. Implementation stopped; preserve the dirty local checkout on `feat/R1-shaping-flow`, HEAD `2cf5e5c`, ahead one. No new commit/push.
+- Current authority for continuation: `docs/CODEX_ACCOUNT_HANDOFF.md`. It records accepted references, working controls/model/core, exact files, verification and finish order.
+- Important unresolved discrepancy: pressure core still has temporary maximum force 1 MN; lead intended restoration to600 kN with UI65% default and70% test. Do not lower material yield thresholds to force a50% deformation test. Redundant cross-clone JSON cache remains. Current passing checks do not resolve this calibration discrepancy.
+- Full serial unit run completed at handoff:36 files/205 tests pass. Press desktop/narrow/safety E2E3 pass; prior shared power E2E4 pass. Current builds/governance and final model pipeline checklist remain incomplete. Author experience has not been accepted.
+- Vite4199 returned HTTP200. Reference images copied into repository; no temporary attachment dependency. Resume from this checkpoint, not older image-generation blockers below.
+
+## 2026-09-21 resumed scope: both machines to experience, new images for press only
+
+- Author supersedes the end-of-day stop: continue power hammer and hydraulic press through prompts, reference images, img2threejs modeling, integration and verification to author experience. Then clarifies that power-hammer references already exist; reuse them and generate only new pressure-machine references.
+- Preserve Git checkpoint `2cf5e5c`, accepted power controls and faster nominal cadence. Do not regenerate the power references, reuse the rejected press as accepted art, or implement a press as repeated hammering. This expands authorization beyond the prior power-only stop; no new Git push or scheduled run is implied.
+- Prepared `assets/concepts/forge-press-v2-reference-prompt.md`: matching early-industrial, real-proportion low-poly hydraulic frame, guided platen, replaceable flat tool, readable open work area; main view followed by a consistent three-view sheet. Approximate image proportions are not measured engineering dimensions. V-shaped tools/multilayer joining need distinct future geometry/physics contracts, not a fake fusion result.
+- Image generation blocker: no built-in image generation tool is exposed in this session. Asked whether author authorizes image API fallback (local key, billable) or will return externally generated images. No image API request, new generated image, model replacement or gameplay edit has been made for this resumed scope yet.
+
 ## 2026-09-21 end-of-day Git checkpoint
 
 - Author requests saving the current version to Git and continuing tomorrow. Archive the complete current power-hammer implementation, reference assets, img2threejs provenance/failed-gate history, tests and art decisions on `feat/R1-shaping-flow`. Local commit only; no push or automatic continuation scheduled.
@@ -285,3 +309,69 @@ Next: verify the restored dual-furnace layout and narrow camera framing, then ru
 - Camera correction: the materials view now approaches from the aisle side so the saw station is behind the camera; quench close-up hides unrelated close-up props and uses a basin-wide frame so the reserved power hammer cannot occlude the bath. Desktop screenshots for both acceptance routes were checked.
 - Camera alignment update: selection and welding now share a centered operator-facing tabletop frame with a downward view; quench uses a centered front view of the basin at closer inspection distance. Eight isolated acceptance routes passed after the camera change.
 - Near-field correction: selection and hammer cameras move closer to the active material/anvil area. The materials origin is shifted 20 scene units away from the left room boundary, with a screenshot check confirming visible clearance.
+## 2026-09-21 pressure handoff continuation
+
+- Restored the hydraulic press rating from the temporary `1,000,000 N` value to the intended `600,000 N`; 50% remains below the spring-steel yield threshold, while the accepted 65% path loads the hot baseline.
+- Removed the redundant whole-workpiece JSON cross-clone press-path cache. Identity-based WeakMap caching remains; cloned baselines now prepare their own deterministic path.
+- Focused verification: 5 Vitest files / 43 tests passed, governance and TypeScript checks passed, and the powered-forging browser path passed at desktop and narrow widths plus early-release/empty-load protection (3 tests).
+- Existing pressure model evidence was retained without regeneration. Final front/reference captures and procedural source are present; the img2threejs state records the earlier blockout gate stop honestly. Projection and texture-material steps were skipped with reasons because this asset uses an existing procedural hard-surface build.
+- Author review URL: `http://127.0.0.1:4199/?accept=press`. Interactive experience review is now handed to the author; no complete crafting regression was run.
+
+## 2026-09-21 unified workpiece pose controls
+
+- Cut, hand hammer, power hammer, hydraulic press and grinding now share the same pose contract: left drag translates on the station table; right drag or Shift-drag rotates around the selected axis; arrow keys translate; Q/E and A/D rotate; the shared axis selector and center button reset/choose the pose.
+- Added the shared `pose-controls` bar and synchronized its axis with the legacy hammer/powered selectors, preserving existing controls while making the gesture semantics consistent across stations.
+- Focused validation: TypeScript check passed; 3 affected Vitest files / 36 tests passed; the narrow pressure browser path passed after the overlay was made transparent to preserve the existing canvas pixel gate.
+- Author should test the five stations manually; no complete crafting regression was run.
+
+## 2026-09-21 author-directed station movement
+
+- Replaced the temporary shared axis-selector/drag system with station-specific first-principles controls. Cut uses Shift+left planar placement and Q/E (Y), A/D (Z), W/S (X) rotations; ordinary left click remains selection/confirmation.
+- Hand hammer now keeps the pictured clamped orientation: W/S feed along the fixed longitudinal direction and A/D roll around the workpiece long axis. Power hammer and press use the operator camera's horizontal forward vector for W/S feed and the same A/D roll.
+- Grinding keeps ordinary left hold for material removal, Shift+left for planar placement, W/S for belt-normal feed, right drag for two-angle contact orientation, and A/D for longitudinal roll.
+- Removed the old movement sliders, rotation-axis selectors, free mouse dragging for hammer/powered equipment, and the generic pose bar so they cannot compete with the new contract.
+- Cut preview/render now carry X/Y/Z pose angles and re-seat the visible billet on the tabletop after rotation. The core cut path remains the existing finite sweep approximation and needs a later 3D swept-plane upgrade before arbitrary tilted cuts can be treated as exact physics.
+## 2026-09-22 author-approved workshop layout and +X operation axis
+
+- Author fixed the scene contract: selection upper-left, saw middle-left, grinder lower-left, anvil center, power hammer right-middle, hydraulic press lower-right, quench rear-center, and heating/tempering furnaces rear-right with the tempering furnace kept clear of the power hammer.
+- The authored world frame is X right, Y up, Z depth. The operator-facing machine feed axis is world +X; the power hammer and press roots now face the same side and map their local pose feed to that shared world direction.
+- The press is yawed +90 degrees at the render root so its open work area is visible from the left operator station. The press is moved forward in Z to keep a real gap from the power hammer; the furnace pair remains against the back wall.
+- Close-up power/press cameras now stand outside the machine mouth and look along +X. The operation camera contract treats occlusion of the billet/contact area by a rear machine as a layout or camera failure.
+- Focused evidence: typecheck passed; power/press W/S changed local feed pose from z=0 to z=8 while the rendered operation camera remained on the +X axis; overview and both operation captures were checked. Full crafting regression was not run.
+
+## 2026-09-22 author review: machine clearance and near-field operation views
+
+- Moved the power hammer origin from X=120 to X=105 in the authored world frame, toward world `-X`, creating more clearance from the east/right wall while retaining separation from the anvil and press. The billet anchor and camera target derive from the same layout origin.
+- Tightened the default operation camera for the power hammer and press to the near-field scale already used by grinding. Their working faces and billet contact area are now readable at entry, while the machine body remains part of the frame.
+- Tightened the cutting station camera to the same near-field family so the saw blade, table and workpiece are visible together.
+- Verified the grinder's actual authored bounds in the workshop geometry test: it remains in the lower-left station, within its footprint and room interior, without overlapping a neighboring station.
+- Browser visual review covered the overview, power hammer, press, grinder and cutting station views on the running 4199 page. The latest page is left at `http://127.0.0.1:4199/?accept=power` for author review.
+
+## 2026-09-22 layout inspection overview
+
+- Re-authored `CAMERA_FRAMES.overview` as a near-vertical plan view at `[0, 640, 30]` aimed at `[0, 0, -30]`. The full room now fits in one frame without the foreground power hammer hiding the rear furnaces or lower grinder.
+- The visible overview was checked in the browser after the camera change. All planned stations are simultaneously readable: materials upper-left, saw middle-left, grinder lower-left, anvil center, power hammer right-middle, press lower-right, quench basins rear-center, and the two furnaces rear-right.
+
+## 2026-09-22 author-directed facing and aisle spacing
+
+- Author clarified the power-hammer contract: rotate the machine model 180 degrees, but keep the player's world-reference operation view facing world +X/right. The power-hammer root is now -90 degrees Y; the operation camera remains on its world -X side. Pressure-press operation remains on world -X, facing the right wall.
+- Rotated the grinder presentation by 180 degrees and moved its operation camera to the opposite side. The belt contact normal, support placement and feed clearance were updated together; W feeds into the belt and S retracts.
+- Shifted the saw forward from Z=0 to Z=35, the grinder from Z=125 to Z=155, and the anvil left from X=0 to X=-12, opening space below the materials bench and to the left of the hammer.
+- Station-local/world offset conversion now derives the visible billet anchors from each authored yaw, so the turned power-hammer billet stays at its die rather than the old world anchor.
+- Verification: TypeScript check and diff check passed; focused layout/render tests passed (4 files / 13 tests); power-hammer real-input browser checks passed at 1280px and 390px (2 tests); rotated-grinder material-removal browser regression passed (1 test). The power-hammer operation view is open for author review.
+
+## 2026-09-22 layout-boundary continuation
+
+- Corrected the powered-station pose mapping for pointer placement: world tabletop deltas are now converted through each station's +90 degree yaw before entering the local hammer frame. W/S remains the authored feed path and mouse placement no longer treats world X/Z as unrotated local coordinates.
+- Measured the actual rotated station meshes instead of relying on pre-yaw footprints. The power hammer reservation is now `[124, 84]`; the pressure press reservation remains `[80, 82]`. The real AABB test now passes without masking intersections.
+- A second layout issue exposed by the measurement pass was fixed: the water and oil basins were microscopically overlapping the furnace envelope. The water basin moved to X=-11 and the oil basin to X=24, leaving a real measured gap before the furnace while keeping both quench stations distinct.
+- Fixed a genuine desktop narrow-frame issue in the powered view: the control panel's rendered height exceeded the old canvas reservation, so the lower controls overlapped the canvas. Desktop powered canvas space now reserves the observed panel height; the 1280px power-hammer layout regression passes and the prior 390px power-hammer layout path remains passing.
+- Verification: focused geometry tests 3 files / 7 tests passed, `npm run typecheck` and `git diff --check` passed, and the desktop power-hammer browser case passed. The full powered browser suites still contain stale expectations: the press test expects an older wheel direction/default-load contract, and the power empty-strike test still uses deprecated arrow-key placement. These are not being reported as complete until their contracts are deliberately reconciled. Full crafting regression remains unrun.
+
+## 2026-09-22 powered-equipment checkpoint continuation
+
+- Reconciled the powered-equipment input contract instead of weakening the press response: the pressure machine now starts at the intended 65% load, one upward wheel step reaches 70%, and the center button restores the station's feed-aligned pose.
+- Confirmed the physical consequence of partial support: after a small roll only part of the lower contact bears on the die, so 70% can remain below yield; the basic deformation regression recenters first, while the empty-load regression moves beyond the finite support until the contact preview disappears.
+- Updated the stale browser paths to use the current W/S feed contract and explicit support-boundary distance. No force threshold or material yield rule was lowered to make a tilted or unsupported workpiece deform.
+- Verification: `npm run test:e2e -- tests/e2e/powered-forging.spec.ts --workers=1` passed 3/3; `npm run test:e2e -- tests/e2e/power-hammer.spec.ts --workers=1` passed 4/4; full unit tests passed 37 files / 207 tests; typecheck, governance, both builds and `git diff --check` passed. The 4199 author page should now be reloaded after the dev server restart.
+- Remaining author review: inspect the pressure machine's integrated early-industrial model, continuous close/load/release feel, and whether the reduced-detail appearance is acceptable. Img2threejs state remains an honest active evidence record with the earlier blockout Tier-1 failure; this is not being relabeled as a final visual pass. Full crafting-chain regression remains intentionally unrun.

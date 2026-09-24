@@ -1,5 +1,5 @@
 import { BoxGeometry, BufferGeometry, CylinderGeometry, DoubleSide, Group, Line, LineBasicMaterial,
-  Mesh, MeshStandardMaterial, Raycaster, Vector3 } from "three";
+  Mesh, MeshStandardMaterial, Raycaster, Vector3, Euler, Quaternion } from "three";
 import type { ForgeSnapshot, ForgeSnapshotWorkpiece } from "../forge/index.ts";
 import { CUT_TABLE, SAW_PATH, cutBounds, type CutPose } from "../app/cut-placement.ts";
 import { WORKSHOP_LAYOUT, WORKSHOP_SURFACE_Y } from "../app/workshop-scale.ts";
@@ -8,8 +8,10 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 export const SAW_ORIGIN = new Vector3(...WORKSHOP_LAYOUT.cut!.origin);
 export function sawCameraFrame(aspect: number) {
   const target = new Vector3(0, WORKSHOP_SURFACE_Y + 4, 0).add(SAW_ORIGIN);
-  const position = new Vector3(92, 100, 0).add(SAW_ORIGIN);
-  position.sub(target).multiplyScalar(Math.max(1, 1.05 / aspect)).add(target);
+  // Keep the blade and the workpiece at the same readable near-field scale as
+  // the grinder operation view, without cropping the cantilever.
+  const position = new Vector3(58, 58, 0).add(SAW_ORIGIN);
+  position.sub(target).multiplyScalar(Math.max(1, 0.72 / aspect)).add(target);
   return { position: position.toArray(), target: target.toArray() };
 }
 
@@ -78,7 +80,18 @@ export class SawStationView {
     this.item.scale.setScalar(scale);
     this.item.position.set(-(b.minX+b.maxX)/2*scale,-b.minY*scale,-(b.minZ+b.maxZ)/2*scale);
     this.stock.position.set(pose.x,CUT_TABLE.surface+0.05,pose.z);
-    this.stock.rotation.y=pose.angle;
+    this.stock.quaternion.setFromEuler(new Euler(pose.pitch,pose.angle,pose.roll,"YXZ"));
+    // Keep the lowest occupied vertex on the table after the three-axis
+    // rotation.  The visible pose may tilt, but it never floats.
+    this.item.updateMatrix();
+    this.stock.updateMatrixWorld(true);
+    const vertices=this.item.geometry.getAttribute("position"), point=new Vector3();
+    let minimum=Infinity;
+    for(let i=0;i<vertices.count;i++) {
+      point.fromBufferAttribute(vertices,i).applyMatrix4(this.item.matrix).applyQuaternion(this.stock.quaternion);
+      minimum=Math.min(minimum,point.y);
+    }
+    if(Number.isFinite(minimum)) this.stock.position.y=CUT_TABLE.surface+0.05-minimum;
     this.guide.geometry.dispose();
     // One finite guide in the blade's YZ plane. Drape it over the actual top
     // surface with a short vertical ray, never draw an infinite screen line.

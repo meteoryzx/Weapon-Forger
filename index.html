@@ -36,8 +36,10 @@
       #hammer-controls button,#hammer-controls select {min-height:32px;padding:5px 10px;background:#333d38;color:#e5e9e7;border:1px solid #727c77;border-radius:4px;font:inherit;cursor:pointer;}
       #hammer-controls input {width:125px;accent-color:#d5aa62;}
       #hammer-status {color:#d6c498;font-size:13px;min-height:18px;}
-      #hammer-mode[aria-pressed="true"] {background:#6b5432;}
-      body.powered-view #game {position:fixed;left:212px;top:128px;width:calc(100% - 212px);height:calc(100% - 316px);}
+      /* The powered control panel grows to roughly 297px on desktop once the
+         status, slider, help text, and action row are laid out. Reserve that
+         real height so the canvas never sits underneath its controls. */
+      body.powered-view #game {position:fixed;left:212px;top:128px;width:calc(100% - 212px);height:calc(100% - 425px);}
       body.powered-view #hud {left:212px;height:128px;box-sizing:border-box;overflow:auto;}
       body.powered-view #inspection-controls {flex-wrap:wrap;}
       body.powered-view #materials-controls {display:none;}
@@ -46,7 +48,6 @@
       #powered-controls button:disabled {opacity:.45;cursor:default;}
       #powered-controls input {width:145px;accent-color:#d5aa62;}
       #powered-controls .cut-row:not(:last-child) {display:grid;grid-template-columns:repeat(2,34px minmax(80px,145px) 58px);gap:8px;}
-      #power-axis-control {grid-column:span 3;}
       #powered-status {color:#d6c498;font-size:13px;min-height:18px;}
       body.heat-view #game {position:fixed;left:212px;top:108px;width:calc(100% - 212px);height:calc(100% - 200px);}
       body.heat-view #hud {left:212px;height:108px;box-sizing:border-box;overflow:auto;}
@@ -60,7 +61,6 @@
       #cut-confirm {background:#596b4b!important;}
       .cut-row {display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:6px 0;}
       #cut-status {color:#d6c498;font-size:13px;}
-      #cut-angle {width:170px;}
       body.cut-view #game {position:fixed;left:212px;top:112px;width:calc(100% - 212px);height:calc(100% - 282px);}
       body.cut-view #hud {left:212px;height:112px;box-sizing:border-box;overflow:auto;}
       body.cut-view #materials-controls {display:none;}
@@ -182,10 +182,9 @@
     <section id="cut-controls" aria-label="圆锯切割操作" hidden>
       <div id="cut-status" role="status">拖动金属摆放到锯片下方</div>
       <div class="cut-row">
-        <label for="cut-angle">平面旋转</label><input id="cut-angle" type="range" min="-180" max="180" step="1" value="0" />
-        <output id="cut-angle-label" for="cut-angle">0°</output>
         <button id="cut-center" type="button">重新摆正</button>
         <button id="cut-confirm" type="button" disabled>确认切割</button>
+        <span>Shift＋左键平移 · Q/E 绕 Y · A/D 绕 Z · W/S 绕 X</span>
       </div>
       <div class="cut-row">
         <label for="cut-piece">加工对象</label><select id="cut-piece"></select>
@@ -206,29 +205,21 @@
       <div id="hammer-status" role="status">移动指针瞄准金属，单击落锤；滚轮调整力度。</div>
       <div class="cut-row">
         <label for="hammer-force">力度</label><input id="hammer-force" type="range" min="10" max="100" step="5" value="55" /><output id="hammer-force-label">55%</output>
-        <button id="hammer-mode" type="button" aria-pressed="false">拖动摆放</button>
         <button id="hammer-center" type="button">重新摆正</button>
-      </div>
-      <div class="cut-row">
-        <label for="hammer-yaw">平面旋转</label><input id="hammer-yaw" type="range" min="-180" max="180" step="1" value="0" /><output id="hammer-yaw-label">0°</output>
-        <label for="hammer-roll">翻滚</label><input id="hammer-roll" type="range" min="-180" max="180" step="1" value="0" /><output id="hammer-roll-label">0°</output>
       </div>
       <div class="cut-row">
         <label for="hammer-piece">加工对象</label><select id="hammer-piece"></select>
         <button id="hammer-overview" type="button">工坊总览</button>
-        <span>Shift＋拖动摆放 · Q/E 旋转 · A/D 翻滚 · 方向键移动</span>
+        <span>左键落锤 · W 前送 · S 回收 · Q/E 绕 Y · A/D 沿工件长轴翻转</span>
       </div>
     </section>
     <section id="powered-controls" aria-label="动力锻造操作" hidden>
       <div id="powered-status" role="status"></div>
       <div class="cut-row">
         <label for="powered-force">载荷</label><input id="powered-force" type="range" min="15" max="90" step="5" value="45" /><output id="powered-force-label">45%</output>
-        <label for="powered-feed">横移</label><input id="powered-feed" type="range" min="-400" max="400" step="1" value="0" /><output id="powered-feed-label">0 mm</output>
       </div>
       <div class="cut-row">
-        <label for="powered-lateral">送进</label><input id="powered-lateral" type="range" min="-300" max="400" step="1" value="0" /><output id="powered-lateral-label">0 mm</output>
-        <label id="powered-cycle-title" for="powered-cycle">保压</label><input id="powered-cycle" type="range" min="1" max="6" step="1" value="3" /><output id="powered-cycle-label">3 秒</output>
-        <label id="power-axis-control">旋转轴 <select id="power-axis"><option value="yaw">Y · 转向</option><option value="roll">X · 翻滚</option></select></label>
+        <span>W/S 前后送料 · A/D 左右平移 · Q/E 绕工件长轴翻转</span>
       </div>
       <div class="cut-row">
         <button id="powered-run" type="button">启动动力锤</button>

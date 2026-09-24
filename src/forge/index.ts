@@ -6,3 +6,4 @@ export * from "./forge-simulation.ts";
 export * from "./forge-types.ts";
 export * from "./workpiece-geometry.ts";
 export * from "./hammer-surface.ts";
+export * from "./press-response.ts";

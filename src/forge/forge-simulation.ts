@@ -6,6 +6,7 @@ import {
   FORGE_STATE_VERSION,
 } from "./forge-rules.ts";
 import { integrateMechanicalResponse } from "./forge-physics.ts";
+import { deformPress } from "./press-response.ts";
 import { applyAbrasiveContact, abrasiveMetrics } from "./abrasive-contact.ts";
 import { cellCorners, cellStretches, deformSurfaceHammer } from "./hammer-surface.ts";
 import {
@@ -231,47 +232,25 @@ export function applyForgeOperation(state: ForgeState, operation: ForgeOperation
       return appendOperation({ ...powered, operations: state.operations }, operation);
     }
     case "forge-press": {
-      if (!Number.isFinite(operation.pressure) || operation.pressure < 0.1 || operation.pressure > 1) {
-        throw new Error("压力机载荷必须在 10%–100% 之间。");
-      }
-      if (!Number.isFinite(operation.strokeMm) || operation.strokeMm <= 0 || operation.strokeMm > 24) {
-        throw new Error("压力机行程无效。");
-      }
-      if (!Number.isFinite(operation.dwellMs) || operation.dwellMs < 0 || operation.dwellMs > 4_000) {
-        throw new Error("压力机保压时间无效。");
-      }
-      // Reuse the proven contact/support/volume-preserving geometry response once,
-      // then retain a slower-load history instead of recording a burst of impacts.
-      const energy = Math.max(0.1, Math.min(0.88,
-        0.12 + operation.pressure * 0.62 + operation.strokeMm / 24 * 0.08 + operation.dwellMs / 4_000 * 0.06));
-      const pressed = applyForgeOperation(state, {
-        kind: "surface-hammer",
-        pose: operation.pose,
-        target: operation.target,
-        energy,
-      });
-      const sections = pressed.workpiece.sections.map((section, sectionIndex) => {
-        const beforeSection = state.workpiece.sections[sectionIndex]!;
-        return {
-          ...section,
-          blocks: section.blocks.map((block, blockIndex) => {
-            const beforeBlock = beforeSection.blocks[blockIndex]!;
-            return {
-              ...block,
-              stress: beforeBlock.stress + (block.stress - beforeBlock.stress) * 0.6,
-              elasticStrain: beforeBlock.elasticStrain + (block.elasticStrain - beforeBlock.elasticStrain) * 0.55,
-              damage: beforeBlock.damage + (block.damage - beforeBlock.damage) * 0.45,
-              integrity: beforeBlock.integrity + (block.integrity - beforeBlock.integrity) * 0.45,
-              cracked: beforeBlock.cracked || (block.cracked && operation.pressure > 0.92),
-            };
-          }),
-        };
-      });
-      return appendOperation({
-        ...pressed,
-        operations: state.operations,
-        workpiece: { ...pressed.workpiece, sections },
-      }, operation);
+      const before = state.workpiece;
+      const result = deformPress(before, operation);
+      if (result.nodes === before.geometry.nodes) return { ...state, operations: [...state.operations,
+        { ...operation, pose: { ...operation.pose }, target: { ...operation.target } }] };
+      const geometry = { ...createStructuredWorkpieceGeometry(before.id, before.geometry.grid, result.nodes, before.sections.length),
+        ...(before.geometry.solids ? { solids: before.geometry.solids } : {}) };
+      const sections = before.sections.map((section, a) => summarizeSection({ ...section, blocks: section.blocks.map(block => {
+        const shape = deriveBlockGeometry(block, a, result.nodes, geometry.grid);
+        const stretches = cellStretches(cellCorners(a, block, geometry), before.geometry.nodes, result.nodes);
+        if (!stretches.some(s => Math.abs(Math.log(s)) > 1e-10)) return shape;
+        const response = integrateMechanicalResponse(block, { length: 1, width: 1, thickness: 1, volume: block.volume },
+          { length: stretches[0]!, width: stretches[1]!, thickness: stretches[2]!, volume: block.volume }, before.material,
+          { strainDriven: true, impactWeight: 1, localisation: Math.min(1, Math.max(0, block.plasticStrain - neighbourPlasticStrain(state, a, block))),
+            thinSectionRisk: Math.max(0, 1 - shape.thickness / FORGE_RULES.simulationCellSize), supportRatio: result.supportRatio });
+        return { ...shape, stress: response.stress, plasticStrain: response.plasticStrain, elasticStrain: response.elasticStrain,
+          mechanicalWorkJ: response.mechanicalWorkJ, damage: response.damage, integrity: response.integrity,
+          cracked: block.cracked || response.integrity <= FORGE_RULES.crackIntegrityThreshold };
+      }) }, a, result.nodes, geometry.grid));
+      return appendOperation({ ...state, workpiece: { ...before, geometry, sections } }, operation);
     }
     case "quench":
       return applyQuench(state, operation);

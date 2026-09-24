@@ -8,9 +8,11 @@ import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { hammerFootprint } from "./hammer-footprint.ts";
 
 export const ANVIL = { surface:WORKSHOP_SURFACE_Y,scale:WORKSHOP_UNITS_PER_MM } as const;
-export function hammerCameraFrame(aspect:number) {
+/** Visual presentation only; the anvil and its support frame stay unrotated. */
+export const HAMMER_PRESENTATION_YAW = Math.PI / 4;
+export function hammerCameraFrame(aspect:number, origin: readonly [number,number,number] = [0,0,0]) {
   const distance=52*Math.max(1,1.05/aspect);
-  return {position:[0,ANVIL.surface+distance*0.58,distance] as const,target:[0,ANVIL.surface+2,0] as const};
+  return {position:[origin[0],ANVIL.surface+distance*0.58,origin[2]+distance] as const,target:[origin[0],ANVIL.surface+2,origin[2]] as const};
 }
 export class HammerStationView {
   readonly group=new Group();
@@ -26,6 +28,7 @@ export class HammerStationView {
   private animating=false;
   private readonly kit=new WorkshopModelKit();
   private energy=HAMMER_RULES.defaultEnergy as number;
+  private displayCenter={x:0,z:0};
 
   constructor() {
     const steel=new MeshStandardMaterial({color:0x434e54,metalness:0.72,roughness:0.5});
@@ -70,9 +73,11 @@ export class HammerStationView {
     this.snapshot=snapshot;
     const frame=hammerFrame(snapshot.geometry,pose);
     this.item.scale.setScalar(ANVIL.scale);
-    this.item.rotation.set(pose.roll,pose.yaw,0,"YXZ");
-    const center=new Vector3(frame.center.x,0,frame.center.z).applyEuler(new Euler(pose.roll,pose.yaw,0,"YXZ"));
+    const displayYaw=pose.yaw+HAMMER_PRESENTATION_YAW;
+    this.item.rotation.set(pose.roll,displayYaw,0,"YXZ");
+    const center=new Vector3(frame.center.x,0,frame.center.z).applyEuler(new Euler(pose.roll,displayYaw,0,"YXZ"));
     this.item.position.set((pose.x-center.x)*ANVIL.scale,ANVIL.surface+(frame.lift-center.y)*ANVIL.scale,(pose.z-center.z)*ANVIL.scale);
+    this.displayCenter={x:pose.x,z:pose.z};
     const appearance=thermalSteelAppearance(snapshot.averageTemperatureC);
     this.item.material.emissive.copy(appearance.emissive);this.item.material.emissiveIntensity=appearance.emissiveIntensity*0.12;
     this.surface=placedHammerSurface(snapshot.geometry,frame);
@@ -87,7 +92,14 @@ export class HammerStationView {
     this.footprint.visible=this.aim!==null;
     if(this.aim){
       const {x,z}=this.aim.point;
-      const position=hammerFootprint(this.surface,x,z).map((v,i)=>v*ANVIL.scale+(i%3===1?ANVIL.surface+0.05:0));
+      const raw=hammerFootprint(this.surface,x,z),position:number[]=new Array(raw.length);
+      const c=Math.cos(HAMMER_PRESENTATION_YAW),s=Math.sin(HAMMER_PRESENTATION_YAW);
+      for(let i=0;i<raw.length;i+=3){
+        const dx=raw[i]!-this.displayCenter.x,dz=raw[i+2]!-this.displayCenter.z;
+        position[i]=(this.displayCenter.x+c*dx+s*dz)*ANVIL.scale;
+        position[i+1]=raw[i+1]! * ANVIL.scale + ANVIL.surface + 0.05;
+        position[i+2]=(this.displayCenter.z-s*dx+c*dz)*ANVIL.scale;
+      }
       this.footprint.geometry.dispose();this.footprint.geometry=new BufferGeometry();
       this.footprint.geometry.setAttribute("position",new Float32BufferAttribute(position,3));
       this.footprint.material.color.set(this.aim.supported?0x9de6c6:0xf49b6b);

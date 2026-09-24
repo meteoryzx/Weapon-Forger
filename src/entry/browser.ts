@@ -7,9 +7,11 @@ import {
   type CutOperation,
   type GrindOperation,
   totalVolume,
+  createForgeSnapshot,
 } from "../forge/index.ts";
 import { GameApplication } from "../app/game-application.ts";
 import { PowerHammerCycle, POWER_CADENCE_MS } from "../app/power-hammer-cycle.ts";
+import { ForgePressCycle } from "../app/forge-press-cycle.ts";
 import type { AbrasiveUpdate } from "../app/grind-update.ts";
 import { MaterialSelection, MATERIAL_RACK_PAGE_SIZE } from "../app/material-selection.ts";
 import { HAMMER_HOME, HAMMER_RULES, hammerFrame, rotateHammerPoint, type ForgePressOperation, type HammerPose, type PowerHammerOperation, type SurfaceHammerOperation } from "../forge/index.ts";
@@ -103,7 +105,7 @@ let view: ForgeBilletView | null = null;
 let latestSnapshot: ForgeSnapshot = application.getSnapshot();
 let activeStation: ForgeStation = "overview";
 let hammerPose:HammerPose={...HAMMER_HOME},hammerEnergy:number=HAMMER_RULES.defaultEnergy;
-let hammerPlacing=false,hammerAim:{x:number;z:number}|null=null;
+let hammerAim:{x:number;z:number}|null=null;
 let hammerDrag:{point:{x:number;z:number};pose:HammerPose}|null=null;
 let hammerPieceId=latestSnapshot.workpieceId;
 let hammerPending=false;
@@ -123,8 +125,6 @@ const hammerPoses=new Map<string,HammerPose>();
 const hammerControls=document.querySelector<HTMLElement>("#hammer-controls")!;
 const hammerStatus=document.querySelector<HTMLElement>("#hammer-status")!;
 const hammerForce=document.querySelector<HTMLInputElement>("#hammer-force")!;
-const hammerYaw=document.querySelector<HTMLInputElement>("#hammer-yaw")!;
-const hammerRoll=document.querySelector<HTMLInputElement>("#hammer-roll")!;
 const hammerPieces=document.querySelector<HTMLSelectElement>("#hammer-piece")!;
 function placeHammer(pose:HammerPose):void {
   if(hammerPending||view?.hammerView.busy)return;
@@ -137,11 +137,7 @@ function refreshHammerInterface():void {
   document.body.dataset.hammerPending=String(hammerPending);
   if(hammerPieceId!==latestSnapshot.workpieceId){hammerPoses.set(hammerPieceId,hammerPose);hammerPieceId=latestSnapshot.workpieceId;hammerPose=hammerPoses.get(hammerPieceId)??{...HAMMER_HOME};view?.updateHammerPose(hammerPose);}
   hammerForce.value=String(Math.round(hammerEnergy*100));
-  hammerYaw.value=String(Math.round(hammerPose.yaw*180/Math.PI));hammerRoll.value=String(Math.round(hammerPose.roll*180/Math.PI));
   document.querySelector("#hammer-force-label")!.textContent=`${hammerForce.value}%`;
-  document.querySelector("#hammer-yaw-label")!.textContent=`${hammerYaw.value}°`;
-  document.querySelector("#hammer-roll-label")!.textContent=`${hammerRoll.value}°`;
-  document.querySelector("#hammer-mode")!.setAttribute("aria-pressed",String(hammerPlacing));
   const pieces=[latestSnapshot,...latestSnapshot.bench];
   hammerPieces.replaceChildren(...pieces.map(piece=>new Option(piece.workpieceId,piece.workpieceId)));
   hammerPieces.value=latestSnapshot.workpieceId;
@@ -171,8 +167,7 @@ function hammerDimensions():string {
 }
 function aimHammer(point:{x:number;z:number}|null):void {
   hammerAim=point;const hit=view?.aimHammer(point,hammerEnergy);
-  hammerStatus.textContent=hammerPlacing?"摆放模式：拖动金属，完成后再次点击“拖动摆放”返回落锤。":
-    hit ? hit.supported?`有效接触 · 力度 ${Math.round(hammerEnergy*100)}% · 砧面支撑 ${Math.round(hit.supportRatio*100)}%`:
+  hammerStatus.textContent=hit ? hit.supported?`有效接触 · 力度 ${Math.round(hammerEnergy*100)}% · 砧面支撑 ${Math.round(hit.supportRatio*100)}%`:
       "该落点缺少砧面支撑，请移动工件。":"瞄准金属表面 · 单击落锤 · 滚轮调力度";
 }
 async function strikeHammer(point:{x:number;z:number}):Promise<void> {
@@ -193,9 +188,6 @@ async function strikeHammer(point:{x:number;z:number}):Promise<void> {
   finally{hammerPending=false;view?.hammerView.finishStrike(performance.now());refreshHammerInterface();}
 }
 hammerForce.addEventListener("input",()=>{hammerEnergy=Number(hammerForce.value)/100;refreshHammerInterface();aimHammer(hammerAim);});
-hammerYaw.addEventListener("input",()=>placeHammer({...hammerPose,yaw:Number(hammerYaw.value)*Math.PI/180}));
-hammerRoll.addEventListener("input",()=>placeHammer({...hammerPose,roll:Number(hammerRoll.value)*Math.PI/180}));
-document.querySelector("#hammer-mode")!.addEventListener("click",()=>{hammerPlacing=!hammerPlacing;refreshHammerInterface();aimHammer(null);});
 document.querySelector("#hammer-center")!.addEventListener("click",()=>placeHammer({...HAMMER_HOME}));
 document.querySelector("#hammer-overview")!.addEventListener("click",()=>setStation("overview"));
 hammerPieces.addEventListener("change",()=>{const index=latestSnapshot.bench.findIndex(p=>p.workpieceId===hammerPieces.value);if(index>=0){application.applyIntent({kind:"select-workpiece",benchIndex:index});updateView();}});
@@ -203,67 +195,88 @@ hammerPieces.addEventListener("change",()=>{const index=latestSnapshot.bench.fin
 const poweredControls=document.querySelector<HTMLElement>("#powered-controls")!;
 const poweredStatus=document.querySelector<HTMLElement>("#powered-status")!;
 const poweredForce=document.querySelector<HTMLInputElement>("#powered-force")!;
-const poweredFeed=document.querySelector<HTMLInputElement>("#powered-feed")!;
-const poweredLateral=document.querySelector<HTMLInputElement>("#powered-lateral")!;
-const poweredCycle=document.querySelector<HTMLInputElement>("#powered-cycle")!;
 const poweredRun=document.querySelector<HTMLButtonElement>("#powered-run")!;
 let poweredPending=false,poweredWorker:Worker|null=null;
+let poweredWorkerSource:ForgeState|null=null;
 const powerCycle=new PowerHammerCycle();
+const pressCycle=new ForgePressCycle();
+let pressPoseCurrent:HammerPose={...HAMMER_HOME};
+let pressDisplayPose:HammerPose|null=null;
+let pressHeld=false;
+let pressSession:{source:ForgeState;pose:HammerPose;pressure:number;contact:boolean;dwell:number;result:ForgeState|null;operation:ForgePressOperation|null}|null=null;
 let powerHeld=false,powerPoseCurrent:HammerPose={...HAMMER_HOME};
-let powerDrag:{point:{x:number;z:number};pose:HammerPose;rotate:boolean;startX:number}|null=null;
+let poweredDrag:{point:{x:number;z:number};pose:HammerPose;rotate:boolean;startX:number}|null=null;
 let powerStroke:{pose:HammerPose;energy:number;contact:boolean}|null=null;
-const powerAxis=document.querySelector<HTMLSelectElement>("#power-axis")!;
+// The press needs to start in the hot-yielding range so a normal hold produces
+// a readable silhouette change; the player can still tune it from the slider.
+const poweredLoads={power:45,press:65};
+let poweredLoadStation:"power"|"press"|null=null;
 let powerNotice="";
 
 function poweredPose():HammerPose {
-  return activeStation==="power"?powerPoseCurrent:{...HAMMER_HOME,x:Number(poweredFeed.value),z:Number(poweredLateral.value)};
+  return activeStation==="power"?powerPoseCurrent:pressDisplayPose??pressPoseCurrent;
+}
+function feedVector(): { x:number; z:number } {
+  return activeStation==="power"||activeStation==="press" ? view?.operationFeedVector() ?? {x:0,z:-1} : {x:0,z:-1};
+}
+function alignPoweredPoseToFeed(pose: HammerPose): HammerPose {
+  const forward=feedVector();
+  // hammerFrame's local +X is the billet's long axis. Rotate it onto the
+  // operator-facing feed vector so W/S moves along the visible long edge.
+  return {...pose,yaw:Math.atan2(-forward.z,forward.x)};
 }
 function evaluatePowered(state:ForgeState,operation:PowerHammerOperation|ForgePressOperation):Promise<ForgeState> {
   return new Promise((resolve,reject)=>{
     poweredWorker??=new Worker(new URL("../platform/hammer.worker.ts",import.meta.url),{type:"module"});
-    const timer=setTimeout(()=>{poweredWorker?.terminate();poweredWorker=null;reject(new Error("动力设备计算超时，请重试。"));},30000);
+    const timer=setTimeout(()=>{poweredWorker?.terminate();poweredWorker=null;poweredWorkerSource=null;reject(new Error("动力设备计算超时，请重试。"));},30000);
     poweredWorker.onmessage=(event:MessageEvent<{state?:ForgeState;error?:string}>)=>{
       clearTimeout(timer);if(event.data.state)resolve(event.data.state);else reject(new Error(event.data.error??"动力设备计算失败。"));
     };
-    poweredWorker.onerror=()=>{clearTimeout(timer);poweredWorker?.terminate();poweredWorker=null;reject(new Error("动力设备计算失败，请重试。"));};
-    poweredWorker.postMessage({state,operation});
+    poweredWorker.onerror=()=>{clearTimeout(timer);poweredWorker?.terminate();poweredWorker=null;poweredWorkerSource=null;reject(new Error("动力设备计算失败，请重试。"));};
+    poweredWorker.postMessage(poweredWorkerSource===state?{reuseBaseline:true,operation}:{state,operation});
+    poweredWorkerSource=state;
   });
 }
 function refreshPoweredInterface():void {
-  document.getElementById("power-machine-view")!.hidden=activeStation!=="power";
   const active=activeStation==="power"||activeStation==="press";
+  document.getElementById("power-machine-view")!.hidden=!active;
   poweredControls.hidden=!active;if(!active)return;
   const press=activeStation==="press";
-  for(const id of ["powered-cycle","powered-cycle-label","powered-cycle-title"])document.getElementById(id)!.hidden=!press;
-  document.getElementById("power-axis-control")!.hidden=press;
-  poweredCycle.max=press?"4":"6";
-  if(Number(poweredCycle.value)>Number(poweredCycle.max))poweredCycle.value=poweredCycle.max;
-  if(!press){poweredFeed.value=String(powerPoseCurrent.x);poweredLateral.value=String(powerPoseCurrent.z);}
+  const station=press?"press":"power";
+  if(poweredLoadStation!==station){
+    if(poweredLoadStation)poweredLoads[poweredLoadStation]=Number(poweredForce.value);
+    poweredForce.value=String(poweredLoads[station]);poweredLoadStation=station;
+  }
+  const pose=poweredPose(),busy=poweredPending||powerCycle.busy||pressCycle.busy;
   document.querySelector("#powered-force-label")!.textContent=`${poweredForce.value}%`;
-  document.querySelector("#powered-feed-label")!.textContent=`${poweredFeed.value} mm`;
-  document.querySelector("#powered-lateral-label")!.textContent=`${poweredLateral.value} mm`;
-  document.querySelector("#powered-cycle-label")!.textContent=press?`${poweredCycle.value} 秒`:`${poweredCycle.value} 次`;
-  poweredRun.textContent=press?"压下并保压":"锻打";
-  poweredRun.title=press?"压下并保压":"按住锻打，松开停止后续冲击";
-  poweredRun.disabled=press&&poweredPending;
-  for(const control of [poweredFeed,poweredLateral,powerAxis])control.disabled=poweredPending||powerCycle.busy;
-  (document.querySelector("#powered-center") as HTMLButtonElement).disabled=poweredPending||powerCycle.busy;
+  poweredRun.textContent=press?"下压":"锻打";
+  poweredRun.title=press?"按住持续下压，松开回程":"按住锻打，松开停止后续冲击";
+  poweredRun.disabled=false;
+  poweredForce.disabled=press&&busy;
+  (document.querySelector("#powered-center") as HTMLButtonElement).disabled=busy;
   document.body.dataset.poweredPending=String(poweredPending);
-  document.body.dataset.poweredFeed=poweredFeed.value;
-  document.body.dataset.poweredLateral=poweredLateral.value;
   document.body.dataset.poweredLoad=String(Number(poweredForce.value)/100);
-  view?.setPoweredPose(poweredPose());
+  // Placement input is applied on the next render tick so repeated W/S/A/D
+  // events do not synchronously rebuild and render the powered workpiece.
+  view?.setPoweredPose(poweredPose(), false);
   if(!poweredPending)poweredStatus.textContent=press
-    ? "手动开关控制一次压下、保压和回程；持续载荷只记录一次压力循环。"
+    ? powerNotice || ({idle:view?.pressWorkpiece.contact?.supported?"平压头 · 接触有效":"平压头 · 无支撑接触",closing:"接近工件",loading:"持续受压",settling:"释放载荷",opening:"回程"}[pressCycle.phase])
     : powerNotice || (view?.powerWorkpiece.contact?.supported?"接触有效":"空击");
 }
 function placePower(pose:HammerPose):void {
-  if(poweredPending||powerCycle.busy||!view)return;
-  if(view.placePowerWorkpiece(pose)){powerPoseCurrent={...pose};powerNotice="";}
+  if(poweredPending||powerCycle.busy||pressCycle.busy||!view)return;
+  const placed=view.placePowerWorkpiece(pose);
+  if(placed){
+    if(activeStation==="press")pressPoseCurrent={...pose};else powerPoseCurrent={...pose};
+    powerNotice="";
+  }
   else powerNotice="空间不足";
   refreshPoweredInterface();
 }
-function stopPower():void {powerHeld=false;powerDrag=null;}
+function stopPower():void {
+  powerHeld=false;pressHeld=false;poweredDrag=null;
+  if(pressCycle.busy)pressCycle.release(performance.now());
+}
 
 async function commitPowerImpact():Promise<void> {
   const stroke=powerStroke;
@@ -289,7 +302,7 @@ async function commitPowerImpact():Promise<void> {
 }
 function tickPower(now:number):void {
   const wasBusy=powerCycle.busy;
-  if(activeStation==="power"&&powerHeld&&!powerDrag&&!view?.isCameraTransitioning()&&!view?.isInspectionActive()&&!powerCycle.busy){
+  if(activeStation==="power"&&powerHeld&&!view?.isCameraTransitioning()&&!view?.isInspectionActive()&&!powerCycle.busy){
     const contact=view?.powerWorkpiece.contact;
     const height=view?.powerWorkpiece.contactHeight??0;
     if(height>120){stopPower();powerNotice="开口不足";refreshPoweredInterface();}
@@ -304,43 +317,99 @@ function tickPower(now:number):void {
   document.body.dataset.powerPhase=powerCycle.phase;
   document.body.dataset.powerHeld=String(powerHeld);
 }
-async function runPoweredForge():Promise<void> {
-  if(poweredPending||view?.poweredBusy||activeStation!=="press")return;
-  const pose=poweredPose(),load=Number(poweredForce.value)/100,cycle=Number(poweredCycle.value);
-  poweredPending=true;poweredStatus.textContent="压力机压下中……";
-  const operation:ForgePressOperation={kind:"forge-press",pose,target:{x:0,z:0},pressure:load,strokeMm:6+load*14,dwellMs:cycle*1000};
-  view?.runForgePress(performance.now(),operation.dwellMs);
-  try{
-    await application.applyPoweredForge(operation,evaluatePowered);
-    updateView();
-    poweredStatus.textContent=`完成 ${(operation.dwellMs/1000).toFixed(0)} 秒保压并回程。`;
-  }catch(error){poweredStatus.textContent=error instanceof Error?error.message:"动力设备未完成。";}
-  finally{poweredPending=false;refreshPoweredInterface();}
+function startPress():void {
+  if(activeStation!=="press"||!view||poweredPending||pressCycle.busy||view.isInspectionActive()||view.isCameraTransitioning())return;
+  if(!pressCycle.begin(performance.now(),view.pressWorkpiece.contactHeight)){powerNotice="开口不足";refreshPoweredInterface();return;}
+  pressHeld=true;powerNotice="";
+  pressSession={source:application.getState(),pose:{...pressPoseCurrent},pressure:Number(poweredForce.value)/100,
+    contact:!!view.pressWorkpiece.contact?.supported,dwell:0,result:null,operation:null};
+  refreshPoweredInterface();
 }
-for(const control of [poweredForce,poweredCycle])control.addEventListener("input",refreshPoweredInterface);
-for(const control of [poweredFeed,poweredLateral])control.addEventListener("input",()=>{
-  if(activeStation==="power")placePower({...powerPoseCurrent,x:Number(poweredFeed.value),z:Number(poweredLateral.value)});
-  else refreshPoweredInterface();
+
+function compensatedPressPose(source:ForgeState,result:ForgeState,pose:HammerPose):HammerPose {
+  const before=hammerFrame(source.workpiece.geometry,pose),after=hammerFrame(result.workpiece.geometry,pose);
+  const shift=rotateHammerPoint({x:after.center.x-before.center.x,y:0,z:after.center.z-before.center.z},pose);
+  return {...pose,x:pose.x+shift.x,z:pose.z+shift.z};
+}
+
+async function solvePress(dwell:number):Promise<void> {
+  const session=pressSession;if(!session||poweredPending)return;
+  poweredPending=true;refreshPoweredInterface();
+  try {
+    // Every preview solves from this cycle's original state, not its last preview.
+    if(session.contact&&dwell>session.dwell){
+      const operation:ForgePressOperation={kind:"forge-press",pose:session.pose,target:{x:0,z:0},
+        pressure:session.pressure,strokeMm:24,dwellMs:dwell};
+      const result=await evaluatePowered(session.source,operation);
+      if(application.getState()!==session.source)throw new Error("工件已改变，本次压力预览已取消。");
+      session.result=result;session.operation=operation;session.dwell=dwell;
+      const changed=result.workpiece.geometry.nodes.some((n,i)=>{
+        const old=session.source.workpiece.geometry.nodes[i]!;
+        return Math.abs(n.verticalOffset-old.verticalOffset)+Math.abs(n.lateralOffset-old.lateralOffset)+Math.abs(n.axialPosition-old.axialPosition)>1e-8;
+      });
+      powerNotice=changed?"": "未发生塑性变形 · 载荷或支撑受限";
+      pressDisplayPose=compensatedPressPose(session.source,result,session.pose);
+      latestSnapshot=createForgeSnapshot(result);
+      view?.setPoweredPose(pressDisplayPose,false);
+      view?.update(latestSnapshot,null,"press");
+    }
+    if(pressCycle.phase==="settling"&&(!session.contact||session.dwell>=pressCycle.dwell(performance.now()))){
+      if(session.result&&session.operation){
+        await application.applyPoweredForge(session.operation,async source=>{
+          if(source!==session.source)throw new Error("压力预览已过期。");
+          return session.result!;
+        });
+        pressPoseCurrent=pressDisplayPose??session.pose;
+      }
+      pressDisplayPose=null;pressSession=null;
+      view?.setPoweredPose(pressPoseCurrent,false);updateView();
+      pressCycle.retract(performance.now(),view?.pressWorkpiece.contactHeight??0);
+    }
+  } catch(error) {
+    pressHeld=false;pressSession=null;pressDisplayPose=null;
+    powerNotice=error instanceof Error?error.message:"压力计算未完成";
+    view?.setPoweredPose(pressPoseCurrent,false);updateView();
+    pressCycle.retract(performance.now(),view?.pressWorkpiece.contactHeight??0);
+  } finally {poweredPending=false;refreshPoweredInterface();}
+}
+
+function tickPress(now:number):void {
+  const before=pressCycle.phase;
+  pressCycle.tick(now);
+  if(pressSession&&!poweredPending){
+    const dwell=pressCycle.dwell(now);
+    if(pressCycle.phase==="settling"||(pressCycle.phase==="loading"&&pressSession.contact&&
+      (dwell-pressSession.dwell>=160||(dwell===4000&&pressSession.dwell<4000))))void solvePress(dwell);
+  }
+  if(pressCycle.busy||before!==pressCycle.phase)view?.setPressGap(pressCycle.gap(now,view.pressWorkpiece.contactHeight));
+  if(before!==pressCycle.phase)refreshPoweredInterface();
+  if(!pressCycle.busy)pressSession=null;
+  document.body.dataset.pressPhase=pressCycle.phase;
+  document.body.dataset.pressHeld=String(pressHeld);
+  document.body.dataset.pressDwell=String(pressSession?.dwell??0);
+}
+
+poweredForce.addEventListener("input",refreshPoweredInterface);
+poweredRun.addEventListener("pointerdown",event=>{
+  if(event.button!==0||view?.isInspectionActive()||view?.isCameraTransitioning())return;
+  event.preventDefault();poweredRun.setPointerCapture(event.pointerId);
+  if(activeStation==="power")powerHeld=true;else startPress();
 });
-poweredRun.addEventListener("click",()=>{void runPoweredForge();});
-poweredRun.addEventListener("pointerdown",event=>{if(activeStation==="power"){event.preventDefault();poweredRun.setPointerCapture(event.pointerId);powerHeld=true;}});
 poweredRun.addEventListener("pointerup",stopPower);
 poweredRun.addEventListener("pointercancel",stopPower);
 poweredRun.addEventListener("lostpointercapture",stopPower);
-document.querySelector("#powered-center")!.addEventListener("click",()=>{if(activeStation==="power")placePower({...HAMMER_HOME});else {poweredFeed.value="0";poweredLateral.value="0";refreshPoweredInterface();}});
+document.querySelector("#powered-center")!.addEventListener("click",()=>placePower(alignPoweredPoseToFeed({...HAMMER_HOME})));
 document.querySelector("#powered-overview")!.addEventListener("click",()=>setStation("overview"));
 const cutControls=document.querySelector<HTMLElement>("#cut-controls")!;
 const cutStatus=document.querySelector<HTMLElement>("#cut-status")!;
 const cutConfirm=document.querySelector<HTMLButtonElement>("#cut-confirm")!;
-const cutAngle=document.querySelector<HTMLInputElement>("#cut-angle")!;
-const cutAngleLabel=document.querySelector<HTMLOutputElement>("#cut-angle-label")!;
 const cutPieces=document.querySelector<HTMLSelectElement>("#cut-piece")!;
 let cutPose:CutPose={...CUT_HOME};
 let cutReady=false, cutting=false, cutPage=0, cutGeneration=0;
 let cutValidity:boolean|null=null;
 let cutWorker:Worker|null=null, cutTimer:ReturnType<typeof setTimeout>|null=null;
 let cutOperation:CutOperation|null=null;
-let cutDrag:{point:{x:number;z:number};pose:CutPose;rotate:boolean}|null=null;
+let cutDrag:{point:{x:number;z:number};pose:CutPose}|null=null;
 
 function cancelCutPreview():void {
   cutGeneration++;cutReady=false;cutValidity=null;cutOperation=null;
@@ -352,9 +421,7 @@ function cancelCutPreview():void {
 function refreshCutInterface():void {
   cutControls.hidden=activeStation!=="cut";
   if(cutControls.hidden)return;
-  cutAngle.value=String(Math.round(cutPose.angle*180/Math.PI));
-  cutAngleLabel.value=`${cutAngle.value}°`;
-  cutAngle.disabled=cutting;cutPieces.disabled=cutting;
+  cutPieces.disabled=cutting;
   cutConfirm.disabled=!cutReady||cutting||view?.isCameraTransitioning()===true;
   const all=[latestSnapshot,...latestSnapshot.bench];
   cutPieces.replaceChildren(...all.map((piece,index)=>{
@@ -370,7 +437,7 @@ function refreshCutInterface():void {
   (document.querySelector("#cut-next") as HTMLButtonElement).disabled=cutPage===pages-1||cutting;
   document.body.dataset.cutReady=String(cutReady);
   document.body.dataset.cutting=String(cutting);
-  document.body.dataset.cutAngle=cutAngle.value;
+  document.body.dataset.cutAngle=String(Math.round(cutPose.angle*180/Math.PI));
   document.body.dataset.cutPose=JSON.stringify(cutPose);
   view?.updateCut(cutPose,cutValidity,cutPage);
 }
@@ -416,7 +483,7 @@ function scheduleCutPreview():void {
 
 function placeCut(pose:CutPose):void {
   if(cutting)return;
-  pose={...pose,angle:Math.atan2(Math.sin(pose.angle),Math.cos(pose.angle))};
+  pose={...pose,angle:Math.atan2(Math.sin(pose.angle),Math.cos(pose.angle)),pitch:Math.atan2(Math.sin(pose.pitch??0),Math.cos(pose.pitch??0)),roll:Math.atan2(Math.sin(pose.roll??0),Math.cos(pose.roll??0))};
   if(!validCutPose(pose))return;
   cutPose=pose;scheduleCutPreview();
 }
@@ -429,7 +496,6 @@ function chooseCutPiece(id:string):void {
   cutPose={...CUT_HOME};updateView();scheduleCutPreview();
 }
 
-cutAngle.addEventListener("input",()=>placeCut({...cutPose,angle:Number(cutAngle.value)*Math.PI/180}));
 document.querySelector("#cut-center")!.addEventListener("click",()=>placeCut({...CUT_HOME}));
 cutPieces.addEventListener("change",()=>chooseCutPiece(cutPieces.value));
 document.querySelector("#cut-prev")!.addEventListener("click",()=>{cutPage--;refreshCutInterface();});
@@ -476,7 +542,7 @@ let quenchContacted = false;
 let quenchStarted = false;
 let quenchPhase: "ready" | "immersed" | "checked" = "ready";
 let quenchDrag: { readonly startX: number; readonly startY: number; readonly pose: ReturnType<ForgeBilletView["quenchPose"]>; readonly point: { x: number; z: number } | null; moved: boolean } | null = null;
-let grindDrag: { readonly point: { x: number; z: number }; readonly pose: ReturnType<ForgeBilletView["grindPose"]>; readonly translate: boolean } | null = null;
+let grindDrag: { readonly point: { x: number; z: number }; readonly pose: ReturnType<ForgeBilletView["grindPose"]>; readonly mode: "move" | "rotate" | "grind"; readonly startX: number; readonly startY: number } | null = null;
 let grindHolding = false;
 let grindLastTick: number | null = null;
 let grindWorker:Worker|null=null,grindPending=false,grindWorkerSource:ForgeState|null=null;
@@ -517,15 +583,15 @@ const stationCopy: Record<ForgeStation, { readonly title: string; readonly hint:
   overview: { title: "铁匠铺 · 总览", hint: "点击材料、工位或铁砧进入第一人称近景；Esc 返回总览。" },
   materials: { title: "选料桌 · 选料", hint: "" },
   furnace: { title: "火炉 · 加热", hint: "拖动钢坯自由调整方向；整体进入炉腔后开始加热，完全拖出后停止。" },
-  anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；Shift＋拖动摆放。Q/E 旋转，A/D 连续翻滚。" },
-  power: { title: "动力锤", hint: "" },
-  press: { title: "锻造压力机 · 压下延展", hint: "调节压力、送料位置与保压时间；手动开关执行压下、保压和回程。" },
-  cut: { title: "切割台 · 切割", hint: "拖动金属摆放；滑杆或 Q/E 旋转，Shift＋拖动也可旋转。绿虚线可切，红虚线需调整；确认后才切割。" },
+  anvil: { title: "铁砧 · 锤击", hint: "瞄准金属单击落锤，滚轮调力度；W/S 沿夹持方向送料，A/D 绕工件长轴翻转。" },
+  power: { title: "动力锤", hint: "空格持续锻打；W/S 前后送料，A/D 左右平移，Q/E 绕工件长轴翻转。" },
+  press: { title: "锻造压力机 · 压下延展", hint: "平压头 · 持续载荷；W/S 前后送料，A/D 左右平移，Q/E 绕工件长轴翻转。" },
+  cut: { title: "切割台 · 切割", hint: "普通左键选择与确认；Shift＋左键平面移动，Q/E 绕 Y、A/D 绕 Z、W/S 绕 X。" },
   weld: { title: "焊合台 · 焊合", hint: "从当前钢坯拖向旁边的第二块工件，贴合后松开。" },
   "quench-water": { title: "水槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
   "quench-oil": { title: "油槽 · 淬火", hint: "点击工件或槽体放入整块刀坯；再次点击取出并查看淬火检查结果。" },
   temper: { title: "火炉 · 回火", hint: "滚轮调整目标温度；拖动钢坯整体进入炉腔后回火，完全拖出后完成。" },
-  grind: { title: "砂带 · 研磨", hint: "拖动调整 XYZ；滚轮绕 X，A/D 绕 Y，Q/E 绕 Z；Shift＋拖动水平移动；W 贴近后按住持续研磨，S 远离停止。" },
+  grind: { title: "砂带 · 研磨", hint: "Shift＋左键平面移动；右键拖动改变接触角，W/S 进退，A/D 绕工件长轴翻转；普通左键按住研磨。" },
 };
 
 const materialLabels: Record<string, string> = {
@@ -639,13 +705,13 @@ function acceptanceState(state: ForgeState): readonly string[] {
       ];
     case "power":
       return [
-        `动力锤 · 温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 载荷 ${poweredForce.value}% · 送料 ${poweredFeed.value} mm`,
+        `动力锤 · 温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 载荷 ${poweredForce.value}%`,
         `累计动力锤循环 ${state.operations.filter(operation=>operation.kind==="power-hammer").length} · 塑性应变 ${average(sections.map(section=>section.plasticStrain)).toFixed(3)}`,
         `机械功 ${sections.reduce((sum,section)=>sum+section.mechanicalWorkJ,0).toFixed(1)} J · ${shared}`,
       ];
     case "press":
       return [
-        `压力机 · 温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 压力 ${poweredForce.value}% · 保压 ${poweredCycle.value}s`,
+        `压力机 · 温度 ${latestSnapshot.averageTemperatureC.toFixed(0)}℃ · 压力 ${poweredForce.value}% · 平压头`,
         `累计压力循环 ${state.operations.filter(operation=>operation.kind==="forge-press").length} · 塑性应变 ${average(sections.map(section=>section.plasticStrain)).toFixed(3)}`,
         `应力 ${average(sections.map(section=>section.stress)).toFixed(3)} · 损伤 ${Math.round(average(sections.map(section=>section.damage))*100)}% · ${shared}`,
       ];
@@ -769,7 +835,7 @@ function renderState(): void {
 }
 
 function updateView(hammerPreview = null): void {
-  latestSnapshot = application.getSnapshot();
+  latestSnapshot = activeStation==="press"&&pressSession?.result?createForgeSnapshot(pressSession.result):application.getSnapshot();
   view?.update(latestSnapshot, hammerPreview, activeStation, temperPreviewC);
   updateMaterialsInterface();
   refreshCutInterface();
@@ -784,7 +850,7 @@ function updateThermalHud(): void {
 
 function setStation(station: ForgeStation): void {
   stopPower();
-  if(cutting||hammerPending||poweredPending||powerCycle.busy||view?.poweredBusy)return;
+  if(cutting||hammerPending||poweredPending||powerCycle.busy||pressCycle.busy)return;
   const furnaceModeSwitch=(activeStation==="furnace"||activeStation==="temper")&&(station==="furnace"||station==="temper");
   if (!furnaceModeSwitch && acceptanceStation && acceptanceVerb!=="cut" && acceptanceVerb!=="heat" && acceptanceVerb!=="hammer" && acceptanceVerb!=="power" && acceptanceVerb!=="press" && !materialSession && station !== acceptanceStation) return;
   if (materialSession && station !== "materials" && materialSelection.getAcquiredCount() === 0) return;
@@ -804,6 +870,7 @@ function setStation(station: ForgeStation): void {
   temperPreviewC = null;
   materialSelection.cancel();
   activeStation = station;
+  powerNotice="";
   if (station === "quench-water" || station === "quench-oil") {
     quenchPhase = "ready";
     quenchContacted = false;
@@ -815,12 +882,21 @@ function setStation(station: ForgeStation): void {
   document.body.classList.toggle("cut-view",station==="cut");
   document.body.classList.toggle("heat-view",station==="furnace"||station==="temper");
   document.body.classList.toggle("hammer-view",station==="anvil");
-  document.body.classList.toggle("powered-view",station==="power"||station==="press");
+document.body.classList.toggle("powered-view",station==="power"||station==="press");
+  document.body.classList.toggle("grind-view",station==="grind");
   document.body.classList.toggle("material-session",station==="materials");
-  hammerDrag=null;hammerAim=null;
+  hammerAim=null;
   view?.setStation(station);
   document.body.dataset.cameraState=view?.isCameraTransitioning()?"moving":"settled";
   view?.resize(viewport());
+  if(station==="power"||station==="press"){
+    const current=station==="power"?powerPoseCurrent:pressPoseCurrent;
+    if(current.x===HAMMER_HOME.x&&current.z===HAMMER_HOME.z&&current.yaw===HAMMER_HOME.yaw&&current.roll===HAMMER_HOME.roll){
+      const aligned=alignPoweredPoseToFeed(current);
+      if(station==="power")powerPoseCurrent=aligned;else pressPoseCurrent=aligned;
+      view?.setPoweredPose(aligned);
+    }
+  }
   updateView();
   if(station==="cut"){cutPose={...CUT_HOME};scheduleCutPreview();}
 }
@@ -1046,8 +1122,15 @@ if(activeStation==="grind")application.prepareGrinding();
 document.body.classList.toggle("heat-view", activeStation === "furnace" || activeStation === "temper");
 document.body.classList.toggle("hammer-view", activeStation === "anvil");
 document.body.classList.toggle("powered-view", activeStation === "power" || activeStation === "press");
+document.body.classList.toggle("grind-view", activeStation === "grind");
 document.body.classList.toggle("material-session",activeStation==="materials");
 view?.resize(viewport());
+if(activeStation==="power"||activeStation==="press"){
+  const current=activeStation==="power"?powerPoseCurrent:pressPoseCurrent;
+  const aligned=alignPoweredPoseToFeed(current);
+  if(activeStation==="power")powerPoseCurrent=aligned;else pressPoseCurrent=aligned;
+  view?.setPoweredPose(aligned,false);
+}
 updateView();
 if(activeStation==="cut")scheduleCutPreview();
 
@@ -1060,10 +1143,10 @@ canvas.addEventListener("pointerdown", (event) => {
   const x = event.clientX - bounds.left;
   const y = event.clientY - bounds.top;
 
-  if(activeStation==="power"){
-    if(poweredPending||powerCycle.busy||!view.pickPowerWorkpiece(x,y))return;
+  if(activeStation==="power"||activeStation==="press"){
+    if(poweredPending||powerCycle.busy||pressCycle.busy)return;
     const point=view.powerTablePoint(x,y);
-    if(point)powerDrag={point,pose:{...powerPoseCurrent},rotate:event.button===2,startX:x};
+    if(point && view.pickPowerWorkpiece(x,y)) poweredDrag={point,pose:{...poweredPose()},rotate:event.button===2,startX:x};
     return;
   }
 
@@ -1071,7 +1154,7 @@ canvas.addEventListener("pointerdown", (event) => {
     if(cutting)return;
     const id=view.pickCutPiece(x,y);
     if(id && id!==latestSnapshot.workpieceId){chooseCutPiece(id);return;}
-    if(id){const point=view.cutTablePoint(x,y);if(point)cutDrag={point,pose:{...cutPose},rotate:event.shiftKey};}
+    if(id&&event.button===0&&event.shiftKey){const point=view.cutTablePoint(x,y);if(point)cutDrag={point,pose:{...cutPose}};}
     return;
   }
 
@@ -1113,15 +1196,16 @@ canvas.addEventListener("pointerdown", (event) => {
   if(activeStation==="anvil"){
     const point=view.pickHammerSurface(x,y);
     if(!point)return;
-    if(hammerPlacing||event.shiftKey){const plane=view.hammerTablePoint(x,y);if(plane)hammerDrag={point:plane,pose:{...hammerPose}};}
-    else strikeHammer(point);
+    if(event.shiftKey){hammerDrag={point,pose:{...hammerPose}};aimHammer(point);return;}
+    strikeHammer(point);
     return;
   }
   const target = view.pickHammerTarget(x, y);
   if (activeStation === "grind" && target) {
     const point = view.grindTablePoint(x, y);
-    if (point) grindDrag = { point, pose: view.grindPose(), translate: event.shiftKey };
-    grindHolding = true;
+    const mode=event.button===2?"rotate":event.shiftKey?"move":"grind";
+    if (point) grindDrag = { point, pose: view.grindPose(), mode, startX:x, startY:y };
+    grindHolding = mode === "grind";
     grindLastTick = performance.now();
     gesture = {
       kind: activeStation,
@@ -1167,31 +1251,28 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
-  if(activeStation==="power"&&powerDrag&&view){
-    const bounds=canvas.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
-    if(powerDrag.rotate){
-      const axis=powerAxis.value==="roll"?"roll":"yaw";
-      placePower({...powerDrag.pose,[axis]:powerDrag.pose[axis]+(x-powerDrag.startX)*0.012});
-    }else{
-      const p=view.powerTablePoint(x,y);
-      if(p)placePower({...powerDrag.pose,x:powerDrag.pose.x+p.x-powerDrag.point.x,z:powerDrag.pose.z+p.z-powerDrag.point.z});
+  if((activeStation==="power"||activeStation==="press"||activeStation==="anvil")&&view){
+    if((activeStation==="power"||activeStation==="press")&&poweredDrag&&!poweredPending&&!powerCycle.busy&&!pressCycle.busy){
+      const bounds=canvas.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
+      if(poweredDrag.rotate) placePower({...poweredDrag.pose,roll:poweredDrag.pose.roll+(x-poweredDrag.startX)*0.012});
+      else {
+        const point=view.powerTablePoint(x,y);
+        if(point) placePower({...poweredDrag.pose,x:poweredDrag.pose.x+point.x-poweredDrag.point.x,z:poweredDrag.pose.z+point.z-poweredDrag.point.z});
+      }
     }
-    return;
-  }
-  if(activeStation==="anvil"&&view){
-    const bounds=canvas.getBoundingClientRect(),x=event.clientX-bounds.left,y=event.clientY-bounds.top;
-    if(hammerDrag){const p=view.hammerTablePoint(x,y);if(p)placeHammer({...hammerDrag.pose,x:hammerDrag.pose.x+p.x-hammerDrag.point.x,z:hammerDrag.pose.z+p.z-hammerDrag.point.z});}
-    else if(!view.hammerView.busy)aimHammer(view.pickHammerSurface(x,y));
+    if(activeStation==="anvil"&&!view.hammerView.busy){
+      const bounds=canvas.getBoundingClientRect(),point=view.pickHammerSurface(event.clientX-bounds.left,event.clientY-bounds.top);
+      if(hammerDrag&&point&&!hammerPending){
+        placeHammer({...hammerDrag.pose,x:hammerDrag.pose.x+point.x-hammerDrag.point.x,z:hammerDrag.pose.z+point.z-hammerDrag.point.z});
+      } else aimHammer(point);
+    }
     return;
   }
   if(cutDrag && !cutting){
     const bounds=canvas.getBoundingClientRect(),point=view?.cutTablePoint(event.clientX-bounds.left,event.clientY-bounds.top);
     if(point){
       const start=cutDrag;
-      if(start.rotate){
-        const angle=start.pose.angle-Math.atan2(point.z-start.pose.z,point.x-start.pose.x)+Math.atan2(start.point.z-start.pose.z,start.point.x-start.pose.x);
-        placeCut({...start.pose,angle:Math.atan2(Math.sin(angle),Math.cos(angle))});
-      }else placeCut({...start.pose,x:start.pose.x+point.x-start.point.x,z:start.pose.z+point.z-start.point.z});
+      placeCut({...start.pose,x:start.pose.x+point.x-start.point.x,z:start.pose.z+point.z-start.point.z});
     }
     return;
   }
@@ -1199,9 +1280,11 @@ canvas.addEventListener("pointermove", (event) => {
     const bounds = canvas.getBoundingClientRect();
     const point = view.grindTablePoint(event.clientX - bounds.left, event.clientY - bounds.top);
     if (point) {
-      if (grindDrag.translate) {
-        view.setGrindPose({ z: grindDrag.pose.z + point.z - grindDrag.point.z });
-      } else {
+      if (grindDrag.mode === "rotate") {
+        const delta=(event.clientX-bounds.left-grindDrag.startX)*0.012;
+        const vertical=(event.clientY-bounds.top-grindDrag.startY)*0.008;
+        view.setGrindPose({yaw:grindDrag.pose.yaw+delta,angle:grindDrag.pose.angle+vertical});
+      } else if (grindDrag.mode === "move") {
         view.setGrindPose({ x: grindDrag.pose.x + point.x - grindDrag.point.x, z:grindDrag.pose.z+point.z-grindDrag.point.z });
       }
     }
@@ -1241,10 +1324,10 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("pointerup", (event) => {
-  powerDrag=null;
+  poweredDrag=null;
   hammerDrag=null;
   cutDrag=null;
-  if (grindDrag?.translate) gesture = null;
+  if (grindDrag && grindDrag.mode === "move") gesture = null;
   grindDrag=null;
   grindHolding = false;
   grindLastTick = null;
@@ -1276,7 +1359,7 @@ canvas.addEventListener("pointerup", (event) => {
 
 canvas.addEventListener("pointercancel", () => {
   stopPower();
-  hammerDrag=null;
+  poweredDrag=null;
   cutDrag=null;
   grindDrag=null;
   grindHolding = false;
@@ -1291,28 +1374,39 @@ canvas.addEventListener("pointercancel", () => {
 });
 
 window.addEventListener("keydown", (event) => {
-  if(activeStation==="power"&&event.code==="Space"){
+  if((activeStation==="power"||activeStation==="press")&&event.code==="Space"){
     const target=event.target;
     if(target instanceof HTMLElement&&(target.isContentEditable||target instanceof HTMLTextAreaElement
       ||target instanceof HTMLSelectElement||(target instanceof HTMLInputElement&&target.type!=="range")))return;
     event.preventDefault();
-    if(!event.repeat&&!view?.isInspectionActive()&&!view?.isCameraTransitioning())powerHeld=true;
+    if(!event.repeat&&!view?.isInspectionActive()&&!view?.isCameraTransitioning()){
+      if(activeStation==="power")powerHeld=true;else startPress();
+    }
     return;
   }
   if (event.key !== "Escape" && (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLButtonElement)) return;
   if (view?.isInspectionActive()) return;
-  if(activeStation==="power"){
-    const key=event.key.toLowerCase(),step=event.shiftKey?20:4;
-    if(["arrowleft","arrowright","arrowup","arrowdown"].includes(key)){
-      event.preventDefault();placePower({...powerPoseCurrent,x:powerPoseCurrent.x+(key==="arrowleft"?-step:key==="arrowright"?step:0),
-        z:powerPoseCurrent.z+(key==="arrowup"?-step:key==="arrowdown"?step:0)});return;
+  if(activeStation==="power"||activeStation==="press"){
+    const key=event.key.toLowerCase(),step=8,delta=Math.PI/36;
+    const pose=poweredPose();
+    if(key==="w"||key==="s") { event.preventDefault(); const forward=feedVector(); placePower({...pose,x:pose.x+forward.x*(key==="w"?step:-step),z:pose.z+forward.z*(key==="w"?step:-step)}); return; }
+    if(key==="a"||key==="d") {
+      event.preventDefault();
+      const forward=feedVector();
+      const side={x:-forward.z,z:forward.x};
+      const sign=key==="a"?-1:1;
+      placePower({...pose,x:pose.x+side.x*step*sign,z:pose.z+side.z*step*sign});
+      return;
     }
+    if(key==="q"||key==="e") { event.preventDefault(); placePower({...pose,roll:pose.roll+(key==="q"?-delta:delta)}); return; }
   }
   if(activeStation==="cut" && ["q","e","ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Enter"].includes(event.key.length===1?event.key.toLowerCase():event.key)){
     event.preventDefault();if(cutting)return;
     const key=event.key.toLowerCase();
     if(key==="enter")cutConfirm.click();
     else if(key==="q"||key==="e")placeCut({...cutPose,angle:cutPose.angle+(key==="q"?-1:1)*Math.PI/36});
+    else if(key==="a"||key==="d")placeCut({...cutPose,roll:(cutPose.roll??0)+(key==="a"?-1:1)*Math.PI/36});
+    else if(key==="w"||key==="s")placeCut({...cutPose,pitch:(cutPose.pitch??0)+(key==="w"?-1:1)*Math.PI/36});
     else {
       const nudge=workshopUnits(event.shiftKey?50:5);
       placeCut({...cutPose,x:cutPose.x+(key==="arrowleft"?-nudge:key==="arrowright"?nudge:0),z:cutPose.z+(key==="arrowup"?-nudge:key==="arrowdown"?nudge:0)});
@@ -1325,9 +1419,9 @@ window.addEventListener("keydown", (event) => {
     const pose = view?.grindPose();
     if (!pose || !view) return;
     const step = workshopUnits(event.shiftKey ? 25 : 5);
-    if (key === "q" || key === "e") view.setGrindPose({ roll: pose.roll + (key === "q" ? -1 : 1) * Math.PI / 72 });
-    else if (key === "a" || key === "d") view.setGrindPose({ yaw: pose.yaw + (key === "a" ? -1 : 1) * Math.PI / 72 });
-    else if (key === "w" || key === "s") view.setGrindPose({ feed: pose.feed + (key === "w" ? 1 : -1) * step });
+    if (key === "q" || key === "e") view.setGrindPose({yaw:pose.yaw+(key === "q" ? -1 : 1)*Math.PI/72});
+    else if (key === "a" || key === "d") view.setGrindPose({roll:pose.roll+(key === "a" ? -1 : 1)*Math.PI/72});
+    else if (key === "w" || key === "s") view.setGrindPose({ feed: pose.feed + (key === "w" ? -1 : 1) * step });
     else view.setGrindPose({
       x: pose.x + (key === "arrowup" ? step : key === "arrowdown" ? -step : 0),
       z: pose.z + (key === "arrowleft" ? -step : key === "arrowright" ? step : 0),
@@ -1362,12 +1456,15 @@ window.addEventListener("keydown", (event) => {
     return;
   }
   if (activeStation !== "anvil") return;
-  const step=Math.PI/36,wrap=(n:number)=>Math.atan2(Math.sin(n),Math.cos(n));
+  const step=Math.PI/36,feedStep=4,wrap=(n:number)=>Math.atan2(Math.sin(n),Math.cos(n));
+  const feed=view?.hammerFeedVector() ?? {x:1,z:0};
   switch (event.key.toLowerCase()) {
     case "a": placeHammer({...hammerPose,roll:wrap(hammerPose.roll-step)}); break;
     case "d": placeHammer({...hammerPose,roll:wrap(hammerPose.roll+step)}); break;
     case "q": placeHammer({...hammerPose,yaw:wrap(hammerPose.yaw-step)}); break;
     case "e": placeHammer({...hammerPose,yaw:wrap(hammerPose.yaw+step)}); break;
+    case "w": placeHammer({...hammerPose,x:hammerPose.x+feed.x*feedStep,z:hammerPose.z+feed.z*feedStep}); break;
+    case "s": placeHammer({...hammerPose,x:hammerPose.x-feed.x*feedStep,z:hammerPose.z-feed.z*feedStep}); break;
     case "arrowleft": placeHammer({...hammerPose,x:hammerPose.x-4}); break;
     case "arrowright": placeHammer({...hammerPose,x:hammerPose.x+4}); break;
     case "arrowup": placeHammer({...hammerPose,z:hammerPose.z-4}); break;
@@ -1378,8 +1475,9 @@ window.addEventListener("keydown", (event) => {
 });
 
 canvas.addEventListener("wheel",event=>{
-  if(activeStation==="power"){
+  if(activeStation==="power"||activeStation==="press"){
     event.preventDefault();
+    if(activeStation==="press"&&pressCycle.busy)return;
     poweredForce.value=String(Math.max(15,Math.min(90,Number(poweredForce.value)+(event.deltaY<0?5:-5))));
     refreshPoweredInterface();return;
   }
@@ -1407,8 +1505,9 @@ canvas.addEventListener("wheel",event=>{
 
 const renderFrame = (nowMs: number): void => {
   tickPower(nowMs);
+  tickPress(nowMs);
   tickFurnace(nowMs);
-  if (activeStation === "grind" && grindHolding && !grindDrag?.translate && view && document.hasFocus()) {
+  if (activeStation === "grind" && grindHolding && grindDrag?.mode === "grind" && view && document.hasFocus()) {
     if (grindLastTick === null) grindLastTick = nowMs;
     const elapsedMs = Math.min(160, Math.max(0, nowMs - grindLastTick));
     if (elapsedMs >= 160) {
@@ -1427,11 +1526,10 @@ const renderFrame = (nowMs: number): void => {
 };
 requestAnimationFrame(renderFrame);
 
-window.addEventListener("keyup",event=>{if(event.code==="Space"){powerHeld=false;event.preventDefault();}});
+window.addEventListener("keyup",event=>{if(event.code==="Space"){stopPower();event.preventDefault();}});
 window.addEventListener("blur",stopPower);
 document.addEventListener("visibilitychange",()=>{if(document.hidden)stopPower();});
-canvas.addEventListener("contextmenu",event=>{if(activeStation==="power")event.preventDefault();});
-canvas.addEventListener("lostpointercapture",()=>{powerDrag=null;});
+canvas.addEventListener("contextmenu",event=>{if(["anvil","power","press","cut","grind"].includes(activeStation))event.preventDefault();});
 
 window.addEventListener("resize", () => view?.resize(viewport()));
 window.addEventListener("beforeunload", () => {

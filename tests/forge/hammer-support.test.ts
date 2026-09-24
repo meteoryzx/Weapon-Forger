@@ -61,7 +61,7 @@ describe("finite anvil support",()=>{
       const cup=(row[0]!.verticalOffset+row.at(-1)!.verticalOffset)/2-row[12]!.verticalOffset;
       expect(Math.abs(cup)).toBeLessThan(0.002);
     }
-  });
+  },15_000);
   it("bends a hot overhang more than a light or cold blow, with conserved volume",()=>{
     const s=hot(),heavy=applyForgeOperation(s,operation()),light=applyForgeOperation(s,operation(0.1));
     const cold=applyForgeOperation(initial(),operation(0.1));

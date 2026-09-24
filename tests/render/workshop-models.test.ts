@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Box3, BoxGeometry, Group, Mesh, Vector3 } from "three";
-import { QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_LAYOUT, WORKSHOP_STANDARD, WORKSHOP_SURFACE_Y, workshopUnits as u } from "../../src/app/workshop-scale.ts";
+import { GRINDER_STATION_YAW, POWER_STATION_YAW, PRESS_STATION_YAW, QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_LAYOUT, WORKSHOP_STANDARD, WORKSHOP_SURFACE_Y, workshopUnits as u } from "../../src/app/workshop-scale.ts";
 import { MaterialsStationView } from "../../src/render/materials-station-view.ts";
 import { SawStationView } from "../../src/render/saw-station-view.ts";
 import { FurnaceStationView } from "../../src/render/furnace-station-view.ts";
@@ -24,11 +24,15 @@ describe("authored workshop geometry",()=>{
   it("grounds real station meshes inside their reserved footprint and room, without station overlaps",()=>{
     const k=new WorkshopModelKit(),geometry=()=>new BoxGeometry(336,8,48);
     const selection=new MaterialsStationView(geometry),saw=new SawStationView(geometry),furnace=new FurnaceStationView(geometry),temper=new FurnaceStationView(geometry,new Vector3(...WORKSHOP_LAYOUT.temper!.origin),"tempering-station","temper"),hammer=new HammerStationView();
+    hammer.group.position.set(...WORKSHOP_LAYOUT.anvil!.origin);
     const roots:Record<string,Group>={materials:selection.group,cut:saw.group,furnace:furnace.body,temper:temper.body,anvil:hammer.group};
     // Dynamic hand tools are excluded from the static furniture envelope.
     hammer.tool.removeFromParent();
     for(const [name,asset] of Object.entries({quench:basinAsset(k,false),"quench-oil":basinAsset(k,true),grind:grindingAsset(k),power:powerHammerAsset(k),press:forgingPressAsset(k)})){
       asset.root.position.set(...WORKSHOP_LAYOUT[name]!.origin);
+      if(name === "grind") asset.root.rotation.y = GRINDER_STATION_YAW;
+      if(name === "power") asset.root.rotation.y = POWER_STATION_YAW;
+      if(name === "press") asset.root.rotation.y = PRESS_STATION_YAW;
       if(name.startsWith("quench"))asset.root.position.y=WORKSHOP_FLOOR_Y*(1-0.55);
       roots[name]=asset.root;
     }

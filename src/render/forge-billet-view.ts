@@ -31,6 +31,8 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { WorkshopModelKit } from "./workshop-model-kit.ts";
 import { PowerHammerWorkpiece } from "./power-hammer-workpiece.ts";
 import { POWER_HAMMER } from "./power-hammer-model.ts";
+import { ForgePressWorkpiece } from "./forge-press-workpiece.ts";
+import { FORGE_PRESS } from "./forge-press-model.ts";
 import { QuenchEffects } from "./quench-effects.ts";
 import { basinAsset, forgingPressAsset, powerHammerAsset, roomAsset, ROOM_INTERIOR, type PoweredForgingAsset, type StationAsset } from "./workshop-assets.ts";
 import { GRINDER, GrinderModel } from "./grinder-model.ts";
@@ -50,14 +52,18 @@ import { MaterialsStationView, materialsCameraFrame, weldCameraFrame } from "./m
 import { SawStationView, SAW_ORIGIN, sawCameraFrame } from "./saw-station-view.ts";
 import { CUT_HOME, CUT_TABLE, type CutPose } from "../app/cut-placement.ts";
 import { FurnaceStationView, furnaceCameraFrame, temperCameraFrame, FURNACE_ORIGIN, TEMPER_FURNACE_ORIGIN, FURNACE } from "./furnace-station-view.ts";
-import { HammerStationView, hammerCameraFrame, ANVIL } from "./hammer-station-view.ts";
+import { HammerStationView, hammerCameraFrame, ANVIL, HAMMER_PRESENTATION_YAW } from "./hammer-station-view.ts";
 import { HAMMER_HOME, hammerSurface, hammerFrame, placedHammerSurface, type HammerPose } from "../forge/index.ts";
-import { QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM, WORKSHOP_STANDARD, WORKSHOP_LAYOUT, workshopUnits } from "../app/workshop-scale.ts";
+import { GRINDER_STATION_YAW, QUENCH_SURFACE_Y, WORKSHOP_FLOOR_Y, WORKSHOP_SURFACE_Y, WORKSHOP_UNITS_PER_MM, WORKSHOP_STANDARD, WORKSHOP_LAYOUT, POWER_STATION_YAW, PRESS_STATION_YAW, stationPoseToWorldDelta, worldDeltaToStationPose, workshopUnits } from "../app/workshop-scale.ts";
 
 const BILLET_SCALE = WORKSHOP_UNITS_PER_MM;
 const ROTATE_CONTROL_SIZE = 32;
 const WORKSTATION_YAW = Math.PI / 24;
 const BILLET_YAW = Math.PI / 4;
+// The operator's horizontal view direction in the two close-up machine
+// cameras. It is converted into each machine's local frame below so W/S keeps
+// meaning feed in/out even though the stations face opposite room walls.
+const POWERED_SCREEN_INWARD_WORLD = { x: 52, z: -7 } as const;
 const BILLET_CENTER_OFFSET = FORGE_RULES.workpieceLength * BILLET_SCALE / 2;
 const BILLET_MATERIAL = new MeshStandardMaterial({
   metalness: 0.82,
@@ -121,19 +127,22 @@ const STATION_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [numbe
 const BILLET_ANCHORS: Record<Exclude<ForgeStation, "overview">, readonly [number, number, number]> = {
   materials: [WORKSHOP_LAYOUT.materials!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.materials!.origin[2]],
   furnace: [WORKSHOP_LAYOUT.furnace!.origin[0], FURNACE.hearth, WORKSHOP_LAYOUT.furnace!.origin[2]],
-  anvil: [0, 0, 0],
+  anvil: [...WORKSHOP_LAYOUT.anvil!.origin],
   cut: [WORKSHOP_LAYOUT.cut!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.cut!.origin[2]],
   weld: [WORKSHOP_LAYOUT.materials!.origin[0]-20, WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.materials!.origin[2]+16],
   "quench-water": [WORKSHOP_LAYOUT.quench!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT.quench!.origin[2]],
   "quench-oil": [WORKSHOP_LAYOUT["quench-oil"]!.origin[0], QUENCH_SURFACE_Y + 22, WORKSHOP_LAYOUT["quench-oil"]!.origin[2]],
   temper: [WORKSHOP_LAYOUT.temper!.origin[0], FURNACE.hearth, WORKSHOP_LAYOUT.temper!.origin[2]],
-  grind: [WORKSHOP_LAYOUT.grind!.origin[0] + workshopUnits(GRINDER.frontX), WORKSHOP_FLOOR_Y + workshopUnits(GRINDER.restY), WORKSHOP_LAYOUT.grind!.origin[2]],
-  power: [WORKSHOP_LAYOUT.power!.origin[0], WORKSHOP_SURFACE_Y, WORKSHOP_LAYOUT.power!.origin[2] + workshopUnits(POWER_HAMMER.dieZ)],
-  press: [WORKSHOP_LAYOUT.press!.origin[0], WORKSHOP_FLOOR_Y + workshopUnits(914), WORKSHOP_LAYOUT.press!.origin[2] - workshopUnits(30)],
+  grind: (() => { const d=stationPoseToWorldDelta(workshopUnits(GRINDER.frontX),0,GRINDER_STATION_YAW); return [WORKSHOP_LAYOUT.grind!.origin[0]+d.x,WORKSHOP_FLOOR_Y+workshopUnits(GRINDER.restY),WORKSHOP_LAYOUT.grind!.origin[2]+d.z]; })(),
+  power: (() => { const d=stationPoseToWorldDelta(0,workshopUnits(POWER_HAMMER.dieZ),POWER_STATION_YAW); return [WORKSHOP_LAYOUT.power!.origin[0]+d.x,WORKSHOP_SURFACE_Y,WORKSHOP_LAYOUT.power!.origin[2]+d.z]; })(),
+  press: (() => { const d=stationPoseToWorldDelta(0,workshopUnits(FORGE_PRESS.dieZ),PRESS_STATION_YAW); return [WORKSHOP_LAYOUT.press!.origin[0]+d.x,WORKSHOP_FLOOR_Y+workshopUnits(FORGE_PRESS.surfaceY),WORKSHOP_LAYOUT.press!.origin[2]+d.z]; })(),
 };
 
 export const CAMERA_FRAMES = {
-  overview: { position: [0, 470, 550], target: [0, 25, -15] },
+  // A near-vertical plan view keeps the whole U-shaped workshop in one
+  // frame, so station placement can be checked without a foreground machine
+  // hiding the rear furnaces or the lower grinder.
+  overview: { position: [0, 640, 30], target: [0, 0, -30] },
 } as const;
 
 function inspectionCameraFrame(target: Vector3, view: InspectionView, distance: number): { readonly position: readonly number[]; readonly target: readonly number[] } {
@@ -166,6 +175,7 @@ export class ForgeBilletView {
   private readonly stationMeshes = new Map<ForgeStation, Mesh>();
   private readonly materialMeshes = new Map<ForgeMaterialPick, Mesh>();
   private readonly stationProps = new Map<ForgeStation, Object3D[]>();
+  private readonly stationBounds = new Map<string, Box3>();
   private readonly scaleReference = new Group();
   private readonly weldBenchTarget = new Mesh(
     new BoxGeometry(118, 10, 38),
@@ -187,7 +197,11 @@ export class ForgeBilletView {
   readonly hammerView: HammerStationView;
   private hammerPose:HammerPose=HAMMER_HOME;
   private poweredPose:HammerPose=HAMMER_HOME;
+  private poweredPoseDirty = false;
+  private poweredGapMm: number | null = null;
   readonly powerWorkpiece=new PowerHammerWorkpiece();
+  readonly pressWorkpiece=new ForgePressWorkpiece();
+  get activePoweredWorkpiece():PowerHammerWorkpiece { return this.station==="press"?this.pressWorkpiece:this.powerWorkpiece; }
   private cutPose: CutPose = CUT_HOME;
   private cutValid: boolean | null = null;
   private materialsFocus: "table" | "rack" = "table";
@@ -204,7 +218,9 @@ export class ForgeBilletView {
   private grindRoll = 0;
   // Start clear of the belt. Positive feed moves the workpiece toward the
   // calibrated belt plane; W advances it and S retracts it.
-  private grindFeed = -workshopUnits(40);
+  // After the 180 degree station turn the operator stands on +X; positive
+  // clearance keeps the billet on that side of the belt until W feeds it in.
+  private grindFeed = workshopUnits(40);
   private grindWorkpieceId: string | null = null;
   private readonly grindCenter = new Vector3();
   private preparedGrindMesh: BufferGeometry | null = null;
@@ -233,7 +249,6 @@ export class ForgeBilletView {
   private readonly grinderModel = new GrinderModel("material");
   private powerAsset: PoweredForgingAsset | null = null;
   private pressAsset: PoweredForgingAsset | null = null;
-  private poweredMotion: { station: "power" | "press"; startedAtMs: number; durationMs: number; blows: number; dwellMs: number } | null = null;
   private viewport: RenderViewport;
 
   constructor(private readonly canvas: RenderCanvas, viewport: RenderViewport) {
@@ -289,6 +304,7 @@ export class ForgeBilletView {
     this.hammerView=new HammerStationView();
     const anvil = this.hammerView.group;
     this.anvilModel = anvil;
+    anvil.position.set(...WORKSHOP_LAYOUT.anvil!.origin);
     // User-space x+ is right, y+ is inward, z+ is up. In Three.js this is a
     // positive yaw around world Y, so the top view reads counter-clockwise.
     this.stationMeshes.set("anvil",this.hammerView.target);
@@ -332,8 +348,11 @@ export class ForgeBilletView {
     this.temperFurnaceView.body.visible = true;
     this.hammerView.setActive(activeStation==="anvil"||activeStation==="overview");
     this.powerWorkpiece.group.visible=activeStation==="power";
-    if(activeStation==="power"){
-      this.powerWorkpiece.update(snapshot,this.poweredPose);
+    this.pressWorkpiece.group.visible=activeStation==="press";
+    this.renderer.shadowMap.enabled = activeStation!=="power" && activeStation!=="press";
+    if(activeStation==="power"||activeStation==="press"){
+      this.activePoweredWorkpiece.update(snapshot,this.poweredPose);
+      this.poweredPoseDirty = false;
       this.updateStationEmphasis(activeStation);this.render();return;
     }
     if(activeStation==="anvil"||activeStation==="overview"){
@@ -355,11 +374,6 @@ export class ForgeBilletView {
     this.billet.rotation.set(snapshot.orientationQuarterTurns * Math.PI / 2,0,0);
     const anchor = BILLET_ANCHORS[activeStation];
     this.billetRig.position.set(...anchor);
-    if(activeStation==="press"){
-      this.billetRig.position.x+=workshopUnits(this.poweredPose.x);
-      this.billetRig.position.z+=workshopUnits(this.poweredPose.z);
-      this.billet.rotation.x+=this.poweredPose.roll;
-    }
     this.temperControl.rotation.z = ((this.temperPreviewC ?? 220) - 220) / 160;
     const nextGeometry = this.preparedGrindMesh ?? createBilletGeometry(snapshot, hammerPreview);
     this.preparedGrindMesh=null;
@@ -385,8 +399,7 @@ export class ForgeBilletView {
         this.billet.position.copy(this.grindCenter).multiplyScalar(-BILLET_SCALE);
         this.billetHitTarget.position.y = 0;
         this.applyGrindTransform();
-      } else if(activeStation==="press") this.billetRig.rotation.set(0,this.poweredPose.yaw,0);
-      else this.billetRig.rotation.set(0, BILLET_YAW, 0);
+      } else this.billetRig.rotation.set(0, BILLET_YAW, 0);
     }
     this.updateWeldBenchItems(snapshot.bench, activeStation === "weld");
     this.updateStationEmphasis(activeStation);
@@ -462,12 +475,24 @@ export class ForgeBilletView {
     const furnaceMoved = this.furnaceView.tick(nowMs);
     const temperFurnaceMoved = this.temperFurnaceView.tick(nowMs);
     const hammerMoved=this.hammerView.tick(nowMs);
-    const poweredMoved=this.tickPoweredForging(nowMs);
     this.grinderModel.tick(nowMs / 1000);
     const inQuench=this.station==="quench-water"||this.station==="quench-oil";
     // Decorative steam/ripples are deferred from the current acceptance gate.
     // Keep the effect object dormant so it cannot consume the interaction frame.
     const quenchMoved = this.quenchEffects.hide();
+    let poweredMoved = false;
+    if (
+      this.poweredPoseDirty &&
+      this.snapshot &&
+      (this.station === "power" || this.station === "press")
+    ) {
+      // Keyboard and pointer placement can generate several pose changes in
+      // one input turn. Apply only the latest pose on the next animation
+      // frame so the event handler stays responsive while the mesh catches up.
+      this.activePoweredWorkpiece.update(this.snapshot, this.poweredPose);
+      this.poweredPoseDirty = false;
+      poweredMoved = true;
+    }
     if (!this.isTransitioning) {
       const grindRenderReady = this.station === "grind"
         && this.grindPoseDirty
@@ -495,67 +520,74 @@ export class ForgeBilletView {
     this.render();
   }
 
-  runPowerHammer(nowMs: number, blows: number, cadenceMs: number): void {
-    this.poweredMotion = { station: "power", startedAtMs: nowMs, durationMs: Math.max(240, blows * cadenceMs), blows, dwellMs: 0 };
-  }
-
   setPoweredPose(pose:HammerPose,refresh=true):void {
     if(pose.x===this.poweredPose.x&&pose.z===this.poweredPose.z&&pose.yaw===this.poweredPose.yaw&&pose.roll===this.poweredPose.roll)return;
     this.poweredPose={...pose};
+    this.poweredPoseDirty = true;
     if(refresh&&this.snapshot&&(this.station==="power"||this.station==="press"))this.update(this.snapshot,null,this.station,this.temperPreviewC);
   }
 
   placePowerWorkpiece(pose:HammerPose):boolean {
-    if(!this.snapshot||!this.powerWorkpiece.canPlace(this.snapshot,pose))return false;
+    if(this.station!=="power"&&this.station!=="press")return false;
+    if(!this.snapshot||!this.activePoweredWorkpiece.canPlace(this.snapshot,pose))return false;
     // Bound against the real wall and neighbouring station envelopes, not a UI slider.
-    const frame=hammerFrame(this.snapshot.geometry,pose);
+    const localBounds=this.activePoweredWorkpiece.placementBounds(this.snapshot,pose);
     const bounds=new Box3();
-    for(const face of placedHammerSurface(this.snapshot.geometry,frame))for(const p of face.points)
-      bounds.expandByPoint(new Vector3(p.x*BILLET_SCALE+BILLET_ANCHORS.power[0],p.y*BILLET_SCALE+WORKSHOP_SURFACE_Y,p.z*BILLET_SCALE+BILLET_ANCHORS.power[2]));
+    const stationYaw=this.station==="power"?POWER_STATION_YAW:PRESS_STATION_YAW;
+    const anchor=new Vector3(...BILLET_ANCHORS[this.station]);
+    for(const x of [localBounds.min.x,localBounds.max.x])
+      for(const y of [localBounds.min.y,localBounds.max.y])
+        for(const z of [localBounds.min.z,localBounds.max.z]) {
+          const local=new Vector3(x*BILLET_SCALE,y*BILLET_SCALE+WORKSHOP_SURFACE_Y-BILLET_ANCHORS[this.station][1],z*BILLET_SCALE)
+            .applyAxisAngle(new Vector3(0,1,0),stationYaw).add(anchor);
+          bounds.expandByPoint(local);
+        }
     if(bounds.max.x>=ROOM_INTERIOR.halfWidthX||bounds.min.x<=-ROOM_INTERIOR.halfWidthX||bounds.min.z<=ROOM_INTERIOR.backZ||bounds.min.y<WORKSHOP_FLOOR_Y)return false;
-    for(const [station,root] of this.stationRoots)if(station!=="power"&&bounds.intersectsBox(new Box3().setFromObject(root)))return false;
-    this.setPoweredPose(pose);return true;
+    for(const [station,root] of this.stationRoots) {
+      if(station===this.station)continue;
+      let stationBounds=this.stationBounds.get(station);
+      if(!stationBounds){
+        stationBounds=new Box3().setFromObject(root);
+        this.stationBounds.set(station,stationBounds);
+      }
+      if(bounds.intersectsBox(stationBounds))return false;
+    }
+    this.setPoweredPose(pose,false);return true;
   }
 
   setPowerGap(mm:number):void {
     if(!this.powerAsset)return;
-    this.powerAsset.ram.position.y=this.powerAsset.closedRamY+workshopUnits(mm);this.render();
+    const next=Math.round(Math.max(0,Math.min(120,mm))/6)*6;
+    if(this.poweredGapMm===next)return;
+    this.poweredGapMm=next;
+    this.powerAsset.ram.position.y=this.powerAsset.closedRamY+workshopUnits(next);this.render();
   }
 
   powerTablePoint(x:number,y:number):{x:number;z:number}|null {
+    if(this.station!=="power"&&this.station!=="press")return null;
     const p=this.hammerTablePoint(x,y);
-    return p?{x:p.x-BILLET_ANCHORS.power[0]/BILLET_SCALE,z:p.z-BILLET_ANCHORS.power[2]/BILLET_SCALE}:null;
+    if(!p)return null;
+    const anchor=BILLET_ANCHORS[this.station];
+    const yaw=this.station==="power"?POWER_STATION_YAW:PRESS_STATION_YAW;
+    const delta=worldDeltaToStationPose(
+      (p.x-anchor[0])/BILLET_SCALE,
+      (p.z-anchor[2])/BILLET_SCALE,
+      yaw,
+    );
+    return delta;
   }
 
   pickPowerWorkpiece(x:number,y:number):boolean {
-    return this.pickObject(x,y,[this.powerWorkpiece.item],false)!==null;
+    return this.pickObject(x,y,[this.activePoweredWorkpiece.item],false)!==null;
   }
 
-  runForgePress(nowMs: number, dwellMs: number): void {
-    this.poweredMotion = { station: "press", startedAtMs: nowMs, durationMs: 760 + dwellMs, blows: 1, dwellMs };
-  }
-
-  get poweredBusy(): boolean { return this.poweredMotion !== null; }
-
-  private tickPoweredForging(nowMs: number): boolean {
-    const motion=this.poweredMotion;
-    if(!motion)return false;
-    const asset=motion.station==="power"?this.powerAsset:this.pressAsset;
-    if(!asset){this.poweredMotion=null;return false;}
-    const elapsed=Math.max(0,nowMs-motion.startedAtMs),t=Math.min(1,elapsed/motion.durationMs);
-    let travel=0;
-    if(motion.station==="power"){
-      const cycle=(t*motion.blows)%1;
-      travel=cycle<0.38?cycle/0.38:cycle<0.58?1:(1-cycle)/0.42;
-      asset.control.rotation.z=-0.18+Math.sin(t*Math.PI*motion.blows*2)*0.06;
-    }else{
-      const closeMs=380,holdEnd=closeMs+motion.dwellMs;
-      travel=elapsed<closeMs?elapsed/closeMs:elapsed<holdEnd?1:Math.max(0,1-(elapsed-holdEnd)/380);
-      asset.control.rotation.z=-0.55-travel*0.28;
-    }
-    asset.ram.position.y=asset.openRamY+(asset.closedRamY-asset.openRamY)*Math.max(0,Math.min(1,travel));
-    if(t>=1){asset.ram.position.y=asset.openRamY;this.poweredMotion=null;}
-    return true;
+  setPressGap(mm:number):void {
+    if(!this.pressAsset)return;
+    const clamped=Math.max(0,Math.min(120,Number.isFinite(mm)?mm:0));
+    const next=Math.round(clamped/6)*6;
+    if(this.poweredGapMm===next)return;
+    this.poweredGapMm=next;
+    this.pressAsset.ram.position.y=this.pressAsset.closedRamY+workshopUnits(next);this.render();
   }
 
   resize(viewport: RenderViewport): void {
@@ -595,16 +627,38 @@ export class ForgeBilletView {
     const p=this.raycaster.ray.intersectPlane(new Plane(new Vector3(0,1,0),-ANVIL.surface),new Vector3());
     return p?{x:p.x/ANVIL.scale,z:p.z/ANVIL.scale}:null;
   }
+  private anvilDisplayPointToLogical(point:{x:number;z:number}):{x:number;z:number} {
+    const dx=point.x-this.hammerPose.x,dz=point.z-this.hammerPose.z;
+    const c=Math.cos(HAMMER_PRESENTATION_YAW),s=Math.sin(HAMMER_PRESENTATION_YAW);
+    return {x:this.hammerPose.x+c*dx-s*dz,z:this.hammerPose.z+s*dx+c*dz};
+  }
+  private anvilLogicalPointToDisplay(point:{x:number;z:number}):{x:number;z:number} {
+    const dx=point.x-this.hammerPose.x,dz=point.z-this.hammerPose.z;
+    const c=Math.cos(HAMMER_PRESENTATION_YAW),s=Math.sin(HAMMER_PRESENTATION_YAW);
+    return {x:this.hammerPose.x+c*dx+s*dz,z:this.hammerPose.z-s*dx+c*dz};
+  }
   pickHammerSurface(x:number,y:number):{x:number;z:number}|null {
     // A ray exactly on a duplicated lattice edge can miss both triangles due
     // to floating point cancellation. Retry within one twentieth of a pixel.
     const hit=this.pickObject(x,y,[this.hammerView.item],false)
       ??this.pickObject(x+0.05,y,[this.hammerView.item],false)
       ??this.pickObject(x-0.05,y,[this.hammerView.item],false);
-    if (hit) return {x:hit.point.x/ANVIL.scale,z:hit.point.z/ANVIL.scale};
+    if (hit) {
+      const local=this.hammerView.group.worldToLocal(hit.point.clone());
+      return this.anvilDisplayPointToLogical({x:local.x/ANVIL.scale,z:local.z/ANVIL.scale});
+    }
     // The close-up camera can place the projected center on a shared lattice
     // edge. Fall back to the actual billet footprint on the anvil plane.
     const tablePoint = this.hammerTablePoint(x, y);
+    if (tablePoint) {
+      // hammerTablePoint returns world-space millimetres because powered
+      // stations share it for their table picking. Convert the fallback ray
+      // into the rotated anvil's local frame before testing the billet.
+      const world = new Vector3(tablePoint.x * ANVIL.scale, ANVIL.surface, tablePoint.z * ANVIL.scale);
+      const local = this.hammerView.group.worldToLocal(world);
+      const logical=this.anvilDisplayPointToLogical({x:local.x/ANVIL.scale,z:local.z/ANVIL.scale});
+      tablePoint.x=logical.x;tablePoint.z=logical.z;
+    }
     if (tablePoint
       && Math.abs(tablePoint.x - this.hammerPose.x) <= FORGE_RULES.workpieceLength / 2
       && Math.abs(tablePoint.z - this.hammerPose.z) <= FORGE_RULES.initialSectionWidth * 0.75) {
@@ -801,7 +855,7 @@ export class ForgeBilletView {
     this.raycaster.setFromCamera(this.pointer, this.camera);
     const faceX = BILLET_ANCHORS.grind[0];
     const point = this.raycaster.ray.intersectPlane(new Plane(new Vector3(1, 0, 0), -faceX), new Vector3());
-    return point ? { x: point.y, z: point.z } : null;
+    return point ? { x: point.y, z: -point.z } : null;
   }
 
   setInspectionView(view: InspectionView): void {
@@ -817,6 +871,33 @@ export class ForgeBilletView {
 
   inspectionViewMode(): InspectionView { return this.inspectionView; }
 
+  /** Horizontal feed direction seen by the operator at the active machine. */
+  hammerFeedVector(): { x: number; z: number } {
+    const yaw=this.hammerPose.yaw+HAMMER_PRESENTATION_YAW;
+    return {x:Math.cos(yaw),z:-Math.sin(yaw)};
+  }
+
+  operationFeedVector(): { x: number; z: number } {
+    // W/S follows the operator's screen-depth direction. Convert that world
+    // direction back into station-local coordinates because the two machines
+    // face opposite walls; this keeps the keyboard path and rendered billet on
+    // the same physical feed axis.
+    if (this.station === "power" || this.station === "press") {
+      const stationYaw = this.station === "power" ? POWER_STATION_YAW : PRESS_STATION_YAW;
+      const length = Math.hypot(POWERED_SCREEN_INWARD_WORLD.x, POWERED_SCREEN_INWARD_WORLD.z) || 1;
+      const direction = worldDeltaToStationPose(
+        POWERED_SCREEN_INWARD_WORLD.x / length,
+        POWERED_SCREEN_INWARD_WORLD.z / length,
+        stationYaw,
+      );
+      const localLength = Math.hypot(direction.x, direction.z) || 1;
+      return { x: direction.x / localLength, z: direction.z / localLength };
+    }
+    const x=this.cameraTarget.x-this.camera.position.x, z=this.cameraTarget.z-this.camera.position.z;
+    const length=Math.hypot(x,z)||1;
+    return {x:x/length,z:z/length};
+  }
+
   isInspectionActive(): boolean { return this.inspectionView !== "default"; }
 
   setGrindPose(offset: { x?: number; z?: number; angle?: number; yaw?: number; roll?: number; feed?: number }): void {
@@ -825,7 +906,7 @@ export class ForgeBilletView {
     if (offset.angle !== undefined) this.grindAngle = Math.atan2(Math.sin(offset.angle), Math.cos(offset.angle));
     if (offset.yaw !== undefined) this.grindYaw = Math.atan2(Math.sin(offset.yaw), Math.cos(offset.yaw));
     if (offset.roll !== undefined) this.grindRoll = Math.atan2(Math.sin(offset.roll), Math.cos(offset.roll));
-    if (offset.feed !== undefined) this.grindFeed = clamp(offset.feed, -workshopUnits(120), 0);
+    if (offset.feed !== undefined) this.grindFeed = clamp(offset.feed, 0, workshopUnits(120));
     if (this.snapshot && this.station === "grind") {
       this.applyGrindTransform();
       this.grindPoseDirty = true;
@@ -835,11 +916,11 @@ export class ForgeBilletView {
   private applyGrindTransform(): void {
     const anchor = BILLET_ANCHORS.grind;
     this.billetRig.position.set(...anchor);
-    this.billetRig.position.z += this.grindOffset.z;
-    this.billetRig.rotation.set(0, Math.PI / 2, 0);
-    // Player right = world +Z, forward = +X, up = +Y.
-    this.billetRig.rotateOnWorldAxis(new Vector3(0,0,1),this.grindAngle);
-    this.billetRig.rotateOnWorldAxis(new Vector3(1,0,0),this.grindYaw);
+    this.billetRig.position.z -= this.grindOffset.z;
+    this.billetRig.rotation.set(0, Math.PI / 2 + GRINDER_STATION_YAW, 0);
+    // Rotate the workpiece and its operator axes with the station.
+    this.billetRig.rotateOnWorldAxis(new Vector3(0,0,-1),this.grindAngle);
+    this.billetRig.rotateOnWorldAxis(new Vector3(-1,0,0),this.grindYaw);
     this.billetRig.rotateOnWorldAxis(new Vector3(0,1,0),this.grindRoll);
     this.billetRig.updateMatrixWorld(true);
     const localBounds=this.billet.geometry.boundingBox;
@@ -847,14 +928,14 @@ export class ForgeBilletView {
     // The actual mesh support is essential after an oblique bevel: a rotated
     // bounding box contains empty corners which must not hold it off the belt.
     const vertices=this.billet.geometry.getAttribute("position"),p=new Vector3();
-    let minY=Infinity,maxX=-Infinity,maxContactX=-Infinity;
+    let minY=Infinity,minX=Infinity,minContactX=Infinity;
     for(let i=0;i<vertices.count;i++){
       p.fromBufferAttribute(vertices,i).applyMatrix4(this.billet.matrixWorld);
-      minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);
-      if(Math.abs(p.z-STATION_ANCHORS.grind[2])<workshopUnits(GRINDER.beltWidth/2)-1e-5)maxContactX=Math.max(maxContactX,p.x);
+      minY=Math.min(minY,p.y);minX=Math.min(minX,p.x);
+      if(Math.abs(p.z-STATION_ANCHORS.grind[2])<workshopUnits(GRINDER.beltWidth/2)-1e-5)minContactX=Math.min(minContactX,p.x);
     }
     this.billetRig.position.y += anchor[1] - minY + this.grindOffset.x;
-    this.billetRig.position.x += anchor[0] - (Number.isFinite(maxContactX)?maxContactX:maxX) + this.grindFeed;
+    this.billetRig.position.x += anchor[0] - (Number.isFinite(minContactX)?minContactX:minX) + this.grindFeed;
   }
 
   grindPose(): { x: number; z: number; angle: number; yaw: number; roll: number; feed: number } {
@@ -862,7 +943,7 @@ export class ForgeBilletView {
   }
 
   grindContactTarget(): HammerPickTarget | null {
-    if (this.station !== "grind" || !this.snapshot || this.grindFeed < -workshopUnits(0.25)) return null;
+    if (this.station !== "grind" || !this.snapshot || this.grindFeed > workshopUnits(0.25)) return null;
     const bounds = this.worldBilletBounds();
     const beltX = BILLET_ANCHORS.grind[0];
     if (bounds.max.x < beltX - workshopUnits(0.3) || bounds.min.x > beltX + workshopUnits(0.3)
@@ -874,12 +955,12 @@ export class ForgeBilletView {
   }
 
   grindContactPatch(): NonNullable<GrindOperation["contact"]> | null {
-    if (this.station !== "grind" || !this.snapshot || this.grindFeed < -workshopUnits(0.25)) return null;
+    if (this.station !== "grind" || !this.snapshot || this.grindFeed > workshopUnits(0.25)) return null;
     if (!this.grindContactTarget()) return null;
     const inverse=this.billet.matrixWorld.clone().invert();
     const origin=new Vector3(BILLET_ANCHORS.grind[0],WORKSHOP_FLOOR_Y+workshopUnits((GRINDER.lowerY+GRINDER.upperY)/2),STATION_ANCHORS.grind[2]).applyMatrix4(inverse);
-    const normal=new Vector3(1,0,0).transformDirection(inverse);
-    const across=new Vector3(0,0,1).transformDirection(inverse);
+    const normal=new Vector3(-1,0,0).transformDirection(inverse);
+    const across=new Vector3(0,0,-1).transformDirection(inverse);
     const down=new Vector3(0,-1,0).transformDirection(inverse);
     const point=(p:Vector3)=>({x:p.x,y:p.y,z:p.z});
     return { axialPosition: origin.x, verticalOffset: origin.y, axialWidth: GRINDER.beltWidth, verticalHeight: GRINDER.upperY-GRINDER.lowerY,
@@ -920,7 +1001,7 @@ export class ForgeBilletView {
         : new Vector3().setFromMatrixPosition(o.matrixWorld);
       return projectWorld(world);
     };
-    const inspectedBillet = this.station === "power" ? this.powerWorkpiece.item : this.station === "anvil"
+    const inspectedBillet = this.station === "power" || this.station === "press" ? this.activePoweredWorkpiece.item : this.station === "anvil"
       ? this.hammerView.item
       : this.station === "furnace"
         ? this.furnaceView.item
@@ -928,9 +1009,22 @@ export class ForgeBilletView {
           ? this.temperFurnaceView.item
         : this.billet;
     const points:Record<string,ReturnType<typeof project>>={billet:project(inspectedBillet,true),hammer:project(this.hammerView.item,true),temper:project(this.temperControl)};
+    const axisHalfLength = FORGE_RULES.workpieceLength * BILLET_SCALE / 2;
+    const axisPose = this.station === "anvil" ? this.hammerPose : this.poweredPose;
+    const axisYaw = this.station === "anvil" ? HAMMER_PRESENTATION_YAW : this.station === "power" ? POWER_STATION_YAW : this.station === "press" ? PRESS_STATION_YAW : 0;
+    const axisAnchor = this.station === "anvil" ? BILLET_ANCHORS.anvil : BILLET_ANCHORS[this.station as "power" | "press"];
+    const axisDirection = { x: Math.cos(axisPose.yaw) * axisHalfLength, z: -Math.sin(axisPose.yaw) * axisHalfLength };
+    const axisWorld = (sign: number) => {
+      const local = stationPoseToWorldDelta(sign * axisDirection.x, sign * axisDirection.z, axisYaw);
+      return projectWorld(new Vector3(axisAnchor[0] + local.x, axisAnchor[1] + 0.32, axisAnchor[2] + local.z));
+    };
+    const workpieceAxis = this.station === "anvil" || this.station === "power" || this.station === "press"
+      ? { start: axisWorld(-1), end: axisWorld(1) }
+      : null;
     if(this.station==="anvil")for(const [x,z] of [[0,0],[100,0],[105,0],[105,18],[105,-18],[0,58],[105,58]] as const){
       const contact=this.hammerView.contact(x,z);
-      const point=new Vector3(x*ANVIL.scale,ANVIL.surface+(contact?.point.y??8)*ANVIL.scale,z*ANVIL.scale);
+      const displayPoint=this.anvilLogicalPointToDisplay({x,z});
+      const point=new Vector3(displayPoint.x*ANVIL.scale,ANVIL.surface+(contact?.point.y??8)*ANVIL.scale,displayPoint.z*ANVIL.scale);
       const projected=projectWorld(this.hammerView.group.localToWorld(point));
       points[`hammer:${x}:${z}`]=projected;
       if(z===0)points[`hammer:${x}`]=projected;
@@ -940,12 +1034,15 @@ export class ForgeBilletView {
     this.materialsView?.tableItems.forEach((m,i)=>points["table:"+i]=project(m));
     this.materialsView?.rackItems.forEach((m,i)=>{points["returned:"+i]=project(m);points["returned:"+m.userData.workpieceId]=project(m);});
     this.weldBenchBillets.forEach((m,i)=>points["weld:"+i]=project(m));
-    return {station:this.station,transitioning:this.isTransitioning,points,camera:{position:this.camera.position.toArray(),target:this.cameraTarget.toArray(),fov:this.camera.fov},
+    return {station:this.station,transitioning:this.isTransitioning,points,workpieceAxis,camera:{position:this.camera.position.toArray(),target:this.cameraTarget.toArray(),fov:this.camera.fov},
       renderer:{calls:this.renderer.info.render.calls,triangles:this.renderer.info.render.triangles,geometries:this.renderer.info.memory.geometries,textures:this.renderer.info.memory.textures},
       immersion:this.quenchImmersion(),
       power:this.station==="power"?{pose:this.poweredPose,contact:this.powerWorkpiece.contact,contactHeight:this.powerWorkpiece.contactHeight,
         gapMm:((this.powerAsset?.ram.position.y??0)-(this.powerAsset?.closedRamY??0))/BILLET_SCALE,previewVertices:this.powerWorkpiece.preview.geometry.getAttribute("position")?.count??0,
         previewVisible:this.powerWorkpiece.preview.visible,bounds:new Box3().setFromObject(this.powerWorkpiece.item)}:null,
+      press:this.station==="press"?{pose:this.poweredPose,contact:this.pressWorkpiece.contact,contactHeight:this.pressWorkpiece.contactHeight,
+        gapMm:((this.pressAsset?.ram.position.y??0)-(this.pressAsset?.closedRamY??0))/BILLET_SCALE,previewVertices:this.pressWorkpiece.preview.geometry.getAttribute("position")?.count??0,
+        previewVisible:this.pressWorkpiece.preview.visible,bounds:new Box3().setFromObject(this.pressWorkpiece.item)}:null,
       hammer:this.station==="anvil"&&this.snapshot?{
         busy:this.hammerView.busy,
         tailSections:[0.7,0.85,1].map(fraction=>{
@@ -1039,6 +1136,7 @@ export class ForgeBilletView {
 
   dispose(): void {
     this.powerWorkpiece.dispose();
+    this.pressWorkpiece.dispose();
     this.quenchEffects.dispose();
     this.stationMeshes.delete("anvil");this.hammerView.dispose();
     this.stationMeshes.delete("furnace");
@@ -1163,13 +1261,16 @@ export class ForgeBilletView {
     for(const [station,asset] of assets){
       asset.root.position.set(STATION_ANCHORS[station][0],station==="grind"?0:STATION_ANCHORS[station][1],STATION_ANCHORS[station][2]);
       if(station==="quench-water"||station==="quench-oil")asset.root.position.y=-30*(1-0.55);
-      // The grinder face is authored on local -X and points at the operator.
+      if(station==="grind")asset.root.rotation.y=GRINDER_STATION_YAW;
+      // The grinder face is authored on local -X and, after the 180 degree
+      // turn, is presented to the operator on world +X.
       this.scene.add(asset.root);
       this.stationRoots.set(station,asset.root);
       if(asset.contact)this.quenchTargets.set(station as QuenchStation,asset.contact);
     }
     const power=powerHammerAsset(k);
     power.root.position.set(...WORKSHOP_LAYOUT.power!.origin);this.scene.add(power.root);
+    power.root.rotation.y=POWER_STATION_YAW;
     this.stationRoots.set("power",power.root);
     power.contact!.userData.station="power";
     this.stationMeshes.set("power",power.contact!);
@@ -1177,10 +1278,12 @@ export class ForgeBilletView {
     power.root.add(this.powerWorkpiece.group);
     const press=forgingPressAsset(k);
     press.root.position.set(...WORKSHOP_LAYOUT.press!.origin);this.scene.add(press.root);
+    press.root.rotation.y=PRESS_STATION_YAW;
     this.stationRoots.set("press",press.root);
     press.contact!.userData.station="press";
     this.stationMeshes.set("press",press.contact!);
     this.pressAsset=press;
+    press.root.add(this.pressWorkpiece.group);
     for(const station of ["materials","cut","weld","quench-water","quench-oil","grind"] as const){
       const definition=WORKSHOP_LAYOUT[station==="weld"?"materials":station==="quench-water"?"quench":station]!;
       const target=new Mesh(new BoxGeometry(definition.footprint[0],50,definition.footprint[1]),new MeshBasicMaterial({transparent:true,opacity:0,depthWrite:false}));
@@ -1193,23 +1296,26 @@ export class ForgeBilletView {
   }
 
   private updateStationEmphasis(activeStation: ForgeStation): void {
-    const quenchFocus = activeStation === "quench-water" || activeStation === "quench-oil";
-    const materialsFocus = activeStation === "materials";
-    this.billetRig.visible=!["materials","cut","furnace","temper","anvil","overview","power"].includes(activeStation);
+    const poweredFocus = activeStation === "power" || activeStation === "press";
+    const stationName: string = activeStation;
+    this.billetRig.visible=!["materials","cut","furnace","temper","anvil","overview","power","press"].includes(activeStation);
     // Every station has one persistent body. Only active workpieces and tools change visibility.
     // The selection table is part of the continuous room and must remain
     // visible in the quench view; only obstructing tools are suppressed.
-    if(this.materialsView)this.materialsView.group.visible=true;
-    this.sawView.group.visible=true;this.sawView.setActive(activeStation==="cut");
-    this.furnaceView.group.visible=true;this.furnaceView.body.visible=true;
+    // Close-up machine views do not need every other station's meshes. Keeping
+    // both powered machines and all decorative station bodies alive doubled
+    // the draw work on every keyboard update and made the input feel laggy.
+    if(this.materialsView)this.materialsView.group.visible=!poweredFocus || stationName==="materials";
+    this.sawView.group.visible=!poweredFocus || stationName==="cut";this.sawView.setActive(activeStation==="cut");
+    this.furnaceView.group.visible=!poweredFocus || stationName==="furnace";this.furnaceView.body.visible=this.furnaceView.group.visible;
     this.furnaceView.itemRig.visible=activeStation==="furnace";
-    this.temperFurnaceView.group.visible=true;this.temperFurnaceView.body.visible=true;
+    this.temperFurnaceView.group.visible=!poweredFocus || stationName==="temper";this.temperFurnaceView.body.visible=this.temperFurnaceView.group.visible;
     this.temperFurnaceView.itemRig.visible=activeStation==="temper";
-    this.anvilModel.visible=true;
+    this.anvilModel.visible=!poweredFocus;
     const power = this.stationRoots.get("power");
-    if (power) power.visible = true;
+    if (power) power.visible = activeStation === "power";
     const press = this.stationRoots.get("press");
-    if (press) press.visible = true;
+    if (press) press.visible = activeStation === "press";
     this.hammerView.setActive(activeStation==="anvil");
     for(const mesh of this.materialMeshes.values())mesh.visible=false;
   }
@@ -1222,10 +1328,16 @@ export class ForgeBilletView {
   }
 
   private cameraFrame(station: ForgeStation) {
+    if(station==="press"&&this.inspectionView==="machine"){
+      const target=new Vector3(WORKSHOP_LAYOUT.press!.origin[0],WORKSHOP_FLOOR_Y+workshopUnits(950),WORKSHOP_LAYOUT.press!.origin[2]);
+      const distance=Math.max(1,0.85/this.camera.aspect);
+      return {position:target.clone().add(new Vector3(-85,55,225).multiplyScalar(distance)).toArray(),target:target.toArray()};
+    }
     if(station==="power"&&this.inspectionView==="machine"){
       const target=new Vector3(WORKSHOP_LAYOUT.power!.origin[0],WORKSHOP_FLOOR_Y+workshopUnits(1090),WORKSHOP_LAYOUT.power!.origin[2]);
       const distance=Math.max(1,0.9/this.camera.aspect);
-      // Look over the front aisle, keeping the neighbouring machines in place.
+      // The hammer is turned 180 degrees. Approach from its +X side and look
+      // toward the -X mouth so the machine front faces the player.
       return {position:target.clone().add(new Vector3(-220,140,-55).multiplyScalar(distance)).toArray(),target:target.toArray()};
     }
     // Inspection views are a shared camera mode. Every station gets the same
@@ -1243,7 +1355,7 @@ export class ForgeBilletView {
         : station === "grind" ? Math.max(1, 0.46 / this.camera.aspect) : Math.max(1, 1.2 / this.camera.aspect);
       return inspectionCameraFrame(target, this.inspectionView, distance);
     }
-    if(station==="anvil")return hammerCameraFrame(this.camera.aspect);
+    if(station==="anvil")return hammerCameraFrame(this.camera.aspect,WORKSHOP_LAYOUT.anvil!.origin);
     if (station === "furnace") return furnaceCameraFrame(this.camera.aspect, FURNACE_ORIGIN);
     if (station === "temper") return temperCameraFrame(this.camera.aspect);
     if(station==="cut")return sawCameraFrame(this.camera.aspect);
@@ -1252,22 +1364,22 @@ export class ForgeBilletView {
     if (station === "power") {
       const target=new Vector3(...BILLET_ANCHORS.power);
       target.y+=workshopUnits(24);
-      const distance=Math.max(1,0.8/this.camera.aspect);
-      return {position:target.clone().add(new Vector3(-26,24,62).multiplyScalar(distance)).toArray(),target:target.toArray()};
+      const distance=Math.max(1,0.62/this.camera.aspect);
+      // The hammer is turned 180 degrees. Approach from its +X side and look
+      // toward the -X mouth so the machine front faces the player.
+      return {position:target.clone().add(new Vector3(-52,20,7).multiplyScalar(distance)).toArray(),target:target.toArray()};
     }
     if (station === "press") {
-      const layout = WORKSHOP_LAYOUT[station]!;
-      const target = new Vector3(layout.origin[0], WORKSHOP_FLOOR_Y + workshopUnits(770), layout.origin[2]);
-      // The powered machines are tall props. Frame the whole load path rather
-      // than the die alone, with extra distance on narrow viewports.
-      const distance = Math.max(1, 1.55 / this.camera.aspect);
-      const offset = new Vector3(30, 36, 92).multiplyScalar(distance);
-      return { position: target.clone().add(offset).toArray(), target: target.toArray() };
+      const target=new Vector3(...BILLET_ANCHORS.press);target.y+=workshopUnits(28);
+      const distance=Math.max(1,0.62/this.camera.aspect);
+      // Hydraulic press shares the +X operator/feed axis with the power
+      // hammer while retaining its own lower-right station position.
+      return {position:target.clone().add(new Vector3(-52,19,7).multiplyScalar(distance)).toArray(),target:target.toArray()};
     }
     if (station === "grind") {
       const target = new Vector3(BILLET_ANCHORS.grind[0], BILLET_ANCHORS.grind[1] + workshopUnits(38), BILLET_ANCHORS.grind[2]);
       const distance = Math.max(1, 0.46 / this.camera.aspect);
-      return {position:target.clone().add(new Vector3(-workshopUnits(350), workshopUnits(92), 0).multiplyScalar(distance)).toArray(),target:target.toArray()};
+      return {position:target.clone().add(new Vector3(workshopUnits(350), workshopUnits(92), 0).multiplyScalar(distance)).toArray(),target:target.toArray()};
     }
     if (station === "quench-water" || station === "quench-oil") {
       const anchor = STATION_ANCHORS[station];
